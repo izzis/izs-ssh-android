@@ -158,10 +158,22 @@ data class ProfileGroup(
 )
 
 data class SshGlobals(
-    val knownHosts: List<String> = emptyList(),
+    val knownHosts: List<KnownHostEntry> = emptyList(),
     val verifyHostKeys: Boolean = true,
     /** Desktop config.ts default false; per-profile options.warnOnClose overrides. */
     val warnOnClose: Boolean = false,
+)
+
+/**
+ * Desktop ssh.knownHosts entry parity: {host, port, type, digest}, where
+ * digest is sha256-base64 of the SSH wire key blob (Node crypto parity).
+ * The single source of trust — read offline from the local YAML cache.
+ */
+data class KnownHostEntry(
+    val host: String = "",
+    val port: Int = 22,
+    val type: String = "",
+    val digest: String = "",
 )
 
 data class ConfigSync(

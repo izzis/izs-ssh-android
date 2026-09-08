@@ -193,7 +193,17 @@ object RawConfigStore {
             }
         val sshMap = doc[KEY_SSH] as? Map<String, Any?>
         val ssh = SshGlobals(
-            knownHosts = (sshMap?.get("knownHosts") as? List<*>)?.map { it.toString() } ?: emptyList(),
+            knownHosts = (sshMap?.get("knownHosts") as? List<*>)?.mapNotNull { entry ->
+                (entry as? Map<*, *>)?.let { m ->
+                    val host = m["host"]?.toString() ?: return@mapNotNull null
+                    KnownHostEntry(
+                        host = host,
+                        port = (m["port"] as? Number)?.toInt() ?: 22,
+                        type = m["type"]?.toString() ?: "",
+                        digest = m["digest"]?.toString() ?: "",
+                    )
+                }
+            } ?: emptyList(),
             verifyHostKeys = sshMap?.get("verifyHostKeys") as? Boolean ?: true,
             warnOnClose = sshMap?.get("warnOnClose") as? Boolean ?: false,
         )
@@ -473,6 +483,33 @@ object RawConfigStore {
      */
     fun resolveGroupWriteValue(rawGroupIds: Set<String>, newId: String, newName: String?): String =
         if (newId in rawGroupIds) newId else (newName?.takeIf { it.isNotBlank() } ?: newId)
+
+    /**
+     * Upserts a desktop-format trust entry into `ssh.knownHosts` (match on
+     * host+port+type, replaces digest). The single source of trust — read
+     * offline from the local cache, synced to desktop via upload.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun appendKnownHost(doc: LinkedHashMap<String, Any?>, entry: KnownHostEntry) {
+        val ssh = LinkedHashMap((doc[KEY_SSH] as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to v } ?: emptyMap())
+        val list = ((ssh["knownHosts"] as? List<*>)?.toMutableList() ?: mutableListOf())
+        val idx = list.indexOfFirst { m ->
+            (m as? Map<*, *>)?.let {
+                it["host"]?.toString() == entry.host &&
+                    ((it["port"] as? Number)?.toInt() ?: 22) == entry.port &&
+                    it["type"]?.toString() == entry.type
+            } == true
+        }
+        val map = linkedMapOf<String, Any?>(
+            "host" to entry.host,
+            "port" to entry.port,
+            "type" to entry.type,
+            "digest" to entry.digest,
+        )
+        if (idx >= 0) list[idx] = map else list += map
+        ssh["knownHosts"] = list
+        doc[KEY_SSH] = ssh
+    }
 
     /**
      * Index of a profile in a raw profiles list. Id-less legacy profiles get

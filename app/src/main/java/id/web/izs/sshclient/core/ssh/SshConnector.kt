@@ -30,9 +30,9 @@ import kotlin.concurrent.thread
  *   but v1 connect shows a "scheduled for v2" message (never silently ignored)
  * - forwardedPorts / x11 / skipBanner / reuseSession: saved for desktop,
  *   not applied on mobile yet
- * - Host-key verification: in-app TOFU guard (accept + record new keys,
- *   reject changed keys). The app key list is stored SEPARATELY from the
- *   desktop `ssh.knownHosts` so the desktop format is never polluted on upload.
+ * - Host-key verification: desktop `ssh.knownHosts` trust (prompt on
+ *   unknown/changed, known-first negotiation so phone and desktop pick the
+ *   same server key). Trust lives in the YAML as the single source.
  */
 class SshConnector {
 
@@ -49,6 +49,14 @@ class SshConnector {
         private val shell: Session.Shell,
         val output: MutableSharedFlow<String>,
     ) {
+        /**
+         * Legacy prefs trust that matched this session: the caller persists
+         * it to YAML (self-healing upgrade) and retires the legacy line.
+         * Null when trust came from YAML entries or one-time acceptance.
+         */
+        internal var trustUpgrade: id.web.izs.sshclient.core.config.KnownHostEntry? = null
+        /** Legacy prefs line that produced [trustUpgrade] — retired on persist. */
+        internal var trustUpgradeLine: String? = null
         suspend fun send(line: String) = withContext(Dispatchers.IO) {
             shell.outputStream.write((line + "\n").toByteArray(Charsets.UTF_8))
             shell.outputStream.flush()
@@ -91,10 +99,11 @@ class SshConnector {
         keys: List<KeyInput>,
         keyPassphrases: List<String> = emptyList(),
         verifyHostKeys: Boolean,
-        knownHostLines: List<String>,
+        knownHosts: List<id.web.izs.sshclient.core.config.KnownHostEntry>,
+        legacyKnownHostLines: List<String> = emptyList(),
+        oneTimeTrust: id.web.izs.sshclient.core.config.KnownHostEntry? = null,
         timeoutMs: Long,
         cacheDir: File,
-        onNewHostKey: (line: String) -> Unit,
     ): ShellSession = withContext(Dispatchers.IO) {
         val o = profile.options
         if (!o.jumpHost.isNullOrBlank() || !o.proxyCommand.isNullOrBlank() ||
@@ -105,9 +114,16 @@ class SshConnector {
         if (o.host.isBlank()) throw IllegalStateException("Empty host")
         val port = if (o.port > 0) o.port else 22
         val user = o.user.ifBlank { "root" }
-        // Ciphers tab: custom algorithm lists ride a per-connection config;
-        // desktop defaults take the plain path (zero behavior change).
-        val client = SshAlgorithmFactories.configFor(o.algorithms)?.let { SSHClient(it) } ?: SSHClient()
+        // Ciphers tab + host-key trust order: the per-connection config
+        // carries custom algorithm lists AND the known-first/desktop-order
+        // host-key offer (the config order is what the server sees — the
+        // verifier list alone is only a membership filter in sshj).
+        val client = SSHClient(
+            SshAlgorithmFactories.configFor(
+                o.algorithms,
+                HostKeyTrust.knownTypes(knownHosts, o.host, port),
+            ),
+        )
         // Advanced tab: keepalive heartbeats (SSH_MSG_IGNORE, universally
         // safe). The desktop countMax has no sshj equivalent and stays
         // stored-only; the interval is honored (ms -> s, min 1).
@@ -115,12 +131,22 @@ class SshConnector {
         try {
             withTimeout(timeoutMs.coerceIn(5_000, 120_000)) {
                 ensureProvider()
-                client.addHostKeyVerifier(
-                    TofuVerifier(o.host, port, verifyHostKeys, knownHostLines, onNewHostKey),
+                val (offeredHostKeys, hostKeysCustom) =
+                    SshAlgorithmFactories.effectiveHostKeys(o.algorithms)
+                val verifier =                 TrustVerifier(
+                    o.host, port, verifyHostKeys, knownHosts,
+                    legacyKnownHostLines, oneTimeTrust,
+                    offeredHostKeys, hostKeysCustom,
                 )
+                client.addHostKeyVerifier(verifier)
                 try {
                     client.connect(o.host, port)
+                } catch (e: UnknownHostKeyException) {
+                    throw e
                 } catch (e: Exception) {
+                    // A rejected verification surfaces here as a transport
+                    // failure — translate it back to the user's decision.
+                    verifier.rejection?.let { throw it }
                     throw IllegalStateException("Connect failed: ${e.message ?: e::class.simpleName}")
                 }
                 var lastErr = ""
@@ -161,6 +187,8 @@ class SshConnector {
                     val shell = session.startShell()
                     val flow = MutableSharedFlow<String>(extraBufferCapacity = 512)
                     val sess = ShellSession(client, session, shell, flow)
+                    sess.trustUpgrade = verifier.trustUpgrade
+                    sess.trustUpgradeLine = verifier.trustUpgradeLine
                     // Login tab: unconditional scripts at session ready, then
                     // per-chunk expect/send automation (LoginScriptRunner).
                     val scriptRunner = o.scripts.takeIf { it.isNotEmpty() }?.let { LoginScriptRunner(it) }
@@ -274,29 +302,69 @@ class SshConnector {
         return f
     }
 
-    /** Trust-on-first-use: accept new keys (recorded), reject CHANGED keys. */
-    private class TofuVerifier(
+    /**
+     * Desktop host-key verification parity (`ssh.ts:verifyHostKey` +
+     * `hostKeyPromptModal`): unknown/changed keys are NEVER auto-trusted.
+     * Rejection is recorded (the transport surfaces a generic failure, so
+     * `openShell` translates it back to [UnknownHostKeyException]) while
+     * negotiation order comes from [HostKeyTrust.findExistingAlgorithms] —
+     * known types first, desktop order on defaults (tabby-android best
+     * practice: phone and desktop then pick the same server key).
+     */
+    private class TrustVerifier(
         private val host: String,
         private val port: Int,
         private val enabled: Boolean,
-        knownLines: List<String>,
-        private val onNew: (String) -> Unit,
+        private val entries: List<id.web.izs.sshclient.core.config.KnownHostEntry>,
+        private val legacyLines: List<String>,
+        private val oneTimeTrust: id.web.izs.sshclient.core.config.KnownHostEntry?,
+        private val offeredHostKeys: List<String>,
+        private val hostKeysCustom: Boolean,
     ) : HostKeyVerifier {
-        private val known = knownLines.toMutableSet()
+        var rejection: UnknownHostKeyException? = null
+            private set
+        var trustUpgrade: id.web.izs.sshclient.core.config.KnownHostEntry? = null
+            private set
+        var trustUpgradeLine: String? = null
+            private set
 
         override fun verify(hostname: String?, p: Int, key: PublicKey?): Boolean {
             if (!enabled || key == null) return true
-            val b64 = java.util.Base64.getEncoder().encodeToString(key.encoded)
-            val line = "$host|${key.algorithm}|$b64"
-            if (known.any { it == line }) return true
-            val sameHostChanged = known.any { it.startsWith("$host|") }
-            if (sameHostChanged) return false // MITM / rotation without confirmation -> reject
-            known += line
-            try { onNew(line) } catch (_: Exception) { }
-            return true
+            val type = HostKeyTrust.wireTypeOf(key)
+            val digest = HostKeyTrust.digestOf(key)
+            val norm = HostKeyTrust.normalizeDigest(digest)
+            if (oneTimeTrust != null &&
+                oneTimeTrust.host == host && oneTimeTrust.port == port &&
+                HostKeyTrust.normalizeDigest(oneTimeTrust.digest) == norm
+            ) {
+                return true
+            }
+            return when (
+                val v = HostKeyTrust.decide(
+                    entries, legacyLines, host, port, type, digest,
+                    HostKeyTrust.x509B64Of(key), port,
+                )
+            ) {
+                HostKeyTrust.Verdict.Known -> true
+                is HostKeyTrust.Verdict.LegacyHit -> {
+                    trustUpgrade = v.upgrade
+                    trustUpgradeLine = v.line
+                    true
+                }
+                HostKeyTrust.Verdict.Unknown -> {
+                    rejection = UnknownHostKeyException(host, port, type, digest, false, null)
+                    false
+                }
+                is HostKeyTrust.Verdict.Mismatched -> {
+                    rejection = UnknownHostKeyException(host, port, type, digest, true, v.previousDigest)
+                    false
+                }
+            }
         }
 
         override fun findExistingAlgorithms(hostname: String?, port: Int): MutableList<String> =
-            mutableListOf()
+            HostKeyTrust.findExistingAlgorithms(
+                entries, host, port, offeredHostKeys, hostKeysCustom,
+            ).toMutableList()
     }
 }

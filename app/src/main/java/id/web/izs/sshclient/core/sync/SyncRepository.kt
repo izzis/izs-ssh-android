@@ -124,6 +124,62 @@ class SyncRepository(
             decryptToLoaded(raw)
         }
 
+    /**
+     * Persists an accepted host key to `ssh.knownHosts` (desktop format, the
+     * single source of trust). Plaintext: local RAW edit. Encrypted shell:
+     * the vault blob is rewritten — needs the passphrase in RAM, otherwise
+     * throws "Vault is locked" and the caller keeps session-only trust.
+     * Server upload follows the normal Upload/auto path (never on accept).
+     */
+    suspend fun appendKnownHost(entry: id.web.izs.sshclient.core.config.KnownHostEntry): Loaded =
+        withContext(Dispatchers.IO) {
+            val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+            val raw = RawConfigStore.loadRaw(yamlStr)
+            if (!RawConfigStore.isEncrypted(raw)) {
+                return@withContext updateLocalRaw { doc ->
+                    RawConfigStore.appendKnownHost(doc, entry)
+                }
+            }
+            val pass = rememberedPassphrase ?: throw IllegalStateException("Vault is locked")
+            val vault = RawConfigStore.storedVault(raw)
+                ?: throw IllegalStateException("Vault is not configured")
+            val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
+            val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
+            RawConfigStore.appendKnownHost(blobConfig, entry)
+            val stored = VaultCrypto.encrypt(RawConfigStore.toJson(blobConfig), secretsJson, pass)
+            val out: LinkedHashMap<String, Any?> = linkedMapOf(
+                RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
+                RawConfigStore.KEY_ENCRYPTED to true,
+            )
+            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+                out[RawConfigStore.KEY_CONFIG_SYNC] = it
+            }
+            disk.saveYaml(RawConfigStore.dumpRaw(out))
+            decryptToLoaded(out)
+        }
+
+    /**
+     * Self-healing legacy upgrade: a prefs-era trust line that matched this
+     * session is promoted to a YAML entry and the legacy line retired.
+     * Throws when locked (caller keeps session-only trust) — same as above.
+     */
+    suspend fun persistTrustUpgrade(
+        entry: id.web.izs.sshclient.core.config.KnownHostEntry,
+        legacyLine: String,
+    ): Loaded = withContext(Dispatchers.IO) {
+        val loaded = appendKnownHost(entry)
+        try {
+            val arr = org.json.JSONArray(disk.loadKnownHostsJson() ?: "[]")
+            val kept = org.json.JSONArray()
+            for (i in 0 until arr.length()) {
+                val s = arr.optString(i)
+                if (s != legacyLine) kept.put(s)
+            }
+            disk.saveKnownHostsJson(kept.toString())
+        } catch (_: Exception) { }
+        loaded
+    }
+
     suspend fun listRemote(hostRaw: String, token: String): List<RemoteConfigMeta> =
         withContext(Dispatchers.IO) {
             val host = RawConfigStore.normalizeHost(hostRaw)

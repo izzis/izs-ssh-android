@@ -44,7 +44,7 @@ app/src/main/java/id/web/izs/sshclient/
                                   Ciphers / Colours-scheme-placeholder / Login), desktop-only
                                   options labeled, new profile + new group
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
-                                  warn-on-close confirm dialog
+                                  warn-on-close + host-key trust dialogs
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
       TerminalSettingsScreen.kt   Font size + scrollback buffer (applies live)
       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`)
@@ -52,7 +52,7 @@ app/src/main/java/id/web/izs/sshclient/
       SetVaultPassphraseDialog.kt Set/change vault passphrase
       VaultSettingsScreen.kt      Vault management (set/change/erase, encrypt-config toggle)
       SshSettingsScreen.kt        SSH defaults: host-key verification + warn-on-close
-                                  (desktop Settings > SSH parity; plaintext only)
+                                  (desktop Settings > SSH parity; live-save, plaintext only)
       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
       CrashReportScreen.kt        Shows last crash trace with copy button
       PlaceholderSettingScreen.kt "Scheduled" stubs (colours, proxy connect, etc.)
@@ -72,8 +72,12 @@ app/src/main/java/id/web/izs/sshclient/
       SyncRepository.kt   Loaded{domain,secrets,needsPassphrase,store,unlockRequired},
                           decrypt/update/delete with RAW preservation
     ssh/
-      SshConnector.kt     sshj sessions, exec + shell channels, TOFU host-key guard,
-                          multi-key auth, PTY window-change, keepalive, login scripts
+      SshConnector.kt     sshj sessions, exec + shell channels, desktop-format host-key
+                          trust prompt, multi-key auth, PTY window-change, keepalive,
+                          login scripts
+      HostKeyTrust.kt     Trust decisions on desktop ssh.knownHosts (sha256 wire digest,
+                          exact host/port/type match, known-first negotiation order,
+                          legacy prefs self-healing upgrade — pure JVM)
       LoginScriptRunner.kt Ordered expect/send automation (desktop LoginScriptProcessor
                           parity, pure JVM)
       SshAlgorithmFactories.kt Profile cipher/kex/mac/hostkey/compression wire names ->
@@ -88,7 +92,7 @@ app/src/main/java/id/web/izs/sshclient/
                           known_hosts (TOFU), terminal prefs (font size)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (13 files, 92 tests — §8)
+app/src/test/... (14 files, 104 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -120,9 +124,16 @@ are screen-scoped (a rotate drops the live PTY by design, v1 scope).
   `file{id}=base64(PEM)` <-> `vault://id`.
 - **Set-vault sweep:** setting a vault passphrase moves inline plaintext
   passwords + PEM keys into the vault once (single save, no duplicates).
-- **Host keys:** TOFU store in app prefs, kept separate from the desktop
-  `ssh.knownHosts` format so uploads never pollute it. Unknown/changed keys
-  prompt (new = trust dialog, changed = danger dialog).
+- **Host keys (single source: `ssh.knownHosts` in YAML):** unknown/changed
+  keys NEVER auto-trust — the connect pauses with a desktop-parity dialog
+  (MITM warning + previous fingerprint on mismatch; Accept and remember /
+  just this once / Disconnect). Remember writes the desktop-format entry
+  locally (uploaded later via normal sync); `verifyHostKeys=false` trusts
+  silently. Negotiation is known-first, desktop order on defaults
+  (ecdsa before ed25519 — sshj's own default would pick otherwise, and the
+  verifier list alone can't reorder: sshj's `Proposal` only uses it as a
+  membership filter, so the per-connection config carries the order).
+  Legacy prefs-era trust self-heals into YAML entries on match.
 
 ## 5. Terminal pipeline
 
@@ -240,7 +251,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 92 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 104 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -254,6 +265,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `TerminalEmulatorTest` | VT100 ops + pending-wrap regression + scrollback cap/trim/alt |
 | `TerminalInputTest` | sticky CTRL/ALT mapping |
 | `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers, color/icon round-trip, global warnOnClose |
+| `HostKeyTrustTest` | ssh-keygen digest vector, exact match/mismatch/port identity, legacy upgrade, negotiation order, knownHosts upsert |
 | `LoginScriptRunnerTest` | unconditional/expect/regex/optional/break/unescape parity |
 | `SshAlgorithmFactoriesTest` | defaults resolve (known skips), order, null-on-defaults, per-category fallback |
 | `SshCryptoProviderTest` | BC provider registration (X25519) |

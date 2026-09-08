@@ -54,9 +54,29 @@ class SshAlgorithmFactoriesTest {
     }
 
     @Test
-    fun `configFor stays null on defaults and empty`() {
-        assertNull(SshAlgorithmFactories.configFor(emptyMap()))
-        assertNull(SshAlgorithmFactories.configFor(SshAlgorithms.DEFAULTS))
+    fun `configFor orders hostkeys desktop-first on defaults`() {
+        val cfg = SshAlgorithmFactories.configFor(emptyMap())
+        assertEquals(
+            listOf(
+                "ecdsa-sha2-nistp256",
+                "ecdsa-sha2-nistp384",
+                "ecdsa-sha2-nistp521",
+                "ssh-ed25519",
+                "rsa-sha2-256",
+                "rsa-sha2-512",
+                "ssh-rsa",
+            ).filter { it in SshAlgorithmFactories.defaultHostKeyTypes() },
+            cfg.keyAlgorithms.map { it.name },
+        )
+        // Other categories stay sshj stock on defaults.
+        assertTrue(cfg.cipherFactories.isNotEmpty())
+    }
+
+    @Test
+    fun `configFor puts known hostkey types first`() {
+        val cfg = SshAlgorithmFactories.configFor(emptyMap(), listOf("ssh-ed25519"))
+        val names = cfg.keyAlgorithms.map { it.name }
+        assertEquals("ssh-ed25519", names.first())
     }
 
     @Test
@@ -64,10 +84,9 @@ class SshAlgorithmFactoriesTest {
         val cfg = SshAlgorithmFactories.configFor(
             mapOf(SshAlgorithms.CIPHER to listOf("aes128-ctr", "aes256-ctr")),
         )
-        assertNotNull(cfg)
         assertEquals(
             listOf("aes128-ctr", "aes256-ctr"),
-            cfg!!.cipherFactories.map { it.name },
+            cfg.cipherFactories.map { it.name },
         )
         // Untouched categories keep sshj defaults.
         assertTrue(cfg.macFactories.isNotEmpty())
@@ -78,8 +97,20 @@ class SshAlgorithmFactoriesTest {
         val cfg = SshAlgorithmFactories.configFor(
             mapOf(SshAlgorithms.KEX to listOf("mlkem768x25519-sha256")),
         )
-        assertNotNull(cfg)
         // Unresolvable-only list -> sshj default KEX kept (negotiation-safe).
-        assertTrue(cfg!!.keyExchangeFactories.any { it.name == "curve25519-sha256" })
+        assertTrue(cfg.keyExchangeFactories.any { it.name == "curve25519-sha256" })
+    }
+
+    @Test
+    fun `orderedHostKeyNames keeps explicit custom order`() {
+        val custom = listOf("rsa-sha2-256", "ssh-ed25519")
+        assertEquals(
+            listOf("ssh-ed25519", "rsa-sha2-256"),
+            SshAlgorithmFactories.orderedHostKeyNames(custom, listOf("ssh-ed25519"), true),
+        )
+        assertEquals(
+            custom,
+            SshAlgorithmFactories.orderedHostKeyNames(custom, emptyList(), true),
+        )
     }
 }

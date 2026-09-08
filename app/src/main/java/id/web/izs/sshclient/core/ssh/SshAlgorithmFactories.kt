@@ -116,24 +116,71 @@ object SshAlgorithmFactories {
         }.filterValues { it.isNotEmpty() }
 
     /**
-     * Per-connection sshj config with the profile lists applied in the
-     * stored order. Null when the profile uses desktop defaults (or
-     * nothing) — the caller then uses a plain `SSHClient()` so the default
-     * path stays byte-identical to before.
+     * Effective server-host-key offer for a profile: resolved custom list
+     * (second = true) or sshj default names (second = false). The trust
+     * verifier uses this as the negotiation set for known-first ordering.
      */
-    fun configFor(algorithms: Map<String, List<String>>): Config? {
-        if (algorithms.isEmpty() || algorithms == SshAlgorithms.DEFAULTS) return null
+    fun effectiveHostKeys(algorithms: Map<String, List<String>>): Pair<List<String>, Boolean> {
+        val custom = algorithms.takeIf { it.isNotEmpty() && it != SshAlgorithms.DEFAULTS }
+            ?.get(SshAlgorithms.SERVER_HOST_KEY)?.takeIf { it.isNotEmpty() }
+        if (custom != null) return resolveHostKeys(custom).map { it.name } to true
+        return defaultHostKeyTypes() to false
+    }
+
+    fun defaultHostKeyTypes(): List<String> =
+        DefaultConfig().keyAlgorithms.map { it.name }
+    /**
+     * Host-key offer order with trust baked in: known types first, then the
+     * rest (custom order kept for explicit lists, desktop order otherwise).
+     *
+     * Why here and not just the verifier: sshj's `Proposal` iterates the
+     * CONFIGURED order and only uses the verifier list as a membership
+     * filter (verified in bytecode) — so a verifier-side order alone never
+     * changes negotiation. The config order is what the server sees.
+     */
+    fun orderedHostKeyNames(
+        configured: List<String>,
+        knownHostTypes: List<String>,
+        isCustom: Boolean,
+    ): List<String> {
+        val known = knownHostTypes.filter { it in configured }.distinct()
+        val rest = configured.filter { it !in known.toSet() }
+        val tail = if (isCustom) {
+            rest
+        } else {
+            rest.sortedBy {
+                HostKeyTrust.DESKTOP_ORDER.indexOf(it).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE
+            }
+        }
+        return known + tail
+    }
+
+    /**
+     * Per-connection sshj config. Host-key order always carries trust
+     * (known-first, desktop order on defaults) so phone and desktop pick
+     * the same server key; other categories are only touched for explicit
+     * custom lists (defaults otherwise stay sshj stock).
+     */
+    fun configFor(
+        algorithms: Map<String, List<String>>,
+        knownHostTypes: List<String> = emptyList(),
+    ): Config {
+        val custom = algorithms.isNotEmpty() && algorithms != SshAlgorithms.DEFAULTS
         val cfg = DefaultConfig()
-        resolveCiphers(algorithms[SshAlgorithms.CIPHER] ?: emptyList())
-            .ifEmpty { cfg.cipherFactories }.also { cfg.cipherFactories = it }
-        resolveKex(algorithms[SshAlgorithms.KEX] ?: emptyList())
-            .ifEmpty { cfg.keyExchangeFactories }.also { cfg.keyExchangeFactories = it }
-        resolveMacs(algorithms[SshAlgorithms.HMAC] ?: emptyList())
-            .ifEmpty { cfg.macFactories }.also { cfg.macFactories = it }
-        resolveHostKeys(algorithms[SshAlgorithms.SERVER_HOST_KEY] ?: emptyList())
+        if (custom) {
+            resolveCiphers(algorithms[SshAlgorithms.CIPHER] ?: emptyList())
+                .ifEmpty { cfg.cipherFactories }.also { cfg.cipherFactories = it }
+            resolveKex(algorithms[SshAlgorithms.KEX] ?: emptyList())
+                .ifEmpty { cfg.keyExchangeFactories }.also { cfg.keyExchangeFactories = it }
+            resolveMacs(algorithms[SshAlgorithms.HMAC] ?: emptyList())
+                .ifEmpty { cfg.macFactories }.also { cfg.macFactories = it }
+            resolveCompressions(algorithms[SshAlgorithms.COMPRESSION] ?: emptyList())
+                .ifEmpty { cfg.compressionFactories }.also { cfg.compressionFactories = it }
+        }
+        val (baseNames, isCustomHk) = effectiveHostKeys(algorithms)
+        // Negotiation-safe: an order that resolves to nothing keeps stock.
+        resolveHostKeys(orderedHostKeyNames(baseNames, knownHostTypes, isCustomHk))
             .ifEmpty { cfg.keyAlgorithms }.also { cfg.keyAlgorithms = it }
-        resolveCompressions(algorithms[SshAlgorithms.COMPRESSION] ?: emptyList())
-            .ifEmpty { cfg.compressionFactories }.also { cfg.compressionFactories = it }
         return cfg
     }
 }

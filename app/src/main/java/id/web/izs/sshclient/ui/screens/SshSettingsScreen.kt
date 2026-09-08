@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +48,34 @@ fun SshSettingsScreen(
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
 
+    // Desktop parity (ngModelChange=config.save()): toggles apply live, no
+    // Save button. On failure the checkbox reverts and the error shows.
+    fun saveLive(nextVerify: Boolean, nextWarn: Boolean, onError: () -> Unit) {
+        scope.launch {
+            busy = true
+            msg = null
+            try {
+                withContext(Dispatchers.IO) {
+                    state.repo.updateLocalRaw { raw ->
+                        @Suppress("UNCHECKED_CAST")
+                        val ssh = LinkedHashMap(
+                            (raw[RawConfigStore.KEY_SSH] as? Map<String, Any?>) ?: emptyMap(),
+                        )
+                        ssh["verifyHostKeys"] = nextVerify
+                        ssh["warnOnClose"] = nextWarn
+                        raw[RawConfigStore.KEY_SSH] = ssh
+                    }
+                }
+                state.refresh()
+            } catch (e: Exception) {
+                onError()
+                msg = "Failed: ${e.message}"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ScreenHeader("SSH", onBack)
         if (encrypted) {
@@ -62,13 +89,18 @@ fun SshSettingsScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = verify,
-                onCheckedChange = { verify = it },
+                onCheckedChange = { v ->
+                    val old = verify
+                    verify = v
+                    saveLive(v, warn) { verify = old }
+                },
                 enabled = !encrypted && !busy,
             )
             Column {
                 Text("Verify host keys when connecting")
                 Text(
-                    "Trust-on-first-use: new keys are recorded, changed keys are rejected.",
+                    "New or changed keys ask first (fingerprint shown); " +
+                        "off trusts everything silently.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -77,7 +109,11 @@ fun SshSettingsScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = warn,
-                onCheckedChange = { warn = it },
+                onCheckedChange = { w ->
+                    val old = warn
+                    warn = w
+                    saveLive(verify, w) { warn = old }
+                },
                 enabled = !encrypted && !busy,
             )
             Column {
@@ -93,34 +129,5 @@ fun SshSettingsScreen(
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (busy) CircularProgressIndicator()
-        Button(
-            enabled = !encrypted && !busy,
-            onClick = {
-                scope.launch {
-                    busy = true
-                    msg = null
-                    try {
-                        withContext(Dispatchers.IO) {
-                            state.repo.updateLocalRaw { raw ->
-                                @Suppress("UNCHECKED_CAST")
-                                val ssh = LinkedHashMap(
-                                    (raw[RawConfigStore.KEY_SSH] as? Map<String, Any?>) ?: emptyMap(),
-                                )
-                                ssh["verifyHostKeys"] = verify
-                                ssh["warnOnClose"] = warn
-                                raw[RawConfigStore.KEY_SSH] = ssh
-                            }
-                        }
-                        state.refresh()
-                        msg = "Saved"
-                    } catch (e: Exception) {
-                        msg = "Failed: ${e.message}"
-                    } finally {
-                        busy = false
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Save") }
     }
 }

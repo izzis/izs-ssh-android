@@ -7,6 +7,8 @@ import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
 import id.web.izs.sshclient.BuildConfig
+import id.web.izs.sshclient.core.config.KnownHostEntry
+import id.web.izs.sshclient.core.ssh.UnknownHostKeyException
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -132,6 +134,13 @@ fun TerminalScreen(
     var copied by remember { mutableStateOf(false) }
     var showUnlock by remember { mutableStateOf(false) }
     var showCloseConfirm by remember { mutableStateOf(false) }
+    // Host-key trust: unknown/changed keys pause the connect with a desktop-
+    // parity prompt instead of auto-trusting (verify ON) — see requestTrust.
+    var hostKeyPrompt by remember { mutableStateOf<UnknownHostKeyException?>(null) }
+    // Trust accepted on this screen (remembered or once): carried straight
+    // into the retry because state.refresh() is fire-and-forget — the
+    // reloaded domain may not have the new entry yet (double-prompt race).
+    var extraTrust by remember { mutableStateOf<KnownHostEntry?>(null) }
     var pendingConnect by remember { mutableStateOf(false) }
     // Guards the double-fire race (effect refires on unlock while a connect
     // is already in flight) that used to open two sessions and trip the
@@ -202,7 +211,10 @@ fun TerminalScreen(
             failed = null
             status = "connecting…"
             try {
-                val known = withContext(Dispatchers.IO) { readKnown() }
+                // Legacy prefs trust rides along for lazy self-healing (matched
+                // lines upgrade to YAML entries, then retire); the YAML list
+                // is the single source of trust.
+                val legacy = withContext(Dispatchers.IO) { readKnown() }
                 val sess = withContext(Dispatchers.IO) {
                     SshConnector().openShell(
                         profile = p,
@@ -212,32 +224,71 @@ fun TerminalScreen(
                         },
                         keyPassphrases = state.keyPassphrases(),
                         verifyHostKeys = state.loaded?.domain?.ssh?.verifyHostKeys ?: true,
-                        knownHostLines = known,
+                        knownHosts = state.loaded?.domain?.ssh?.knownHosts ?: emptyList(),
+                        legacyKnownHostLines = legacy,
+                        oneTimeTrust = extraTrust,
                         timeoutMs = p.options.readyTimeout ?: 20000,
                         cacheDir = context.cacheDir,
-                        onNewHostKey = { line ->
-                            val cur = try {
-                                JSONArray(state.disk.loadKnownHostsJson() ?: "[]")
-                            } catch (_: Exception) { JSONArray() }
-                            cur.put(line)
-                            state.disk.saveKnownHostsJson(cur.toString())
-                        },
                     )
                 }
                 session = sess
                 status = "connected"
+                // A legacy line matched: promote it to YAML now (locked vault
+                // keeps session-only trust — same rule as accept-remember).
+                sess.trustUpgrade?.let { entry ->
+                    scope.launch {
+                        try {
+                            sess.trustUpgradeLine?.let { line ->
+                                state.repo.persistTrustUpgrade(entry, line)
+                                state.refresh()
+                            }
+                        } catch (_: Exception) { }
+                    }
+                }
                 scope.launch {
                     sess.output.collect { chunk ->
                         emulator.feed(chunk)
                         emuVersion = emulator.version
                     }
                 }
+            } catch (e: UnknownHostKeyException) {
+                hostKeyPrompt = e
+                status = "disconnected"
             } catch (e: Exception) {
                 failed = e.message ?: "Connect failed"
                 status = "disconnected"
             } finally {
                 connecting = false
             }
+        }
+    }
+
+    /**
+     * Desktop hostKeyPromptModal parity: remember persists to `ssh.knownHosts`
+     * (uploaded later via the normal sync path); once retries without
+     * storing; disconnect aborts. A locked vault degrades remember to once
+     * (session-only trust) instead of failing the connect.
+     */
+    fun acceptHostKey(remember: Boolean) {
+        val prompt = hostKeyPrompt ?: return
+        hostKeyPrompt = null
+        val entry = KnownHostEntry(prompt.host, prompt.port, prompt.keyType, prompt.digest)
+        if (!remember) {
+            extraTrust = entry
+            doConnect()
+            return
+        }
+        scope.launch {
+            failed = null
+            try {
+                withContext(Dispatchers.IO) { state.repo.appendKnownHost(entry) }
+                state.refresh()
+            } catch (e: Exception) {
+                // Locked vault (or disk hiccup): YAML skipped, session trust
+                // below still connects now (persisted on a later save).
+            }
+            extraTrust = entry
+            doConnect()
         }
     }
 
@@ -646,8 +697,7 @@ fun TerminalScreen(
         }
     }
 
-    if (showCloseConfirm) {
-        AlertDialog(
+    if (showCloseConfirm) {        AlertDialog(
             onDismissRequest = { showCloseConfirm = false },
             title = { Text("Disconnect?") },
             text = { Text("“${profile?.name}” is still connected.") },
@@ -659,6 +709,91 @@ fun TerminalScreen(
             dismissButton = {
                 TextButton(onClick = { showCloseConfirm = false }) { Text("Cancel") }
             },
+        )
+    }
+
+    // Desktop hostKeyPromptModal parity: unknown vs changed (MITM warning +
+    // previous fingerprint), three actions: remember / once / disconnect.
+    hostKeyPrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Host key verification") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (prompt.mismatched) {
+                        Text(
+                            "Warning: the host key of ${prompt.host}:${prompt.port} has " +
+                                "CHANGED since your last visit. This could be a " +
+                                "man-in-the-middle attack — or the server was reinstalled.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "Last known host key fingerprint",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Text(
+                            (prompt.previousDigest ?: "").let { "SHA256:$it" },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        Text(
+                            "First connection to ${prompt.host}:${prompt.port}. " +
+                                "Check the fingerprint with the server administrator " +
+                                "before accepting.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "Current host key fingerprint",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            prompt.keyType,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (prompt.mismatched) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Text(
+                        "SHA256:${prompt.digest}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                // Desktop stacks all three actions full-width (no side-by-side
+                // confirm/dismiss row with its wide gap).
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = { acceptHostKey(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = if (prompt.mismatched) ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                        ) else ButtonDefaults.buttonColors(),
+                    ) { Text("Accept and remember key") }
+                    OutlinedButton(
+                        onClick = { acceptHostKey(false) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Accept just this once") }
+                    TextButton(
+                        onClick = {
+                            hostKeyPrompt = null
+                            failed = "Host key rejected"
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            dismissButton = null,
         )
     }
 
