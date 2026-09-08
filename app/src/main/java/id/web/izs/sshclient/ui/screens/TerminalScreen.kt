@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
@@ -67,6 +66,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -77,10 +77,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import id.web.izs.sshclient.core.ssh.SshConnector
 import id.web.izs.sshclient.core.term.TerminalEmulator
 import id.web.izs.sshclient.core.term.TerminalInput
+import id.web.izs.sshclient.core.term.KeyStep
+import id.web.izs.sshclient.core.term.loadKeyLayout
+import id.web.izs.sshclient.core.term.stepBytes
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -129,6 +133,17 @@ fun TerminalScreen(
     var boxMode by remember { mutableStateOf(false) }
     var showKeys by remember { mutableStateOf(true) }
     var showMenu by remember { mutableStateOf(false) }
+    // Editable extra-keys bar (Settings > Terminal > Extra keys): reloaded
+    // on every resume so edits apply without reopening the session.
+    var keyLayout by remember { mutableStateOf(loadKeyLayout(state.disk.extraKeysJson)) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) keyLayout = loadKeyLayout(state.disk.extraKeysJson)
+        }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
+    }
     var boxInput by remember { mutableStateOf("") }
     // Hidden field MIRROR: diff-based streaming needs the field to match the
     // shell's input buffer AND carry an explicit end-of-text cursor. A plain
@@ -215,6 +230,64 @@ fun TerminalScreen(
         sendRaw(seq)
         ctrlSticky = false
         altSticky = false
+    }
+
+    /**
+     * Staged delivery: a single packet behaves exactly like sendSpecial;
+     * multiple packets go out separately with the Settings > Terminal step
+     * delay between them, clearing the stickies like any extra-key send.
+     * Declared before [sendKeySteps]: local functions must precede use.
+     */
+    fun sendChunks(s: SshConnector.ShellSession, chunks: List<String>) {
+        if (chunks.size == 1) {
+            sendSpecial(chunks[0])
+            return
+        }
+        val gapMs = state.disk.macroStepDelayMs
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    for ((i, c) in chunks.withIndex()) {
+                        if (i > 0 && gapMs > 0) delay(gapMs)
+                        s.sendRaw(c)
+                    }
+                }
+                ctrlSticky = false
+                altSticky = false
+            } catch (e: Exception) {
+                failed = "Send failed: ${e.message}"
+                s.close()
+                session = null
+                status = "disconnected"
+            }
+        }
+    }
+
+    /**
+     * Single funnel for every extra-key/menu payload, as explicit step
+     * bytes. Same mirror invariant as paste: printable bytes join the
+     * hidden field (cursor pinned at the end) so backspace diffs correctly;
+     * a submitted line (CR/LF) clears it instead. Pure escape sequences
+     * mirror nothing. Multiple steps go out staged with a settle delay so
+     * each part registers in order (vim `:q!`: ESC, then text, then Enter).
+     * The bar tap steals focus onto the button, so hand it straight back.
+     */
+    fun sendKeySteps(steps: List<KeyStep>) {
+        val s = session ?: return
+        val byteSteps = steps.map(::stepBytes).filter { it.isNotEmpty() }
+        if (byteSteps.isEmpty()) return
+        var submitted = false
+        for (b in byteSteps) {
+            if (b.any { it == '\r' || it == '\n' }) submitted = true
+            else {
+                val printable = b.filter { it.code >= 0x20 && it.code != 0x7F }
+                if (printable.isNotEmpty()) mirrorExternalInput(printable)
+            }
+        }
+        if (submitted) resetImeLine()
+        sendChunks(s, byteSteps)
+        focusRequester.requestFocus()
+        keyboard?.show()
     }
 
     // Live connect step for the loading row (replaces the spinner: the user
@@ -658,54 +731,20 @@ fun TerminalScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                // Docked key bars (Termux/tabby-android .extra-keyboard):
-                // layout siblings below the grid (NOT overlays), so the grid
-                // can never slide behind them — no reserve math needed. Pure
-                // black melts the bar into the keyboard's dead zone above it.
+                // Docked extra-keys bar (user-editable layout, same composable
+                // as the editor preview): layout sibling below the grid, so
+                // the grid can never slide behind it.
                 if (!boxMode && showKeys) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RectangleShape,
-                        color = Color.Black,
-                    ) {
-                        Column {
-                            HorizontalDivider(thickness = 1.dp, color = Color.White.copy(alpha = 0.1f))
-                            Column(
-                                Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            ExtraKeyBtn("ESC", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC) }
-                            ExtraKeyBtn("/", false, session != null, Modifier.weight(1f)) { sendSpecial("/") }
-                            ExtraKeyBtn("-", false, session != null, Modifier.weight(1f)) { sendSpecial("-") }
-                            ExtraKeyBtn("HOME", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[H") }
-                            ExtraKeyBtn("UP", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[A") }
-                            ExtraKeyBtn("END", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[F") }
-                            ExtraKeyBtn("PGUP", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[5~") }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            ExtraKeyBtn("TAB", false, session != null, Modifier.weight(1f)) { sendSpecial(TAB) }
-                            ExtraKeyBtn("CTRL", ctrlSticky, session != null, Modifier.weight(1f)) {
-                                ctrlSticky = !ctrlSticky
-                            }
-                            ExtraKeyBtn("ALT", altSticky, session != null, Modifier.weight(1f)) {
-                                altSticky = !altSticky
-                            }
-                            ExtraKeyBtn("LEFT", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[D") }
-                            ExtraKeyBtn("DOWN", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[B") }
-                            ExtraKeyBtn("RIGHT", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[C") }
-                            ExtraKeyBtn("PGDN", false, session != null, Modifier.weight(1f)) { sendSpecial(ESC + "[6~") }
-                        }
-                    }
+                    ExtraKeysBar(
+                        layout = keyLayout,
+                        enabled = session != null,
+                        ctrlActive = ctrlSticky,
+                        altActive = altSticky,
+                        onSendSteps = { sendKeySteps(it) },
+                        onToggleCtrl = { ctrlSticky = !ctrlSticky },
+                        onToggleAlt = { altSticky = !altSticky },
+                    )
                 }
-            }
-        }
                 if (boxMode) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -898,38 +937,7 @@ fun TerminalScreen(
     }
 }
 
+// ASCII-safe escape constants (never raw control bytes in source).
 private val DEL = 127.toChar().toString()
 private val LF = 10.toChar().toString()
 private val CR = 13.toChar().toString()
-
-/** Compact Termux-like extra key; highlighted while its sticky is active. */
-@Composable
-private fun ExtraKeyBtn(
-    label: String,
-    active: Boolean,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    onTap: () -> Unit,
-) {
-    OutlinedButton(
-        onClick = onTap,
-        enabled = enabled,
-        modifier = modifier,
-        shape = RoundedCornerShape(6.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            horizontal = 2.dp,
-            vertical = 8.dp,
-        ),
-        colors = if (active) {
-            ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        } else {
-            ButtonDefaults.outlinedButtonColors()
-        },
-    ) {
-        Text(label, fontSize = 11.sp)
-    }
-}
-
-// ASCII-safe escape constants (never raw control bytes in source).
-private val ESC = 27.toChar().toString()
-private val TAB = 9.toChar().toString()

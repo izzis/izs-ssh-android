@@ -33,9 +33,11 @@ technical design.
   (expect/regex/optional), keepalive interval, and custom ciphers;
   warn-on-close follows Settings > SSH (per-profile override preserved).
 - **Settings > Terminal**: font size + scrollback buffer
-  (− number + stepper, tap to type, 0 = off, max 100.000), applies live.
+  (− number + stepper, tap to type, 0 = off, max 100.000), applies live;
+  extra-keys layout editor (labels, ordered step macros with per-step
+  byte preview, popup menus, presets, clipboard import/export) with a pixel-identical live preview.
 - **Termux-like input**: docked extra-keys bar
-  (`ESC / - HOME UP END PGUP` / `TAB CTRL ALT LEFT DOWN RIGHT PGDN`),
+  (`ESC / - HOME ↑ END PGUP` / `TAB CTRL ALT ← ↓ → PGDN`),
   sticky CTRL/ALT, direct typing with raw keystrokes (Backspace=DEL,
   Enter=CR), command-box mode, adjustable font (8–24sp).
 - **Keyboard dock that jumps, not slides**: the layout moves once, discretely,
@@ -63,7 +65,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 112 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection)
+./gradlew :app:testDebugUnitTest   # 127 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -74,7 +76,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 112/112 green)
+## Parity guarantees (tested, 127/127 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

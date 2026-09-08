@@ -35,7 +35,7 @@ import id.web.izs.sshclient.ui.AppState
  * opening one sub-screen per section.
  *
  * Included now: Config Sync (full cloud management), SSH, Vault (simplified),
- * Terminal (font, scrollback), Config file. Appearance / Color scheme / Window are placeholders for the
+ * Terminal (font, scrollback, extra keys), Config file. Appearance / Color scheme / Window are placeholders for the
  * next update. Hotkeys and Plugins are intentionally skipped on mobile
  * (no hardware keyboard assumption, no plugin runtime on Android), and
  * Profiles & Connections lives on the home page.
@@ -66,7 +66,7 @@ val SETTING_SECTIONS = listOf(
         Icons.Filled.Description,
     ),
     SettingSection(
-        "terminal", "Terminal", "Font size, scrollback buffer",
+        "terminal", "Terminal", "Font size, scrollback, extra keys",
         Icons.Filled.Terminal,
     ),
     SettingSection(

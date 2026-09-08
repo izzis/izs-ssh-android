@@ -92,7 +92,7 @@ app/src/main/java/id/web/izs/sshclient/
                           known_hosts (TOFU), terminal prefs (font size)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (15 files, 112 tests — §8)
+app/src/test/... (16 files, 127 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -147,7 +147,11 @@ typing: hidden 1px BasicTextField (autoCorrect OFF)
   -> diff (backspace = DEL, Enter = CR) -> session.send (IO dispatcher);
   Enter/buffer-cap calls resetImeLine() (clear + restartInput, keyboard
   stays open) so predictions start fresh each line — WebView-clear parity.
-extra keys: sendSpecial bytes / sticky CTRL+ALT via TerminalInput
+extra keys: user-editable layout (ExtraKeyboard model: ordered send steps
+  with preset/text kinds, modifiers, escape codec, legacy-send migration,
+  normalize+fallback) rendered by one shared ExtraKeysBar composable in the
+  terminal and the editor preview; multi-step macros send staged with a
+  settle delay; device-local JSON, never synced
 resize: measured grid -> settle-debounced (150ms) emulator.resize +
   session window-change (RFC 4254); layout/scroll track live, reflow waits
 ```
@@ -270,7 +274,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 112 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 127 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -289,6 +293,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `LoginScriptRunnerTest` | unconditional/expect/regex/optional/break/unescape parity |
 | `SshAlgorithmFactoriesTest` | defaults resolve (known skips), order, null-on-defaults, per-category fallback |
 | `SshCryptoProviderTest` | BC provider registration (X25519) |
+| `ExtraKeyboardTest` | layout normalize/clamp, escape codec, save-load, corrupt fallback, strict import |
 
 ## 9. Build & diagnostics
 

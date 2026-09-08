@@ -25,6 +25,7 @@ val PROFILE_COLORS = listOf(
     "#cddc39",
     "#ffeb3b",
     "#ff9800",
+    "#795548",
 )
 
 private val HEX_COLOR = Regex("^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$")

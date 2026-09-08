@@ -116,6 +116,31 @@ class ConfigDisk(context: Context) {
         get() = prefs().getInt(KEY_TERMINAL_SCROLLBACK, 5000)
         set(v) = prefs().edit().putInt(KEY_TERMINAL_SCROLLBACK, v.coerceIn(0, 100_000)).apply()
 
+    /**
+     * Extra-keys bar layout JSON (Settings > Terminal > Extra keys).
+     * Null means the factory default. Parsed defensively by
+     * [id.web.izs.sshclient.core.term.loadKeyLayout]; corrupt content falls
+     * back to the default instead of breaking the terminal.
+     */
+    var extraKeysJson: String?
+        get() = prefs().getString(KEY_EXTRA_KEYS, null)
+        set(v) = prefs().edit().putString(KEY_EXTRA_KEYS, v).apply()
+
+    /**
+     * Settle delay between macro steps in ms (Settings > Terminal).
+     * Multi-step keys send one packet per step with this pause so each
+     * part registers in order. 0 sends back-to-back.
+     */
+    var macroStepDelayMs: Long
+        get() = prefs().getLong(
+            KEY_MACRO_STEP_DELAY_MS,
+            id.web.izs.sshclient.core.term.DEFAULT_MACRO_STEP_DELAY_MS,
+        ).coerceIn(0L, id.web.izs.sshclient.core.term.MAX_MACRO_STEP_DELAY_MS)
+        set(v) = prefs().edit().putLong(
+            KEY_MACRO_STEP_DELAY_MS,
+            v.coerceIn(0L, id.web.izs.sshclient.core.term.MAX_MACRO_STEP_DELAY_MS),
+        ).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -130,5 +155,7 @@ class ConfigDisk(context: Context) {
         const val KEY_EXPANDED_GROUPS = "home.expandedGroups"
         const val KEY_TERMINAL_FONT_SP = "terminal.fontSp"
         const val KEY_TERMINAL_SCROLLBACK = "terminal.scrollback"
+        const val KEY_EXTRA_KEYS = "terminal.extraKeys"
+        const val KEY_MACRO_STEP_DELAY_MS = "terminal.macroStepDelayMs"
     }
 }

@@ -40,6 +40,7 @@ import id.web.izs.sshclient.ui.AppViewModel
 import id.web.izs.sshclient.ui.IzsDarkColors
 import id.web.izs.sshclient.ui.screens.ConfigFileScreen
 import id.web.izs.sshclient.ui.screens.ConfigSyncScreen
+import id.web.izs.sshclient.ui.screens.KeyboardLayoutScreen
 import id.web.izs.sshclient.ui.screens.PlaceholderSettingScreen
 import id.web.izs.sshclient.ui.screens.CrashReportScreen
 import id.web.izs.sshclient.ui.screens.ProfileEditScreen
@@ -241,7 +242,14 @@ private fun AppNav(
             ConfigFileScreen(appState) { nav.popBackStack() }
         }
         composable("settings/terminal") {
-            TerminalSettingsScreen(appState) { nav.popBackStack() }
+            TerminalSettingsScreen(
+                appState,
+                onEditKeys = { nav.navigate("settings/keyboard") },
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable("settings/keyboard") {
+            KeyboardLayoutScreen(appState) { nav.popBackStack() }
         }
         composable("settings/appearance") {
             PlaceholderSettingScreen("Appearance") { nav.popBackStack() }
