@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1 allows self-hosted/LAN http:// per user request.
+     The UI shows a warning banner for non-HTTPS hosts (a MITM'd YAML payload can RCE via command/env).
+     For public production use, prefer https:// for parity with Tabby Desktop, which enforces HTTPS. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

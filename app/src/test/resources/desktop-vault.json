@@ -1,0 +1,137 @@
+{
+ "passphrase": "correct horse battery staple",
+ "stored": {
+  "version": 1,
+  "contents": "Mhm2nbdlL1u+utE+TRmGXCXdjhX/o7AbyQE/YKN6tMPoIvSntkANcHM39/B8yqRjWtNwne108bhyuZ79x6/abDncUzMioI3VT9M3887xqUXBnZDOwtYCnmkF5buJwGdOO1rFQ5IVTg+gaRhT/Y17wpnOzVaT6FrBmkPBHaHnjKQZR0OpHTuTUGuIVDKHHKiKtpo3bOJgGWyFidVqd6GKJd/boWoxh23prFXgIS7tsLzihk7U18P9I4xEnjynu6NOhuVFVyHGnc2eHF6TYn49N8qAdDZ8SN65jA/qgSV9FhL3/CGxmKvBUS8LLs17XGZgugsvkFouXwuC4EyiYnnwWtnkPwmAL6KCmhGIIj7CWFCR9sSncte/oRv8p6uMIDWOFLllC0OI1aneDqWn69zkWCyhq/kqnheR0sfH6YsbpC9ZbwsvEBX5yncAtqT0ASTugtsDs7okRVllAg7x4GGcF5+cEF2INyg3nlGciybj1iSyNI5MzPH3ZurQIBdzK22ixB/pE8UUcomI/Wv8KB7wDgyVXRSZI8z/hnDY7xh2tNfbx4kM7SxA0TvgPZi8fljz8jNWH7dx8o+f/9y+pgDgIt0cBFoKyhFsHuIRYm3/CD2k8235I1kVpcz6kSpRbELKPqLUUZ++fJvVCa/GIm5YyuPw7DkY7zakKxHrVavXSbFBgLrznNnFOpn4Z4ocX1db24StsHB+EzTInwaVd3W60SZaDw/2CYr0BJMqYP30U+M/Ah5IBw8APRksduiLorvPKxi6IbjTiSVgc+pqUOajIyXtXB0N/rvD6RTVChXhyD7d8uV0WOA3hOi/PLuUBoHL9/dsn8m4gP30ucqdxsFvIZfUuA9MH8lTUTEO2tjdtftp1aU+4nh41rMdwfY8IrM5nQ4X15pfbw3BSztKe0/s0ccfVsLjwUMYb1hzvAXvyUnNFPmCL3mUSU/iOrNnBbbk6JSOJt+mD8J0VEjxt1bNlw+vE4mAAOBAkVFlTrzHj5ITovvcJOHxJYaC/aCOh9lMy+/HqwQcfAVmDV9yrH6lFHttIQdqyZuVAI8lpV2m+lg8rd+CiCROFlggiok/2ueYiLqG2i07WCWK2Y8mVrDGReR9RgsBp7kASRbV/FMzJtD9Mlx+klhy7nVQujDGeuk8mxBj+yn8cVgGWluS5/w5etfn1rj2m7WNgm3cg9dJ4OMnAX3LTLoDy1vjOT8I5owe6lHP/gKdbBLUxvcebjkgdIaCKPFLsmqEpH3DFZH0t44gw3xh9ekGDMd+BT4Ryeemg++AsKIh5P9nw3/e7B26oPMdnYNyRA20Hbx2mio7EnM8idSmiBz8V/g08JkvldtQoNa514V1IDmQgeSwpB5cx6orl7hLa3Z8uzMDwKz5QeY/zP6L76jLeGbIlmmNlR+B2a63+cuw9ZABRxoCKt+oW2efKH0SXNRXDmBD+frfclndAGSkgrgfF2xo1YLNL0KF1jNpk2wu7CeKIFUt+LjpuczvUzt8gk1+11vvEU/qJYyW0I4U5FJ+gNyqZKTap3rEioJaRPB0BQHvJk5vs+tMTffwG7wjzdDNgiPG+CmJUvdqaY4FVhPObSjGDuXRsoFG0WNpRj0MRUnR0LTYMCSIWQC8QIjrU95FhBT3QTnzgAeT8VWxggU5kpEBfS91v7WTm61Dlz+xdxwpM/vah/3gPQx1YjTnVa+VtQU9k6bTr5wGzR9CgMM/6WTbz+XGxBB5UXlqEAZTQPoonK9iHf15rWMTZ3v1XCkDGLlu46RbRev9taJSuBTtf6ffLBMTGHIvYdF/WkSnl10o16E5vl997UYkAIgpwkZpTZjv5So8QKMmNSF3gwO8ha4NtkxkaV5aYsrlUiMS/NmNTj/D71h6HYk441mZwPDgiLHxoaG0AOsiAQWzwFE1bevjYZa6SH8v2fXLzgydi07aFnwc8tCCBsiJJH/IghJdrJWESZEZ6EgK9crUmdvPVubh4JnWbGdkuVjzWbGINGH5Ue45/7lpW7GdMqSI6WQ26RgMFZN/3zKtTimDhFziUwRGfBh5WK6siQgWNnP7PgvKpU4LskVihfL9tY7FAyot+1TCB/uIFIVidUGkCm1+XtKG5OfCdlJIRDSdIr28jyocuFhQ5uL7FdpRDmC+zdLAvBxPyjcXqVuUPb9UIrMLHkM900TElo+d",
+  "keySalt": "3408123a2af02ea1",
+  "iv": "a1d0a44850c110ff65797cec1f040070"
+ },
+ "expectedConfig": {
+  "version": 8,
+  "profiles": [
+   {
+    "id": "ssh:aaa-111",
+    "type": "ssh",
+    "name": "web-01",
+    "group": "g-servers",
+    "options": {
+     "host": "10.0.0.1",
+     "port": 22,
+     "user": "root",
+     "auth": "password",
+     "privateKeys": [
+      "vault://file-key-1"
+     ],
+     "keepaliveInterval": 5000,
+     "keepaliveCountMax": 10,
+     "jumpHost": "ssh:bbb-222",
+     "agentForward": false,
+     "reuseSession": true
+    }
+   },
+   {
+    "id": "ssh:bbb-222",
+    "type": "ssh",
+    "name": "tëst-sérver \"secrets\" \\ {braces}",
+    "group": "g-nested",
+    "options": {
+     "host": "config.example.com",
+     "port": 2222,
+     "user": "admin",
+     "auth": "publicKey"
+    }
+   },
+   {
+    "type": "ssh",
+    "name": "legacy-no-id",
+    "options": {
+     "host": "10.0.0.9",
+     "user": "root"
+    }
+   },
+   {
+    "id": "serial:1",
+    "type": "serial",
+    "name": "console",
+    "options": {
+     "port": "/dev/ttyUSB0"
+    }
+   }
+  ],
+  "groups": [
+   {
+    "id": "g-servers",
+    "name": "Servers"
+   },
+   {
+    "id": "g-nested",
+    "name": "Nested",
+    "parentGroupId": "g-servers"
+   }
+  ],
+  "ssh": {
+   "verifyHostKeys": true,
+   "knownHosts": []
+  },
+  "hotkeys": {
+   "new-tab": [
+    "ctrl-shift-t"
+   ]
+  },
+  "appearance": {
+   "theme": "standard",
+   "vibrancy": false
+  }
+ },
+ "expectedSecrets": [
+  {
+   "type": "ssh:password",
+   "key": {
+    "user": "root",
+    "host": "10.0.0.1",
+    "port": 22
+   },
+   "value": "s3cr3t pâsswörd 🔑"
+  },
+  {
+   "type": "ssh:password",
+   "key": {
+    "user": "admin"
+   },
+   "value": "fallback-no-host"
+  },
+  {
+   "type": "ssh:key-passphrase",
+   "key": {
+    "hash": "abcdef1234567890"
+   },
+   "value": "key-pass"
+  },
+  {
+   "type": "file",
+   "key": {
+    "id": "file-key-1",
+    "description": "deploy key (id_rsa)"
+   },
+   "value": "LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KZmFrZWtleWRhdGEKLS0tLS1FTkQgT1BFTlNTSCBQUklWQVRFIEtFWS0tLS0t"
+  },
+  {
+   "type": "ssh:password",
+   "key": {
+    "user": "x",
+    "host": "y",
+    "port": 22
+   },
+   "value": "\"secrets\""
+  },
+  {
+   "type": "ssh:password",
+   "key": {
+    "user": "x",
+    "host": "z",
+    "port": 22
+   },
+   "value": "{\"config\":ikers, \"a\":[1,{\"b\":null}]} back\\slash \"q\""
+  }
+ ]
+}

@@ -1,0 +1,20 @@
+# Gradle / Android — never commit these
+local.properties
+.gradle/
+build/
+app/build/
+.kotlin/
+.idea/
+*.iml
+.DS_Store
+
+# Native / captures
+.externalNativeBuild/
+captures/
+
+# Signing keys and store passwords — NEVER commit
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
