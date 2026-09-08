@@ -6,8 +6,7 @@ Single module (`:app`), Kotlin + Jetpack Compose, no WebView.
 
 Upstream references (behavioral parity, not code):
 Tabby Desktop `config.service.ts` / `vault.service.ts`
-(`tabby-core`), `configSync.service.ts` (`tabby-settings`);
-mobile UX reference `tabby-android` (xterm-based).
+(`tabby-core`), `configSync.service.ts` (`tabby-settings`).
 
 ## 1. Design principles
 
@@ -20,7 +19,7 @@ mobile UX reference `tabby-android` (xterm-based).
    (`VaultState`, inside `AppState`, inside `AppViewModel`). It is asked
    lazily — only when vault content is actually needed.
 4. **Terminal jumps, never slides.** Keyboard open/close moves the layout in
-   one discrete jump (like tabby-android's coarse updates). No per-frame
+   one discrete jump. No per-frame
    animation tracking, no follow-up motion.
 5. **Cheap frames on weak phones.** The grid redraws only when emulator
    output arrives; keyboard-animation frames skip the Canvas entirely;
@@ -191,8 +190,7 @@ resize: measured grid -> settle-debounced (150ms) emulator.resize +
   output follows only while pinned, and rows prepended above are
   compensated so the view stays on the same text. Copy includes history.
 - **Layout, not overlay:** the terminal grid (`weight=1f`) and the key bars
-  are Column siblings that take real layout space (tabby-android `kb-spacer`
-  pattern), so the grid can never slide behind the bars — no reserve math.
+  are Column siblings that take real layout space, so the grid can never slide behind the bars — no reserve math.
   6dp side padding keeps edge columns clear of screen protectors.
 - **Connect honors the profile:** login scripts (`LoginScriptRunner`:
   unconditional at session-ready, then per-chunk expect/regex/optional
@@ -210,19 +208,16 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 - `WindowInsets.ime.getBottom()` is the source of truth (0 when the window
   resizes instead — then the dock is a no-op; never double-counted).
-- Two height signals, imitating tabby-android's `visualViewport` math
-  (`terminal.component.ts:424-443`): the claimed `WindowInsets.ime` plus
+- Two height signals, imitating the `visualViewport` approach: the claimed `WindowInsets.ime` plus
   the ACTUALLY-visible rect (`decorView.getWindowVisibleDisplayFrame`,
   15% threshold filters the nav bar). When the visible rect is notably
   smaller than the claim it is trusted with zero shave (the true keys);
   otherwise `ime - imeShavePx` as before.
-- Skip redundant sets (`if (t != dockPx)`, like kb-spacer's height check),
-  small `delay(10)` in the hot path, and a 500ms re-assert safety net
-  (`extraBarInterval` parity). Every apply logs `ImeDock ime= vis=
+- Skip redundant sets (`if (t != dockPx)`), small `delay(10)` in the hot path, and a 500ms re-assert safety net. Every apply logs `ImeDock ime= vis=
   useVis= dock=` to logcat for on-device verification.
   History: single `50` (jump) → `0` (tracked live) → `10` → `5` (open fast,
   close looked animated) → direction-aware `5`+`150` → single `10` →
-  tabby-android imitation (dual signal + 500ms net).
+  dual-signal tracking + 500ms net.
 - **Instant open:** the last settled keyboard height is remembered; the bar
   jumps to it on the first open frame, the settle pass only corrects
   mismatches (orientation changes reset the cache).
@@ -308,7 +303,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 - `CrashLog` (debug builds only) persists the last crash trace; the next
   launch offers the Crash Report screen with copy.
 
-## 10. Roadmap (missing vs Tabby config.yaml / tabby-android)
+## 10. Roadmap (missing vs Tabby config.yaml)
 
 - **Multi-session (todo — prerequisite for anything multiplexing-shaped):**
   session registry in `AppViewModel` (PTYs survive nav + rotation, which

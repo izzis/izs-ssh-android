@@ -318,8 +318,8 @@ class SshConnector {
      * Rejection is recorded (the transport surfaces a generic failure, so
      * `openShell` translates it back to [UnknownHostKeyException]) while
      * negotiation order comes from [HostKeyTrust.findExistingAlgorithms] —
-     * known types first, desktop order on defaults (tabby-android best
-     * practice: phone and desktop then pick the same server key).
+     * known types first, desktop order on defaults (phone and desktop
+     * then pick the same server key).
      */
     private class TrustVerifier(
         private val host: String,

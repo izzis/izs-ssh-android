@@ -6,8 +6,8 @@ Tabby profiles, unlock the vault once, and ssh from your phone — black
 full-bleed terminal, docked extra-keys bar, sticky CTRL/ALT.
 
 Behavioral parity with [Tabby Desktop](https://github.com/Eugeny/tabby)
-(`config.service`, `vault.service`, `configSync.service`); mobile UX inspired
-by tabby-android (xterm). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
+(`config.service`, `vault.service`, `configSync.service`); mobile-first
+terminal UX (xterm-style). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
 technical design.
 
 ## Features (usable today)
@@ -90,7 +90,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   sshj-supported (desktop `supportedAlgorithms`-filter parity),
   `warnOnClose` = profile override ?? global `ssh.warnOnClose`.
 
-## Roadmap (toward full `config.yaml` parity, min. tabby-android level)
+## Roadmap (toward full `config.yaml` parity)
 
 - **Multi-session (todo)**: session registry in `AppViewModel` (PTYs survive
   nav + rotation — also fixes rotation-PTY), session picker replacing

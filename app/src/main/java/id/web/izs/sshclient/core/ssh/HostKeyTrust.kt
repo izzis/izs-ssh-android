@@ -17,8 +17,7 @@ import java.util.Base64
  * - Matching is exact per {host, port, type}; any stored entry for the
  *   host+port with a different digest is a MISMATCH (MITM-or-rotation).
  * - Negotiation order comes from [findExistingAlgorithms]: known types for
- *   the host first (tabby-android best practice, verified against sshj's
- *   `KeyExchanger` bytecode — the first non-empty verifier list becomes
+ *   the host first (verified against sshj's `KeyExchanger` bytecode — the first non-empty verifier list becomes
  *   THE negotiated host-key list), otherwise the desktop preference order
  *   so fresh trusts coincide with desktop's pick (ecdsa first, NOT sshj's
  *   ed25519-first default).

@@ -19,7 +19,7 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     companion object {
         const val FG = 0xFFE8E8E8.toInt()
         // Pure black: blends the grid with the full-bleed page background
-        // (xterm theme in tabby-android uses #000000 too).
+        // (matching the xterm black theme).
         const val BG = 0xFF000000.toInt()
         const val MAX_HISTORY = 2000
 

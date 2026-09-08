@@ -63,8 +63,7 @@ class SyncRepository(
     suspend fun loadLocal(): Loaded = withContext(Dispatchers.IO) {
         var yamlStr = disk.loadYaml()
         if (yamlStr.isNullOrBlank()) {
-            // tabby-android parity (config-android.service.ts:32): a fresh
-            // install owns an empty local config, so the app is usable
+            // A fresh install owns an empty local config, so the app is usable
             // (add profiles) without ever touching Config Sync. Seeded to
             // disk once — later loads see a real document.
             val seed = linkedMapOf<String, Any?>(

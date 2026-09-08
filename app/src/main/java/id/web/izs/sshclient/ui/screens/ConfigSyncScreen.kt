@@ -43,7 +43,7 @@ import kotlinx.coroutines.withContext
  * One screen for connection (host+token+test), full cloud config
  * management (list / download-switch / upload / create / delete), and
  * auto-sync + parts options. Reached from Settings only — first-run setup
- * is gone (tabby-android parity: home is always the profile list on top
+ * is gone (home is always the profile list on top
  * of a seeded empty local config).
  */
 @Composable

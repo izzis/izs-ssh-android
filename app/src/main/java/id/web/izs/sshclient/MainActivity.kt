@@ -55,7 +55,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * v1 flow (tabby-android parity): home is ALWAYS the profile list, on top
+ * v1 flow: home is ALWAYS the profile list, on top
  * of a seeded empty local config when fresh — no setup gate. Sync connects
  * later from Settings > Config Sync; terminal is a real PTY shell.
  * Settings mirrors the desktop sidebar: Config Sync, SSH, Vault, Terminal,
@@ -101,8 +101,7 @@ class MainActivity : ComponentActivity() {
                             crash != null -> Boot.Ready("crash", crash)
                             !ok || appState.loaded == null ->
                                 Boot.Failed(appState.error ?: "Load failed")
-                            // tabby-android parity: home is ALWAYS the profile
-                            // list (app-routing redirects everything there).
+                            // Home is ALWAYS the profile list.
                             // A fresh install owns a seeded empty config, so
                             // profiles can be added without Config Sync; sync
                             // connects later from Settings > Config Sync.

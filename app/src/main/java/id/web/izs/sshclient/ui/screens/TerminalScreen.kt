@@ -169,8 +169,8 @@ fun TerminalScreen(
     // is already in flight) that used to open two sessions and trip the
     // crypto provider swap.
     var connecting by remember { mutableStateOf(false) }
-    // tabby-android parity: the WebView clears its hidden textarea on Enter,
-    // so Chromium resets composing and predictions start fresh each line.
+    // WebView-based terminals clear their hidden textarea on Enter,
+    // so the web view resets composing and predictions start fresh each line.
     // Compose must ask for the same explicitly — restartInput() resets the
     // IME's prediction/composing state while keeping the keyboard open.
     val view = LocalView.current
@@ -589,13 +589,13 @@ fun TerminalScreen(
                 OutlinedButton(onClick = { cancelConnect() }) { Text("Cancel") }
             }
         }
-        // Keyboard dock imitating tabby-android (terminal.component.ts):
+        // Keyboard dock:
         // (1) visualViewport equivalent — decorView.getWindowVisibleDisplayFrame
         //     is the rect that is ACTUALLY visible, immune to SwiftKey's
         //     over-claimed inset when its window is only as tall as the keys.
         //     Trusted (zero shave) when notably smaller than the IME inset.
-        // (2) Skip redundant sets (like kb-spacer's height check).
-        // (3) 500ms re-assert safety net while open (extraBarInterval).
+        // (2) Skip redundant sets.
+        // (3) 500ms re-assert safety net while open.
         // (4) Small settle wait in the hot path (no fit-spam: our refit hits
         //     the network via window-change, so no 150/400ms fit retries).
         val dockDensity = LocalDensity.current
@@ -631,7 +631,7 @@ fun TerminalScreen(
                 dockPx = target
                 Log.d("ImeDock", "ime=$imeBottomPx vis=$visKbPx useVis=$useVis dock=$dockPx")
             }
-            // Safety net ala tabby-android extraBarInterval: re-assert.
+            // Safety net: re-assert the dock height periodically.
             while (true) {
                 delay(500)
                 val t = (if (useVis) visKbPx else imeBottomPx - imeShavePx).coerceAtLeast(0f)
@@ -673,7 +673,7 @@ fun TerminalScreen(
             // rebuild + full Canvas redraw + window-change packet) pegged
             // the CPU and froze scrolling until settle. Layout (dock height,
             // viewport, scroll) still tracks live — only the expensive
-            // reflow waits for 150ms quiet, like tabby-android's fit retries.
+            // reflow waits for 150ms quiet.
             val wantSize = wantCols to wantRows
             val latestWant by rememberUpdatedState(wantSize)
             LaunchedEffect(wantSize) {
