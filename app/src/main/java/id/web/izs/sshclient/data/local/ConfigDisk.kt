@@ -108,6 +108,14 @@ class ConfigDisk(context: Context) {
         get() = prefs().getFloat(KEY_TERMINAL_FONT_SP, 14f)
         set(v) = prefs().edit().putFloat(KEY_TERMINAL_FONT_SP, v.coerceIn(8f, 24f)).apply()
 
+    /**
+     * Scrollback buffer in lines (Settings > Terminal, xterm-like default).
+     * 0 disables history. Applied live; lowering trims immediately.
+     */
+    var terminalScrollback: Int
+        get() = prefs().getInt(KEY_TERMINAL_SCROLLBACK, 5000)
+        set(v) = prefs().edit().putInt(KEY_TERMINAL_SCROLLBACK, v.coerceIn(0, 100_000)).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -121,5 +129,6 @@ class ConfigDisk(context: Context) {
         const val KEY_LAST_CHANGE = "sync.lastRemoteChange"
         const val KEY_EXPANDED_GROUPS = "home.expandedGroups"
         const val KEY_TERMINAL_FONT_SP = "terminal.fontSp"
+        const val KEY_TERMINAL_SCROLLBACK = "terminal.scrollback"
     }
 }

@@ -118,6 +118,48 @@ class TerminalEmulatorTest {
     }
 
     @Test
+    fun `scrollback capped by maxHistory`() {
+        val t = term(cols = 4, rows = 3)
+        t.maxHistory = 2
+        // 6 lines on a 3-row grid: the 3rd..6th line-feeds scroll, pushing
+        // l0..l3; the cap keeps the two newest.
+        repeat(6) { i -> t.feed("l$i\r\n") }
+        assertEquals(2, t.historyRowCount())
+        // Oldest evicted first: history holds the two newest scrolled lines.
+        assertEquals("l2", (0 until 4).map { t.historyCell(0, it)?.ch ?: ' ' }.joinToString("").trimEnd())
+        assertEquals("l3", (0 until 4).map { t.historyCell(1, it)?.ch ?: ' ' }.joinToString("").trimEnd())
+    }
+
+    @Test
+    fun `lowering maxHistory trims immediately and zero disables`() {
+        val t = term(cols = 4, rows = 3)
+        repeat(5) { i -> t.feed("l$i\r\n") }
+        assertTrue(t.historyRowCount() > 2)
+        t.maxHistory = 2
+        assertEquals(2, t.historyRowCount())
+        t.maxHistory = 0
+        assertEquals(0, t.historyRowCount())
+        t.feed("x\r\n")
+        assertEquals(0, t.historyRowCount())
+    }
+
+    @Test
+    fun `alt buffer neither records nor exposes history`() {
+        val t = term(cols = 4, rows = 3)
+        // 3 lines on a 3-row grid: the 3rd line-feed scrolls once.
+        t.feed("a1\r\nb2\r\nc3\r\n")
+        assertEquals(1, t.historyRowCount())
+        t.feed("$esc[?1049h")
+        assertTrue(t.altActive)
+        assertEquals(0, t.historyRowCount())
+        t.feed("zz\r\n".repeat(5))
+        t.feed("$esc[?1049l")
+        // Full-screen scrolls under alt left the primary history untouched.
+        assertEquals(1, t.historyRowCount())
+        assertEquals("b2", rowText(t, 0))
+    }
+
+    @Test
     fun `osc title is swallowed not printed`() {
         val t = term()
         t.feed("$esc]0;my-title${7.toChar()}OK")

@@ -45,6 +45,7 @@ import id.web.izs.sshclient.ui.screens.CrashReportScreen
 import id.web.izs.sshclient.ui.screens.ProfileEditScreen
 import id.web.izs.sshclient.ui.screens.ProfileListScreen
 import id.web.izs.sshclient.ui.screens.TerminalScreen
+import id.web.izs.sshclient.ui.screens.TerminalSettingsScreen
 import id.web.izs.sshclient.ui.screens.SettingsScreen
 import id.web.izs.sshclient.ui.screens.SshSettingsScreen
 import id.web.izs.sshclient.ui.screens.SyncSetupScreen
@@ -57,7 +58,7 @@ import kotlinx.coroutines.withContext
  * v1 flow (desktop parity):
  * setup (host+token) -> sync (connection + cloud configs + options)
  * -> profiles (folders + search) -> terminal (real PTY shell).
- * Settings mirrors the desktop sidebar: Config Sync, SSH, Vault,
+ * Settings mirrors the desktop sidebar: Config Sync, SSH, Vault, Terminal,
  * Config file (+ Appearance/Color scheme/Window placeholders).
  *
  * Boot is hardened: the start destination is computed BEFORE the NavHost is
@@ -260,6 +261,9 @@ private fun AppNav(
         }
         composable("settings/configfile") {
             ConfigFileScreen(appState) { nav.popBackStack() }
+        }
+        composable("settings/terminal") {
+            TerminalSettingsScreen(appState) { nav.popBackStack() }
         }
         composable("settings/appearance") {
             PlaceholderSettingScreen("Appearance") { nav.popBackStack() }

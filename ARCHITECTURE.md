@@ -41,7 +41,8 @@ app/src/main/java/id/web/izs/sshclient/
       ProfileListScreen.kt        Groups + search + profile list, edit entry point
       ProfileEditScreen.kt        Rename/move/edit connection fields, add/remove keys, delete
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode
-      TerminalView.kt             Grid Canvas, cursor-follow scroll, measured cell metrics
+      TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
+      TerminalSettingsScreen.kt   Font size + scrollback buffer (applies live)
       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`)
       VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
       SetVaultPassphraseDialog.kt Set/change vault passphrase
@@ -70,7 +71,8 @@ app/src/main/java/id/web/izs/sshclient/
                           multi-key auth, PTY window-change
     term/
       TerminalEmulator.kt Pure-Kotlin VT100/xterm subset (SGR, cursor, erase,
-                          scroll/margins, wrap, alt-buffer, ?25, ?1049)
+                          scroll/margins, wrap, alt-buffer, ?25, ?1049) +
+                          scrollback history deque capped by maxHistory
       TerminalInput.kt    Pure sticky CTRL/ALT mapping (c & 0x1F, ALT = ESC prefix)
   data/local/
     ConfigDisk.kt         EncryptedSharedPreferences: sync creds, RAW YAML cache,
@@ -119,9 +121,12 @@ sshj shell PTY (xterm-256color)
   -> keepCursorVisible snap (output + viewport effects)
 
 typing: hidden 1px BasicTextField (autoCorrect OFF)
-  -> diff (backspace = DEL, Enter = CR) -> session.send (IO dispatcher)
+  -> diff (backspace = DEL, Enter = CR) -> session.send (IO dispatcher);
+  Enter/buffer-cap calls resetImeLine() (clear + restartInput, keyboard
+  stays open) so predictions start fresh each line — WebView-clear parity.
 extra keys: sendSpecial bytes / sticky CTRL+ALT via TerminalInput
-resize: measured grid -> emulator.resize + session window-change (RFC 4254)
+resize: measured grid -> settle-debounced (150ms) emulator.resize +
+  session window-change (RFC 4254); layout/scroll track live, reflow waits
 ```
 
 - **Emulator** (`core/term`): pure Kotlin, fully unit-tested. Wrap is
@@ -130,14 +135,34 @@ resize: measured grid -> emulator.resize + session window-change (RFC 4254)
 - **Render** (`TerminalView`): pure-black full-bleed Canvas. Backgrounds are
   merged per contiguous run (default BG skipped — the backdrop covers it);
   text is **one AnnotatedString layout per row** (~40 layouts/frame instead
-  of ~1000 single-cell layouts). Columns are exactly one measured monospace
+  of ~1000 single-cell layouts), and only the **visible window + overscan**
+  is drawn at all — the canvas keeps full content size (correct scroll
+  extents) but off-screen rows emit zero draw ops, so cost is O(visible)
+  even with 10k scrollback lines. Spans merge per style run (80
+  single-char spans made paragraph layout pathological at ~15ms/row
+  measured; typical rows emit a handful). Scrolling inside the baked
+  window is pure GPU translation — a redraw happens only on content
+  change (gated by drawTick: history-only windows skip while reading
+  during output floods), window exit, or size settle — never per scroll
+  pixel or per cursor-follow snap (the old derived window re-laid the
+  whole frame on each: the keyboard-toggle freeze). Columns are exactly one measured monospace
   advance wide (`rememberTerminalCell` averages 40 glyphs, so laid-out rows
   land pixel-perfect on the grid). The Canvas lives in `TerminalCanvas`,
   whose params are all Compose-stable (`State` holder + `version` + scalars),
   so size-only recompositions skip the redraw entirely; every emulator
   mutation bumps `version`, so `(ref, version)` fully describes the view.
+  Programmatic scrolls never run while a finger is down (`touching` flag —
+  `isScrollInProgress` only covers post-slop drags). DEBUG builds log
+  `TvPerf` (draw/resize ms) and `TvScroll` (drag/follow/snap) telemetry.
 - **Scroll:** `keepCursorVisible` (2-line / 8-column margin) snaps on new
   output and on viewport change. Single snap, no glide, no trailing motion.
+- **Scrollback:** full-screen scrolls push the top row into a history deque
+  capped by `maxHistory` (Settings > Terminal: stepper + free input,
+  default 5000 lines, 0 = off, max 100000; lowering trims immediately). The view renders history + grid as one
+  continuous block (history hidden under the alt buffer; pre-resize rows
+  padded). A drag ending above the live edge unpins (`pinned=false`); new
+  output follows only while pinned, and rows prepended above are
+  compensated so the view stays on the same text. Copy includes history.
 - **Layout, not overlay:** the terminal grid (`weight=1f`) and the key bars
   are Column siblings that take real layout space (tabby-android `kb-spacer`
   pattern), so the grid can never slide behind the bars — no reserve math.
@@ -150,9 +175,19 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 - `WindowInsets.ime.getBottom()` is the source of truth (0 when the window
   resizes instead — then the dock is a no-op; never double-counted).
-- Only the **settled** value is applied (`delay(50)` quiet period): during
-  the slide the scope doesn't recompose at all; at settle bar + grid jump
-  once. No per-frame tracking, no follow-up motion.
+- Two height signals, imitating tabby-android's `visualViewport` math
+  (`terminal.component.ts:424-443`): the claimed `WindowInsets.ime` plus
+  the ACTUALLY-visible rect (`decorView.getWindowVisibleDisplayFrame`,
+  15% threshold filters the nav bar). When the visible rect is notably
+  smaller than the claim it is trusted with zero shave (the true keys);
+  otherwise `ime - imeShavePx` as before.
+- Skip redundant sets (`if (t != dockPx)`, like kb-spacer's height check),
+  small `delay(10)` in the hot path, and a 500ms re-assert safety net
+  (`extraBarInterval` parity). Every apply logs `ImeDock ime= vis=
+  useVis= dock=` to logcat for on-device verification.
+  History: single `50` (jump) → `0` (tracked live) → `10` → `5` (open fast,
+  close looked animated) → direction-aware `5`+`150` → single `10` →
+  tabby-android imitation (dual signal + 500ms net).
 - **Instant open:** the last settled keyboard height is remembered; the bar
   jumps to it on the first open frame, the settle pass only corrects
   mismatches (orientation changes reset the cache).
@@ -175,7 +210,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 63 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 66 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -186,7 +221,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `VaultCryptoTest` | PBKDF2/AES vectors, `BAD_DECRYPT` |
 | `VaultManageTest` | set/change/erase passphrase, encrypt-config toggle |
 | `VaultStateTest` | pure resolve + `unlockRequired` rules |
-| `TerminalEmulatorTest` | VT100 ops + pending-wrap regression |
+| `TerminalEmulatorTest` | VT100 ops + pending-wrap regression + scrollback cap/trim/alt |
 | `TerminalInputTest` | sticky CTRL/ALT mapping |
 | `SshCryptoProviderTest` | BC provider registration (X25519) |
 
@@ -205,9 +240,6 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 10. Roadmap (missing vs Tabby config.yaml / tabby-android)
 
-- **Scrollback + buffer setting:** emulator keeps the live grid only
-  (`MAX_HISTORY` const exists but unwired); add scrollback store + visible
-  scroll + `tabby-scrollback`-style size setting.
 - **Text selection with handles:** long-press -> start/end drag handles +
   floating Copy/Paste bar (tabby-android pattern), replacing screen-copy.
 - **Full profile editor parity:** every `config.yaml` key editable and

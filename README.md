@@ -20,8 +20,11 @@ technical design.
 - **Profiles**: groups, search, edit (rename/move/host/port/user/password,
   add/remove keys, delete), live RAW `config.yaml` viewer.
 - **Terminal**: real PTY shell (sshj), VT100/xterm-subset emulator, colors,
-  alt-buffer (vim/htop), window-change on resize, TOFU host-key guard,
+  alt-buffer (vim/htop), **scrollback with drag-to-read + follow-bottom**,
+  window-change on resize, TOFU host-key guard,
   password + multi-key auth.
+- **Settings > Terminal**: font size + scrollback buffer
+  (− number + stepper, tap to type, 0 = off, max 100.000), applies live.
 - **Termux-like input**: docked extra-keys bar
   (`ESC / - HOME UP END PGUP` / `TAB CTRL ALT LEFT DOWN RIGHT PGDN`),
   sticky CTRL/ALT, direct typing with raw keystrokes (Backspace=DEL,
@@ -51,7 +54,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 63 unit tests (vault, sync, emulator)
+./gradlew :app:testDebugUnitTest   # 66 unit tests (vault, sync, emulator)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -61,7 +64,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 63/63 green)
+## Parity guarantees (tested, 66/66 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
@@ -72,7 +75,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Roadmap (toward full `config.yaml` parity, min. tabby-android level)
 
-- Scrollback store + visible scroll + buffer-size setting.
 - Text selection with start/end drag handles + Copy/Paste bar.
 - Full profile editor: every `config.yaml` key editable and honored
   (keepalive, ciphers, port forwarding, proxy/jumpHost, terminal type).

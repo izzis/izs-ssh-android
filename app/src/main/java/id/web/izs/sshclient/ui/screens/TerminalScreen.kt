@@ -1,6 +1,12 @@
 package id.web.izs.sshclient.ui.screens
 
+import android.app.Activity
+import android.graphics.Rect
+import android.util.Log
+import android.view.ViewTreeObserver
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
+import id.web.izs.sshclient.BuildConfig
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -47,6 +53,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +62,8 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -98,7 +107,14 @@ fun TerminalScreen(
     val locked = state.loaded?.needsPassphrase == true
 
     val emulator = remember(profileId) { TerminalEmulator(80, 24) }
+    // Scrollback pref (Settings > Terminal): applied live on every
+    // composition — deliberately impure, the setter only trims and never
+    // triggers recomposition, so there is no loop risk.
+    emulator.maxHistory = state.disk.terminalScrollback
     var emuVersion by remember(profileId) { mutableStateOf(0L) }
+    // First fit per session is instant; later ones are settle-debounced
+    // (see the refit below) so the keyboard animation never reflows.
+    var sizedOnce by remember(profileId) { mutableStateOf(false) }
     var session by remember { mutableStateOf<SshConnector.ShellSession?>(null) }
     var status by remember { mutableStateOf("connecting…") }
     var failed by remember { mutableStateOf<String?>(null) }
@@ -117,6 +133,16 @@ fun TerminalScreen(
     // is already in flight) that used to open two sessions and trip the
     // crypto provider swap.
     var connecting by remember { mutableStateOf(false) }
+    // tabby-android parity: the WebView clears its hidden textarea on Enter,
+    // so Chromium resets composing and predictions start fresh each line.
+    // Compose must ask for the same explicitly — restartInput() resets the
+    // IME's prediction/composing state while keeping the keyboard open.
+    val view = LocalView.current
+    val imm = remember(context) { context.getSystemService(InputMethodManager::class.java) }
+    fun resetImeLine() {
+        kbText = ""
+        try { imm.restartInput(view) } catch (_: Exception) { }
+    }
 
     fun readKnown(): List<String> = try {
         val arr = JSONArray(state.disk.loadKnownHostsJson() ?: "[]")
@@ -129,8 +155,7 @@ fun TerminalScreen(
         state.disk.terminalFontSp = c
     }
 
-    fun sendRaw(text: String) {
-        val s = session ?: return
+    fun sendRaw(text: String) {        val s = session ?: return
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { s.sendRaw(text) }
@@ -354,26 +379,57 @@ fun TerminalScreen(
                 OutlinedButton(onClick = { goBack() }) { Text("Close") }
             }
         }
-        // Discrete keyboard dock ("lompat", like tabby-android): apply the
-        // SETTLED IME height only, never the per-frame animation values.
-        // While the keyboard slides this scope doesn't recompose at all;
-        // at settle the bar + grid jump once to their final place.
-        // No animation tracking, no follow-up motion: langsung.
+        // Keyboard dock imitating tabby-android (terminal.component.ts):
+        // (1) visualViewport equivalent — decorView.getWindowVisibleDisplayFrame
+        //     is the rect that is ACTUALLY visible, immune to SwiftKey's
+        //     over-claimed inset when its window is only as tall as the keys.
+        //     Trusted (zero shave) when notably smaller than the IME inset.
+        // (2) Skip redundant sets (like kb-spacer's height check).
+        // (3) 500ms re-assert safety net while open (extraBarInterval).
+        // (4) Small settle wait in the hot path (no fit-spam: our refit hits
+        //     the network via window-change, so no 150/400ms fit retries).
         val dockDensity = LocalDensity.current
-        val imeBottomPx = WindowInsets.ime.getBottom(dockDensity)
+        val imeBottomPx = WindowInsets.ime.getBottom(dockDensity).toFloat()
+        val activity = LocalContext.current as? Activity
+        var visKbPx by remember { mutableFloatStateOf(0f) }
+        DisposableEffect(activity) {
+            val decor = activity?.window?.decorView
+            if (decor == null) return@DisposableEffect onDispose {}
+            val rect = Rect()
+            val lis = ViewTreeObserver.OnGlobalLayoutListener {
+                decor.getWindowVisibleDisplayFrame(rect)
+                val screenH = decor.resources.displayMetrics.heightPixels.toFloat()
+                val occluded = screenH - rect.bottom.toFloat()
+                // 15% threshold filters the nav bar; below it = no keyboard.
+                visKbPx = if (occluded > screenH * 0.15f) occluded else 0f
+            }
+            decor.viewTreeObserver.addOnGlobalLayoutListener(lis)
+            onDispose { decor.viewTreeObserver.removeOnGlobalLayoutListener(lis) }
+        }
         // SwiftKey claims ~35dp more inset than its visible keys (hidden
-        // toolbar slot). Shave all of it so the bar touches the visible
-        // keyboard. Condition: SwiftKey with toolbar OFF (current setup).
-        // If the toolbar is ever shown (or a tighter keyboard like Gboard
-        // is used), lower this — at most this strip of the bar's bottom is
-        // covered. One constant to tune.
+        // toolbar slot). Shave 44.dp docks the bar onto the visible keys
+        // (SwiftKey, toolbar OFF) — used only when the visible rect does
+        // NOT prove a smaller true height. One constant to tune.
         val imeShavePx = with(dockDensity) { 44.dp.toPx() }
         var dockPx by remember { mutableFloatStateOf(0f) }
-        LaunchedEffect(imeBottomPx) {
-            val target = (imeBottomPx - imeShavePx).coerceAtLeast(0f)
-            if (target == dockPx) return@LaunchedEffect
-            delay(50)
-            dockPx = target
+        LaunchedEffect(imeBottomPx, visKbPx) {
+            // Visible rect notably smaller than claimed inset = true keys.
+            val useVis = visKbPx > 0f && visKbPx < imeBottomPx - with(dockDensity) { 10.dp.toPx() }
+            val target = (if (useVis) visKbPx else imeBottomPx - imeShavePx).coerceAtLeast(0f)
+            if (target != dockPx) {
+                delay(10)
+                dockPx = target
+                Log.d("ImeDock", "ime=$imeBottomPx vis=$visKbPx useVis=$useVis dock=$dockPx")
+            }
+            // Safety net ala tabby-android extraBarInterval: re-assert.
+            while (true) {
+                delay(500)
+                val t = (if (useVis) visKbPx else imeBottomPx - imeShavePx).coerceAtLeast(0f)
+                if (t != dockPx) {
+                    dockPx = t
+                    Log.d("ImeDock", "re-assert ime=$imeBottomPx vis=$visKbPx dock=$t")
+                }
+            }
         }
         BoxWithConstraints(
             modifier = Modifier.weight(1f).fillMaxWidth()
@@ -394,16 +450,31 @@ fun TerminalScreen(
             val wantRows = (availH / lineH).toInt().coerceIn(8, 64)
 
             suspend fun applySize(c: Int, r: Int) {
+                val t0 = if (BuildConfig.DEBUG) System.nanoTime() else 0L
                 emulator.resize(c, r)
                 emuVersion = emulator.version
                 session?.resize(c, r, (c * charW).toInt(), (r * lineH).toInt())
+                if (BuildConfig.DEBUG) {
+                    Log.d("TvPerf", "resize ${c}x$r ms=${(System.nanoTime() - t0) / 1_000_000.0}")
+                }
             }
-            // Refit AT ONCE on every size change. Sizes now arrive
-            // discretely (see the dock above), so this fires once per
-            // open/close: a single jump, no tracking, no trailing motion.
-            LaunchedEffect(wantCols, wantRows) {
-                if (wantCols == emulator.cols && wantRows == emulator.rows) return@LaunchedEffect
-                applySize(wantCols, wantRows)
+            // Refit at SETTLE, never per-frame. Sizes stream every animation
+            // frame while the keyboard slides; reflowing per frame (buffer
+            // rebuild + full Canvas redraw + window-change packet) pegged
+            // the CPU and froze scrolling until settle. Layout (dock height,
+            // viewport, scroll) still tracks live — only the expensive
+            // reflow waits for 150ms quiet, like tabby-android's fit retries.
+            val wantSize = wantCols to wantRows
+            val latestWant by rememberUpdatedState(wantSize)
+            LaunchedEffect(wantSize) {
+                if (sizedOnce) delay(150)
+                val (c, r) = latestWant
+                if (c == emulator.cols && r == emulator.rows) {
+                    sizedOnce = true
+                    return@LaunchedEffect
+                }
+                applySize(c, r)
+                sizedOnce = true
             }
             LaunchedEffect(session) {
                 // Fresh shells start at 80x24: correct the server at once.
@@ -529,10 +600,12 @@ fun TerminalScreen(
                     repeat(removed) { sendRaw(DEL) }
                     val added = next.substring(common).replace(LF, CR)
                     if (added.isNotEmpty()) sendCooked(added)
-                    kbText = if (next.length > 48) "" else next
+                    // New line (or buffer cap): fresh IME state per line.
+                    if (added.contains(CR) || next.length > 48) resetImeLine()
+                    else kbText = next
                 },
                 keyboardOptions = KeyboardOptions(autoCorrect = false, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { sendRaw(CR) }),
+                keyboardActions = KeyboardActions(onDone = { sendRaw(CR); resetImeLine() }),
                 modifier = Modifier.size(1.dp).focusRequester(focusRequester),
             )
         }

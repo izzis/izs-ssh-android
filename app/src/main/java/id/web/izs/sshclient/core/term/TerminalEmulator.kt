@@ -60,6 +60,24 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     private var alt = newGrid(cols, rows)
     private val history = ArrayDeque<Array<Cell>>()
 
+    /**
+     * Scrollback cap in lines (Settings > Terminal). 0 disables history.
+     * Lowering trims immediately. History rows keep their original width —
+     * the view pads rows narrower than the current grid.
+     */
+    var maxHistory: Int = MAX_HISTORY
+        set(v) {
+            field = v.coerceIn(0, 100_000)
+            while (history.size > field) history.removeFirst()
+        }
+
+    /** Lines currently held in scrollback (0 while the alt buffer is up). */
+    fun historyRowCount(): Int = if (altActive) 0 else history.size
+
+    /** A scrollback cell, or null past the row's stored width (renders blank). */
+    fun historyCell(row: Int, x: Int): Cell? =
+        if (altActive) null else history.getOrNull(row)?.getOrNull(x)
+
     private var grid: Array<Array<Cell>> = primary
     var altActive: Boolean = false
         private set
@@ -422,7 +440,7 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         val fullScreen = topMargin == 0 && bottomMargin == rows - 1
         if (!altActive && fullScreen) {
             history.addLast(grid[0])
-            if (history.size > MAX_HISTORY) history.removeFirst()
+            while (history.size > maxHistory) history.removeFirst()
         }
         for (y in topMargin until bottomMargin) {
             grid[y] = grid[y + 1]
