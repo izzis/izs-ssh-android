@@ -1,14 +1,18 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
@@ -32,10 +36,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.config.ProfileGroup
 import id.web.izs.sshclient.core.config.SshDefaults
 import id.web.izs.sshclient.core.config.SshProfile
+import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.ui.AppState
 
 /**
@@ -271,7 +278,19 @@ private fun ProfileCard(
         Row(
             Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Identity stripe (desktop tab-colorbar parity). Absent without
+            // a stored color, so uncolored rows look exactly as before.
+            val stripe = remember(profile.color) { profileColorArgb(profile.color) }
+            if (stripe != null) {
+                Box(
+                    Modifier
+                        .size(width = 4.dp, height = 52.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(stripe)),
+                )
+            }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(profile.name, style = MaterialTheme.typography.titleMedium)
                 if (profile.type == "ssh") {

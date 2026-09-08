@@ -1,15 +1,22 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FormatColorReset
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -38,13 +45,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.config.ForwardedPort
 import id.web.izs.sshclient.core.config.LoginScript
+import id.web.izs.sshclient.core.config.PROFILE_COLORS
 import id.web.izs.sshclient.core.config.SshAlgorithms
 import id.web.izs.sshclient.core.config.SshProfile
+import id.web.izs.sshclient.core.config.normalizeProfileColor
+import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.launch
@@ -91,6 +103,9 @@ fun ProfileEditScreen(
     // ---- General ----
     var name by remember(original) { mutableStateOf(o?.let { original.name } ?: "") }
     var groupId by remember(original) { mutableStateOf(original?.group ?: "") }
+    // Identity color (profile-level `color`, desktop tab-colorbar parity).
+    // Stored normalized; blank = default = omit on save.
+    var color by remember(original) { mutableStateOf(normalizeProfileColor(original?.color) ?: "") }
     var host by remember(original) { mutableStateOf(o?.host ?: "") }
     var portText by remember(original) { mutableStateOf(o?.port?.toString() ?: "22") }
     var user by remember(original) { mutableStateOf(o?.user ?: "root") }
@@ -132,7 +147,8 @@ fun ProfileEditScreen(
     var agentForward by remember(original) { mutableStateOf(o?.agentForward ?: false) }
     var skipBanner by remember(original) { mutableStateOf(o?.skipBanner ?: false) }
     var reuseSession by remember(original) { mutableStateOf(o?.reuseSession ?: true) }
-    var warnOnClose by remember(original) { mutableStateOf(o?.warnOnClose ?: false) }
+    // No warnOnClose editor (desktop parity: it lives in Settings > SSH;
+    // a stored per-profile value is preserved untouched via the copy below).
     var keepaliveText by remember(original) { mutableStateOf(o?.keepaliveInterval?.toString() ?: "5000") }
     var keepaliveMaxText by remember(original) { mutableStateOf(o?.keepaliveCountMax?.toString() ?: "10") }
     // The Domain view fills the transient 20000 default, so a stored-absent
@@ -202,7 +218,6 @@ fun ProfileEditScreen(
         agentForward = agentForward,
         skipBanner = skipBanner,
         reuseSession = reuseSession,
-        warnOnClose = warnOnClose.takeIf { it },
         keepaliveInterval = keepaliveText.toLongOrNull()?.takeIf { it > 0 } ?: 5000,
         keepaliveCountMax = keepaliveMaxText.toIntOrNull()?.takeIf { it > 0 } ?: 10,
         readyTimeout = readyTimeoutText.toLongOrNull()?.takeIf { it > 0 },
@@ -228,6 +243,7 @@ fun ProfileEditScreen(
                         profile = SshProfile(
                             id = "",
                             name = name.ifBlank { "New profile" },
+                            color = color.ifBlank { null },
                             options = buildOptions(),
                         ),
                         groupId = groupId.ifBlank { null },
@@ -240,6 +256,7 @@ fun ProfileEditScreen(
                     val updated = orig.copy(
                         name = name.ifBlank { orig.name },
                         group = groupId.ifBlank { null },
+                        color = color.ifBlank { null },
                         options = buildOptions().copy(
                             port = port,
                             user = user.trim().ifBlank { orig.options.user },
@@ -339,6 +356,7 @@ fun ProfileEditScreen(
                     name = name, onName = { name = it },
                     groups = groups, groupId = groupId, onGroup = { groupId = it },
                     onNewGroup = { newGroupName = ""; showNewGroup = true },
+                    color = color, onColor = { color = it },
                     host = host, onHost = { host = it },
                     portText = portText, onPort = { portText = it.filter { c -> c.isDigit() }.take(5) },
                     user = user, onUser = { user = it },
@@ -380,7 +398,6 @@ fun ProfileEditScreen(
                     agentForward = agentForward, onAgentForward = { agentForward = it },
                     skipBanner = skipBanner, onSkipBanner = { skipBanner = it },
                     reuseSession = reuseSession, onReuseSession = { reuseSession = it },
-                    warnOnClose = warnOnClose, onWarnOnClose = { warnOnClose = it },
                     keepaliveText = keepaliveText,
                     onKeepalive = { keepaliveText = it.filter { c -> c.isDigit() }.take(7) },
                     keepaliveMaxText = keepaliveMaxText,
@@ -517,6 +534,7 @@ private fun GeneralTab(
     name: String, onName: (String) -> Unit,
     groups: List<id.web.izs.sshclient.core.config.ProfileGroup>,
     groupId: String, onGroup: (String) -> Unit, onNewGroup: () -> Unit,
+    color: String, onColor: (String) -> Unit,
     host: String, onHost: (String) -> Unit,
     portText: String, onPort: (String) -> Unit,
     user: String, onUser: (String) -> Unit,
@@ -539,10 +557,27 @@ private fun GeneralTab(
     vaultPresent: Boolean,
     onAddKey: () -> Unit,
 ) {
-    OutlinedTextField(
-        value = name, onValueChange = onName,
-        label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-    )
+    var showColour by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = name, onValueChange = onName,
+            label = { Text("Name") }, modifier = Modifier.weight(1f), singleLine = true,
+        )
+        ColourDot(selected = color, onClick = { showColour = true })
+    }
+    if (showColour) {
+        AlertDialog(
+            onDismissRequest = { showColour = false },
+            title = { Text("Profile colour") },
+            text = {
+                ColourPicker(
+                    selected = color,
+                    onSelect = { onColor(it); showColour = false },
+                )
+            },
+            confirmButton = { TextButton(onClick = { showColour = false }) { Text("Done") } },
+        )
+    }
     GroupDropdown(groups = groups, selected = groupId, onSelect = onGroup, onNewGroup = onNewGroup)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
@@ -680,11 +715,100 @@ private fun GeneralTab(
     }
 }
 
+/**
+ * Compact identity-color selector: a dot beside the Name field. The swatch
+ * grid lives in a dialog so the General tab stays short.
+ */
+@Composable
+private fun ColourDot(selected: String, onClick: () -> Unit) {
+    val argb = profileColorArgb(selected)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(
+                if (argb != null) Color(argb)
+                else MaterialTheme.colorScheme.surfaceVariant,
+            )
+            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            .clickable(onClick = onClick),
+    ) {
+        if (argb == null) {
+            Icon(
+                Icons.Filled.FormatColorReset,
+                contentDescription = "Pick profile color",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Identity color picker (profile-level `color`, desktop tab-colorbar
+ * parity — not the terminal color scheme, which lives in the Colours tab).
+ * Preset swatches + Default; a stored custom hex (e.g. from desktop) shows
+ * as an extra selected swatch instead of being hidden.
+ */
+@Composable
+private fun ColourPicker(selected: String, onSelect: (String) -> Unit) {
+    val swatches = remember(selected) {
+        if (selected.isNotBlank() && !PROFILE_COLORS.contains(selected)) {
+            listOf(selected) + PROFILE_COLORS
+        } else PROFILE_COLORS
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        (listOf("") + swatches).chunked(7).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { hex -> ColourSwatch(hex = hex, isSelected = hex == selected, onSelect = onSelect) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColourSwatch(hex: String, isSelected: Boolean, onSelect: (String) -> Unit) {
+    val ring = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+    if (hex.isBlank()) {
+        // Default: no color stored.
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(2.dp, ring, CircleShape)
+                .clickable { onSelect("") },
+        ) {
+            Icon(
+                Icons.Filled.FormatColorReset,
+                contentDescription = "Default color",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    val argb = profileColorArgb(hex) ?: return
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color(argb))
+            .border(2.dp, ring, CircleShape)
+            .clickable { onSelect(hex) },
+    )
+}
+
 @Composable
 private fun PortsTab(forwards: List<ForwardedPort>, onChange: (List<ForwardedPort>) -> Unit) {
     Text("Port forwarding", style = MaterialTheme.typography.titleMedium)
     Text(
         "Local/Remote listen on interface:port and reach target:port. Dynamic is a SOCKS proxy (target hidden).",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        "Stored for desktop — forwarding is not opened on mobile yet.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -768,7 +892,6 @@ private fun AdvancedTab(
     agentForward: Boolean, onAgentForward: (Boolean) -> Unit,
     skipBanner: Boolean, onSkipBanner: (Boolean) -> Unit,
     reuseSession: Boolean, onReuseSession: (Boolean) -> Unit,
-    warnOnClose: Boolean, onWarnOnClose: (Boolean) -> Unit,
     keepaliveText: String, onKeepalive: (String) -> Unit,
     keepaliveMaxText: String, onKeepaliveMax: (String) -> Unit,
     readyTimeoutText: String, onReadyTimeout: (String) -> Unit,
@@ -778,7 +901,12 @@ private fun AdvancedTab(
     CheckRow("Forward SSH agent", agentForward, onAgentForward)
     CheckRow("Skip banner", skipBanner, onSkipBanner)
     CheckRow("Reuse session", reuseSession, onReuseSession)
-    CheckRow("Warn before closing", warnOnClose, onWarnOnClose)
+    Text(
+        "The four options above are stored for desktop and have no effect " +
+            "on mobile (no X server, no ssh-agent, no banner display, no multiplexing).",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     Text("Timeouts", style = MaterialTheme.typography.titleMedium)
     OutlinedTextField(
         value = keepaliveText, onValueChange = onKeepalive,
@@ -789,6 +917,11 @@ private fun AdvancedTab(
         value = keepaliveMaxText, onValueChange = onKeepaliveMax,
         label = { Text("Keepalive max misses (default 10)") },
         modifier = Modifier.fillMaxWidth(), singleLine = true,
+    )
+    Text(
+        "Mobile sends heartbeats on the interval above; max misses is stored for desktop.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     OutlinedTextField(
         value = readyTimeoutText, onValueChange = onReadyTimeout,

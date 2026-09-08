@@ -54,7 +54,7 @@ val SETTING_SECTIONS = listOf(
         Icons.Filled.Sync,
     ),
     SettingSection(
-        "ssh", "SSH", "Host key verification",
+        "ssh", "SSH", "Host key verification, close warning",
         Icons.Filled.VpnKey,
     ),
     SettingSection(

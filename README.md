@@ -17,16 +17,19 @@ technical design.
 - **Vault**: PBKDF2-HmacSHA512 + AES-256-CBC interop with desktop vaults;
   lazy unlock (passphrase asked only when a secret is actually needed);
   survives rotation via ViewModel; RAM-only, never written to disk.
-- **Profiles**: home list (search, groups, add button), tabbed editor —
-  General (connection-mode dropdown, Auto auth, new/existing groups),
-  Ports (forwarding), Advanced, Ciphers, Login scripts; Colours is a
-  scheduled placeholder. New profiles get desktop-shape ids
-  (`ssh:custom:<slug>:<uuid>`), fields at desktop defaults are omitted
-  from YAML, live RAW `config.yaml` viewer.
+- **Profiles**: home list (search, groups, add button, identity-colour
+  stripe), tabbed editor — General (connection-mode dropdown, Auto auth,
+  new/existing groups, colour picker), Ports, Advanced, Ciphers,
+  Login scripts; Colours stays desktop-managed (colour schemes). New
+  profiles get desktop-shape ids (`ssh:custom:<slug>:<uuid>`), fields at
+  desktop defaults are omitted from YAML, options that do nothing on
+  mobile are labeled desktop-only, live RAW `config.yaml` viewer.
 - **Terminal**: real PTY shell (sshj), VT100/xterm-subset emulator, colors,
   alt-buffer (vim/htop), **scrollback with drag-to-read + follow-bottom**,
   window-change on resize, TOFU host-key guard,
-  password + multi-key auth.
+  password + multi-key auth. Connect honors login scripts
+  (expect/regex/optional), keepalive interval, and custom ciphers;
+  warn-on-close follows Settings > SSH (per-profile override preserved).
 - **Settings > Terminal**: font size + scrollback buffer
   (− number + stepper, tap to type, 0 = off, max 100.000), applies live.
 - **Termux-like input**: docked extra-keys bar
@@ -58,7 +61,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 75 unit tests (vault, sync, emulator, profiles)
+./gradlew :app:testDebugUnitTest   # 92 unit tests (vault, sync, emulator, profiles, connect opts)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -69,22 +72,32 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 75/75 green)
+## Parity guarantees (tested, 92/92 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
-  merged from the correct side, opaque unknown keys).
+  merged from the correct side, opaque unknown keys, profile `color`/`icon`
+  preserved).
 - Secrets: `ssh:password{user,host,port}`, `ssh:key-passphrase{hash}`,
   `file{id}=base64(PEM)` ↔ `vault://id`; blob-always-container rule.
 - Emulator: SGR/wrap/cursor/erase/scroll/margins/alt-buffer + wrap regression.
+- Connect opts: login scripts (unconditional/expect/regex/optional/unescape),
+  keepalive interval, cipher/kex/mac/hostkey/compression filtered to
+  sshj-supported (desktop `supportedAlgorithms`-filter parity),
+  `warnOnClose` = profile override ?? global `ssh.warnOnClose`.
 
 ## Roadmap (toward full `config.yaml` parity, min. tabby-android level)
 
-- Text selection with start/end drag handles + Copy/Paste bar.
-- Profile connect parity: `connectionMode` (proxyCommand/jumpHost/SOCKS/HTTP)
-  is saved to YAML but connect is direct-only today; keepalive, terminal
-  type, colour schemes still unwritten.
-- Keep the live PTY across rotation; search-in-buffer.
+- **Multi-session (todo)**: session registry in `AppViewModel` (PTYs survive
+  nav + rotation — also fixes rotation-PTY), session picker replacing
+  disconnect-on-back, profile-colour strip as tab colour, per-session
+  warn-on-close, cap on concurrent sessions. Prerequisite for anything
+  multiplexing-shaped.
+- **Port forwarding**: open Local/Remote/Dynamic at connect (saved today).
+- **Connect**: `connectionMode` (proxyCommand/jumpHost/SOCKS/HTTP) stays
+  direct-only (saved for desktop); terminal type + colour schemes stay
+  desktop-managed.
+- Text selection with start/end drag handles + Copy/Paste bar; search-in-buffer.
 
 ## Layout
 

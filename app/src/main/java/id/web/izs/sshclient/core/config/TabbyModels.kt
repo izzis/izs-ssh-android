@@ -160,6 +160,8 @@ data class ProfileGroup(
 data class SshGlobals(
     val knownHosts: List<String> = emptyList(),
     val verifyHostKeys: Boolean = true,
+    /** Desktop config.ts default false; per-profile options.warnOnClose overrides. */
+    val warnOnClose: Boolean = false,
 )
 
 data class ConfigSync(

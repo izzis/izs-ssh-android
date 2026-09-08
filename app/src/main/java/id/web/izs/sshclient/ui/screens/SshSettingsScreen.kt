@@ -28,9 +28,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * Settings > SSH (desktop SSH-tab parity, mobile-relevant subset).
- * Only verifyHostKeys is wired: WinSCP/agent options are Windows-only on
- * desktop and meaningless on Android. Plaintext configs only — on encrypted
- * stores the ssh section lives inside the vault blob (edited on desktop).
+ * verifyHostKeys + warnOnClose are wired: WinSCP/agent options are
+ * Windows-only on desktop and meaningless on Android. Plaintext configs
+ * only — on encrypted stores the ssh section lives inside the vault blob
+ * (edited on desktop).
  */
 @Composable
 fun SshSettingsScreen(
@@ -41,6 +42,9 @@ fun SshSettingsScreen(
     val encrypted = state.loaded?.domain?.encrypted == true
     var verify by remember(state.loaded) {
         mutableStateOf(state.loaded?.domain?.ssh?.verifyHostKeys ?: true)
+    }
+    var warn by remember(state.loaded) {
+        mutableStateOf(state.loaded?.domain?.ssh?.warnOnClose ?: false)
     }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -70,6 +74,22 @@ fun SshSettingsScreen(
                 )
             }
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = warn,
+                onCheckedChange = { warn = it },
+                enabled = !encrypted && !busy,
+            )
+            Column {
+                Text("Warn when closing active connections")
+                Text(
+                    "Ask before disconnecting a live session. A profile with " +
+                        "its own warnOnClose set still wins (desktop parity).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (busy) CircularProgressIndicator()
@@ -87,6 +107,7 @@ fun SshSettingsScreen(
                                     (raw[RawConfigStore.KEY_SSH] as? Map<String, Any?>) ?: emptyMap(),
                                 )
                                 ssh["verifyHostKeys"] = verify
+                                ssh["warnOnClose"] = warn
                                 raw[RawConfigStore.KEY_SSH] = ssh
                             }
                         }

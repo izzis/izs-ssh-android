@@ -2,7 +2,9 @@ package id.web.izs.sshclient
 
 import id.web.izs.sshclient.core.config.ForwardedPort
 import id.web.izs.sshclient.core.config.LoginScript
+import id.web.izs.sshclient.core.config.normalizeProfileColor
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.core.config.SshAlgorithms
 import id.web.izs.sshclient.core.config.SshDefaults
 import id.web.izs.sshclient.core.config.SshOptions
@@ -219,8 +221,7 @@ class ProfileFieldsTest {
     }
 
     @Test
-    fun `new profile map on an empty base carries id type name`() {
-        val p = SshProfile(id = "ssh:custom:x", name = "fresh", options = SshOptions(host = "h"))
+    fun `new profile map on an empty base carries id type name`() {        val p = SshProfile(id = "ssh:custom:x", name = "fresh", options = SshOptions(host = "h"))
         val out = RawConfigStore.updateProfileMap(emptyMap(), p, null, null, emptyList())
         assertEquals("ssh:custom:x", out["id"])
         assertEquals("ssh", out["type"])
@@ -229,5 +230,62 @@ class ProfileFieldsTest {
         val opts = out["options"] as Map<String, Any?>
         assertEquals("h", opts["host"])
         assertFalse(opts.containsKey("group"))
+    }
+
+    @Test
+    fun `updateProfileMap writes color normalized and clears on blank`() {
+        val p = SshProfile(
+            id = "ssh:1", name = "n", color = "  #FF0000 ",
+            options = SshOptions(host = "h"),
+        )
+        val written = RawConfigStore.updateProfileMap(emptyMap(), p, null, null, emptyList())
+        assertEquals("#ff0000", written["color"])
+
+        val existing = linkedMapOf<String, Any?>("color" to "#ff0000")
+        val cleared = RawConfigStore.updateProfileMap(
+            existing, p.copy(color = null), null, null, emptyList(),
+        )
+        assertFalse(cleared.containsKey("color"))
+    }
+
+    @Test
+    fun `updateProfileMap preserves icon without a picker`() {
+        val existing = linkedMapOf<String, Any?>("icon" to "fas fa-server")
+        val kept = RawConfigStore.updateProfileMap(
+            existing,
+            SshProfile(id = "ssh:1", name = "n", options = SshOptions(host = "h")),
+            null, null, emptyList(),
+        )
+        assertEquals("fas fa-server", kept["icon"])
+    }
+
+    @Test
+    fun `normalizeProfileColor accepts hex only`() {
+        assertEquals("#ffffff", normalizeProfileColor("#FFF"))
+        assertEquals("#ff0000", normalizeProfileColor("  #FF0000 "))
+        assertEquals("#80123456", normalizeProfileColor("#80123456"))
+        assertNull(normalizeProfileColor(null))
+        assertNull(normalizeProfileColor(""))
+        assertNull(normalizeProfileColor("red"))
+        assertNull(normalizeProfileColor("#gggggg"))
+        assertNull(normalizeProfileColor("#12345"))
+    }
+
+    @Test
+    fun `profileColorArgb parses opaque and alpha hex`() {
+        assertEquals(0xFFFF0000.toInt(), profileColorArgb("#ff0000"))
+        assertEquals(0x80123456.toInt(), profileColorArgb("#80123456"))
+        assertNull(profileColorArgb("red"))
+        assertNull(profileColorArgb(null))
+    }
+
+    @Test
+    fun `global ssh warnOnClose parses with desktop false default`() {
+        val bare = RawConfigStore.toDomain(profileMap(linkedMapOf("host" to "h")))
+        assertFalse(bare.ssh.warnOnClose)
+        val doc = profileMap(linkedMapOf("host" to "h")).apply {
+            put("ssh", linkedMapOf("warnOnClose" to true))
+        }
+        assertTrue(RawConfigStore.toDomain(doc).ssh.warnOnClose)
     }
 }

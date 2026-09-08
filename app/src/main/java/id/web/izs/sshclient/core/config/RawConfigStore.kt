@@ -195,6 +195,7 @@ object RawConfigStore {
         val ssh = SshGlobals(
             knownHosts = (sshMap?.get("knownHosts") as? List<*>)?.map { it.toString() } ?: emptyList(),
             verifyHostKeys = sshMap?.get("verifyHostKeys") as? Boolean ?: true,
+            warnOnClose = sshMap?.get("warnOnClose") as? Boolean ?: false,
         )
         val csMap = doc[KEY_CONFIG_SYNC] as? Map<String, Any?>
         val parts = csMap?.get("parts") as? Map<String, Any?>
@@ -386,6 +387,13 @@ object RawConfigStore {
         if (groupWrite != null) {
             if (groupWrite.isEmpty()) out.remove("group") else out["group"] = groupWrite
         }
+        // Profile identity color is written from the domain object (blank
+        // clears the key, defaults-omitted parity). Icon has no mobile
+        // picker, so the raw copy above preserves the stored value; an
+        // explicit domain value still wins (create path).
+        val color = normalizeProfileColor(p.color)
+        if (color != null) out["color"] = color else out.remove("color")
+        if (p.icon != null) out["icon"] = p.icon
         val o = p.options
         val opts = LinkedHashMap<String, Any?>((existing["options"] as? Map<String, Any?>) ?: emptyMap())
         opts["host"] = o.host

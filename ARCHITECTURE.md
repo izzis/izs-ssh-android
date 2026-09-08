@@ -38,26 +38,31 @@ app/src/main/java/id/web/izs/sshclient/
     screens/
       ScreenHeader.kt           Shared sub-screen top bar (back arrow + title)
       ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only)
-      ProfileListScreen.kt        Home: logo + name header, count, add button, groups + search
-      ProfileEditScreen.kt        Tabbed editor (General/Ports/Advanced/Ciphers/
-                                  Colours-placeholder/Login), new profile + new group
-      TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode
+      ProfileListScreen.kt        Home: logo + name header, count, add button, groups + search,
+                                  identity-colour stripe per profile row
+      ProfileEditScreen.kt        Tabbed editor (General + colour picker / Ports / Advanced /
+                                  Ciphers / Colours-scheme-placeholder / Login), desktop-only
+                                  options labeled, new profile + new group
+      TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
+                                  warn-on-close confirm dialog
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
       TerminalSettingsScreen.kt   Font size + scrollback buffer (applies live)
       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`)
       VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
       SetVaultPassphraseDialog.kt Set/change vault passphrase
       VaultSettingsScreen.kt      Vault management (set/change/erase, encrypt-config toggle)
-      SshSettingsScreen.kt        SSH defaults (kept separate from desktop format)
+      SshSettingsScreen.kt        SSH defaults: host-key verification + warn-on-close
+                                  (desktop Settings > SSH parity; plaintext only)
       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
       CrashReportScreen.kt        Shows last crash trace with copy button
       PlaceholderSettingScreen.kt "Scheduled" stubs (colours, proxy connect, etc.)
   core/
     config/
-      TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options
+      TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options, SshGlobals
       SshDefaults.kt      Transient defaults applied on the domain view only
       ConfigMigrator.kt   Legacy migrations (name-based groups -> ids, jump hosts)
       RawConfigStore.kt   RAW YAML document ops (update/delete profile, secrets JSON)
+      ProfileColor.kt     Identity-color palette + hex normalize/parse (pure JVM)
     vault/
       VaultCrypto.kt      PBKDF2-HmacSHA512 x100k/salt8 -> AES-256-CBC/iv16 (pure JVM)
       VaultState.kt       Pure resolve/unlock-required logic + secret CRUD ops
@@ -68,7 +73,11 @@ app/src/main/java/id/web/izs/sshclient/
                           decrypt/update/delete with RAW preservation
     ssh/
       SshConnector.kt     sshj sessions, exec + shell channels, TOFU host-key guard,
-                          multi-key auth, PTY window-change
+                          multi-key auth, PTY window-change, keepalive, login scripts
+      LoginScriptRunner.kt Ordered expect/send automation (desktop LoginScriptProcessor
+                          parity, pure JVM)
+      SshAlgorithmFactories.kt Profile cipher/kex/mac/hostkey/compression wire names ->
+                          sshj factories, unknown skipped (pure JVM + Config build)
     term/
       TerminalEmulator.kt Pure-Kotlin VT100/xterm subset (SGR, cursor, erase,
                           scroll/margins, wrap, alt-buffer, ?25, ?1049) +
@@ -79,7 +88,7 @@ app/src/main/java/id/web/izs/sshclient/
                           known_hosts (TOFU), terminal prefs (font size)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (11 files, 75 tests — §8)
+app/src/test/... (13 files, 92 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -170,6 +179,14 @@ resize: measured grid -> settle-debounced (150ms) emulator.resize +
   are Column siblings that take real layout space (tabby-android `kb-spacer`
   pattern), so the grid can never slide behind the bars — no reserve math.
   6dp side padding keeps edge columns clear of screen protectors.
+- **Connect honors the profile:** login scripts (`LoginScriptRunner`:
+  unconditional at session-ready, then per-chunk expect/regex/optional
+  matching, desktop quirk-for-quirk), keepalive interval as
+  `KEEP_ALIVE` (SSH_MSG_IGNORE) heartbeats (`countMax` stored-only, no sshj
+  equivalent), custom algorithms via per-connection `DefaultConfig` (desktop
+  defaults take the plain `SSHClient()` path — zero behavior change).
+  `warnOnClose` = per-profile override ?? global `ssh.warnOnClose`
+  (default off); the confirm dialog guards live sessions only.
 
 ## 6. Keyboard dock ("lompat", not slide)
 
@@ -208,6 +225,12 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   header matches it (themed surface) with a status dot on the name row —
   green = connected, amber = connecting, red = disconnected, tap to
   disconnect — and full-width `user@host:port` below.
+- Profile identity color: dot selector beside Name in the General tab
+  (presets + Default; custom desktop hex shows as an extra swatch), stripe
+  on list rows (absent without a stored color). Terminal scheme stays in
+  the Colours tab as a desktop-managed placeholder. Options with no mobile
+  effect (forwarding, x11/agent/banner/reuse, non-direct modes) carry a
+  desktop-only note in the editor instead of failing silently.
 - Extra-keys rows: `ESC / - HOME UP END PGUP` and
   `TAB CTRL ALT LEFT DOWN RIGHT PGDN`; special keys bypass stickies via
   `sendSpecial`. Font size pref `terminal.fontSp` (8–24sp, default 14).
@@ -217,7 +240,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 75 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 92 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -230,7 +253,9 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `VaultStateTest` | pure resolve + `unlockRequired` rules |
 | `TerminalEmulatorTest` | VT100 ops + pending-wrap regression + scrollback cap/trim/alt |
 | `TerminalInputTest` | sticky CTRL/ALT mapping |
-| `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers |
+| `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers, color/icon round-trip, global warnOnClose |
+| `LoginScriptRunnerTest` | unconditional/expect/regex/optional/break/unescape parity |
+| `SshAlgorithmFactoriesTest` | defaults resolve (known skips), order, null-on-defaults, per-category fallback |
 | `SshCryptoProviderTest` | BC provider registration (X25519) |
 
 ## 9. Build & diagnostics
@@ -248,16 +273,15 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 10. Roadmap (missing vs Tabby config.yaml / tabby-android)
 
-- **Text selection with handles:** long-press -> start/end drag handles +
-  floating Copy/Paste bar (tabby-android pattern), replacing screen-copy.
-- **Full profile editor parity:** every `config.yaml` key editable and
-  honored (advanced SSH opts, keepalive, ciphers, port forwarding,
-  proxy/jumpHost, terminal type) — DONE for editing (tabs General / Ports /
-  Advanced / Ciphers / Colours-placeholder / Login scripts, defaults omitted
-  from YAML like desktop ConfigProxy); honoring at connect time
-  (jumpHost/proxy/multiplex) is still a "scheduled" stub.
+- **Multi-session (todo — prerequisite for anything multiplexing-shaped):**
+  session registry in `AppViewModel` (PTYs survive nav + rotation, which
+  also fixes the rotation-PTY item below); session picker replacing
+  disconnect-on-back; profile-colour strip as tab colour; per-session
+  warn-on-close; cap on concurrent sessions for weak phones.
+- **Port forwarding:** open Local/Remote/Dynamic at connect (saved today).
 - **jumpHost / proxyCommand / SOCKS-HTTP:** saved to YAML via the
   `connectionMode` dropdown (other-mode fields nulled on save, desktop
   priority), but connect is direct-only — a "scheduled" stub.
-- **Rotation keeping the live PTY** (session is screen-scoped today).
+- **Text selection with handles:** long-press -> start/end drag handles +
+  floating Copy/Paste bar (tabby-android pattern), replacing screen-copy.
 - Multi-window / font-choice polish, search-in-buffer.

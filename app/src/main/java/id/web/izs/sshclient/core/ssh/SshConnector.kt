@@ -3,8 +3,10 @@ package id.web.izs.sshclient.core.ssh
 import id.web.izs.sshclient.core.config.SshProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
@@ -19,12 +21,15 @@ import kotlin.concurrent.thread
 /**
  * Koneksi SSH v1 via sshj 0.40.0 (aktif maintained, ed25519 + KEX modern).
  *
- * v1 scope (per user focus: group/name/host/port/vault password+sshkey):
- * - Direct connect + password / publicKey auth (multi-key, tried one by one)
- *   / keyboard-interactive (forwarded as password when the server asks for it)
+ * Honored profile options: host/port/user/auth (+vault secrets), readyTimeout,
+ * keepaliveInterval (SSH_MSG_IGNORE heartbeats; countMax stored-only),
+ * login scripts (LoginScriptRunner), custom algorithms (per-connection sshj
+ * config; desktop defaults take the plain path).
  * - agent auth: not supported on Android (no ssh-agent) -> clear message
  * - jumpHost / proxyCommand / socks-http proxy: parsed + preserved,
  *   but v1 connect shows a "scheduled for v2" message (never silently ignored)
+ * - forwardedPorts / x11 / skipBanner / reuseSession: saved for desktop,
+ *   not applied on mobile yet
  * - Host-key verification: in-app TOFU guard (accept + record new keys,
  *   reject changed keys). The app key list is stored SEPARATELY from the
  *   desktop `ssh.knownHosts` so the desktop format is never polluted on upload.
@@ -100,7 +105,13 @@ class SshConnector {
         if (o.host.isBlank()) throw IllegalStateException("Empty host")
         val port = if (o.port > 0) o.port else 22
         val user = o.user.ifBlank { "root" }
-        val client = SSHClient()
+        // Ciphers tab: custom algorithm lists ride a per-connection config;
+        // desktop defaults take the plain path (zero behavior change).
+        val client = SshAlgorithmFactories.configFor(o.algorithms)?.let { SSHClient(it) } ?: SSHClient()
+        // Advanced tab: keepalive heartbeats (SSH_MSG_IGNORE, universally
+        // safe). The desktop countMax has no sshj equivalent and stays
+        // stored-only; the interval is honored (ms -> s, min 1).
+        client.transport.config.keepAliveProvider = KeepAliveProvider.KEEP_ALIVE
         try {
             withTimeout(timeoutMs.coerceIn(5_000, 120_000)) {
                 ensureProvider()
@@ -135,6 +146,13 @@ class SshConnector {
                     }
                     throw IllegalStateException("Auth failed: $lastErr")
                 }
+                try {
+                    val keepAlive = client.connection.keepAlive
+                    keepAlive.keepAliveInterval = (o.keepaliveInterval / 1000).toInt().coerceAtLeast(1)
+                    if (!keepAlive.isAlive) keepAlive.start()
+                } catch (_: Exception) {
+                    // Best-effort: a dead keepalive must never fail the session.
+                }
                 val session = client.startSession()
                 try {
                     // xterm-256color (not dumb): fullscreen apps gate colors
@@ -143,6 +161,10 @@ class SshConnector {
                     val shell = session.startShell()
                     val flow = MutableSharedFlow<String>(extraBufferCapacity = 512)
                     val sess = ShellSession(client, session, shell, flow)
+                    // Login tab: unconditional scripts at session ready, then
+                    // per-chunk expect/send automation (LoginScriptRunner).
+                    val scriptRunner = o.scripts.takeIf { it.isNotEmpty() }?.let { LoginScriptRunner(it) }
+                    scriptRunner?.runUnconditional()?.forEach { sess.send(it) }
                     thread(isDaemon = true, name = "ssh-shell-reader") {
                         try {
                             // Char-based (not byte chunks): multi-byte UTF-8
@@ -152,7 +174,14 @@ class SshConnector {
                             while (true) {
                                 val n = reader.read(buf)
                                 if (n < 0) break
-                                if (n > 0) flow.tryEmit(String(buf, 0, n))
+                                if (n > 0) {
+                                    val chunk = String(buf, 0, n)
+                                    flow.tryEmit(chunk)
+                                    // The runner is touched only on this
+                                    // thread; sends block briefly via
+                                    // runBlocking (rare and tiny).
+                                    scriptRunner?.onOutput(chunk)?.forEach { runBlocking { sess.send(it) } }
+                                }
                             }
                         } catch (_: Exception) {
                             // Session closed -> pump ends.

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -130,6 +131,7 @@ fun TerminalScreen(
     var altSticky by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
     var showUnlock by remember { mutableStateOf(false) }
+    var showCloseConfirm by remember { mutableStateOf(false) }
     var pendingConnect by remember { mutableStateOf(false) }
     // Guards the double-fire race (effect refires on unlock while a connect
     // is already in flight) that used to open two sessions and trip the
@@ -250,6 +252,20 @@ fun TerminalScreen(
         onBack()
     }
 
+    fun requestClose() {
+        // Desktop parity (sshTab): per-profile warnOnClose wins, otherwise
+        // the global Settings > SSH toggle (default off). Guards an ACTIVE
+        // session only — failed/connecting/closed states close at once.
+        val warn = profile?.options?.warnOnClose
+            ?: state.loaded?.domain?.ssh?.warnOnClose
+            ?: false
+        if (warn && status == "connected") {
+            showCloseConfirm = true
+        } else {
+            goBack()
+        }
+    }
+
     LaunchedEffect(profileId, state.loaded) {
         if (profile != null && session == null && failed == null && !connecting) {
             if (locked) {
@@ -263,7 +279,7 @@ fun TerminalScreen(
     DisposableEffect(profileId) {
         onDispose { session?.close() }
     }
-    BackHandler { goBack() }
+    BackHandler { requestClose() }
 
     if (profile == null) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -284,7 +300,7 @@ fun TerminalScreen(
                 .background(MaterialTheme.colorScheme.surface)
                 .padding(end = 12.dp, top = 4.dp, bottom = 4.dp),
         ) {
-            IconButton(onClick = { goBack() }) {
+            IconButton(onClick = { requestClose() }) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
             }
             // Status dot sits on the NAME row so user@host below gets the
@@ -307,7 +323,7 @@ fun TerminalScreen(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier.size(32.dp).clickable(
-                            onClick = { goBack() },
+                            onClick = { requestClose() },
                             onClickLabel = "Disconnect",
                         ),
                     ) {
@@ -628,6 +644,22 @@ fun TerminalScreen(
                 modifier = Modifier.size(1.dp).focusRequester(focusRequester),
             )
         }
+    }
+
+    if (showCloseConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCloseConfirm = false },
+            title = { Text("Disconnect?") },
+            text = { Text("“${profile?.name}” is still connected.") },
+            confirmButton = {
+                TextButton(
+                    onClick = { showCloseConfirm = false; goBack() },
+                ) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloseConfirm = false }) { Text("Cancel") }
+            },
+        )
     }
 
     if (showUnlock) {
