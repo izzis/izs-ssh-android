@@ -111,14 +111,23 @@ class SshConnector {
 
         fun close() {
             if (!closeState.compareAndSet(false, true)) return
+            if (onClosed != null) {
+                // Shared transport (desktop SSHShellSession.destroy parity,
+                // shell.ts:92-99): NEVER close the channel here — some servers
+                // tear the whole connection down on channel close, killing
+                // sibling tabs. Just release the pool ref; the last release
+                // disconnects the transport and the server cleans up. The
+                // abandoned remote shell lingers until then, exactly like
+                // desktop (whose kill() is a no-op and never closes either).
+                try { onClosed?.invoke() } catch (_: Exception) { }
+                return
+            }
+            // Solo: nothing is shared — full teardown.
             try { session.close() } catch (_: Exception) { }
             // The reader pump may already have fired onDied just before this;
             // the owner guards via registry lookup, so both orders are safe.
-            try { onClosed?.invoke() } catch (_: Exception) { }
-            if (onClosed == null) {
-                try { client.disconnect() } catch (_: Exception) { }
-                try { client.close() } catch (_: Exception) { }
-            }
+            try { client.disconnect() } catch (_: Exception) { }
+            try { client.close() } catch (_: Exception) { }
         }
 
         /** Reader-pump callback: unexpected end (drop or server-side end). */

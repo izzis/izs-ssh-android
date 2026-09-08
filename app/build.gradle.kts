@@ -90,4 +90,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockwebserver3)
+    // Test-only: local SSH server for the multiplex regression tests
+    // (SshMultiplexTest). Never ships in the APK (testImplementation).
+    testImplementation(libs.mina.sshd)
 }

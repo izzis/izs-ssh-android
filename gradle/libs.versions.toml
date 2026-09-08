@@ -16,6 +16,7 @@ slf4j = "2.0.17"
 bouncycastle = "1.85.2"
 bouncycastlePkix = "1.85"
 junit = "4.13.2"
+minaSshd = "2.19.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -42,6 +43,7 @@ slf4j-nop = { group = "org.slf4j", name = "slf4j-nop", version.ref = "slf4j" }
 bcprov = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 bcpkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bouncycastlePkix" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+mina-sshd = { group = "org.apache.sshd", name = "sshd-core", version.ref = "minaSshd" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 
 [plugins]

@@ -315,6 +315,10 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   profile tap opens a new tab while `reuseSession=true` (default) shares one
   TCP transport per `host:port:user:proxy…` key (desktop multiplexer parity —
   extra tabs skip re-auth, one reader pump per channel, refcounted teardown);
+  closing a tab on a shared transport releases the pool ref WITHOUT sending
+  channel-close (desktop `shell.ts` destroy parity — some servers kill the
+  whole connection on channel close; the abandoned remote shell lingers until
+  the last tab's disconnect, exactly like desktop);
   the home list shows an Active-sessions section (green/amber/red dot)
   replacing disconnect-on-back; per-session warn-on-close; cap on concurrent
   sessions (default 5, hard max 8, tunable in Settings > Terminal, now
