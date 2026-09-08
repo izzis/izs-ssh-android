@@ -35,8 +35,8 @@ import id.web.izs.sshclient.ui.AppState
  * opening one sub-screen per section.
  *
  * Included now: Config Sync (full cloud management), SSH, Vault (simplified),
- * Terminal (font, scrollback, extra keys), Config file. Appearance / Color scheme / Window are placeholders for the
- * next update. Hotkeys and Plugins are intentionally skipped on mobile
+ * Terminal (font, scrollback, extra keys), Window (tab location), Config file.
+ * Appearance / Color scheme are placeholders for the next update. Hotkeys and Plugins are intentionally skipped on mobile
  * (no hardware keyboard assumption, no plugin runtime on Android), and
  * Profiles & Connections lives on the home page.
  */
@@ -78,8 +78,8 @@ val SETTING_SECTIONS = listOf(
         Icons.Filled.Palette, comingSoon = true,
     ),
     SettingSection(
-        "window", "Window", "Next update",
-        Icons.Filled.AspectRatio, comingSoon = true,
+        "window", "Window", "Tab location: synced config or this device",
+        Icons.Filled.AspectRatio,
     ),
 )
 

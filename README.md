@@ -36,7 +36,20 @@ technical design.
   (− number + stepper, tap to type, 0 = off, max 100.000), applies live;
   extra-keys layout editor (labels, ordered step macros with per-step
   byte preview, popup menus, presets, clipboard import/export) with a pixel-identical live preview.
+- **Multi-session tabs**: every profile tap opens a new tab (desktop
+  parity); `reuseSession` shares one TCP transport per tab group. Tab chrome
+  follows the desktop `appearance.tabsLocation` key — `top`/`bottom` strip
+  (status dot + profile name + activity dot + ×), `left`/`right` side drawer
+  (hamburger replaces Back, middle-fling opens it), absent key = no tabs
+  (profile-list UX). `+` opens a new connection, × honors `warnOnClose`,
+  Back always goes home, navigation stays shallow (no stack growth).
+- **Settings > Window**: tab-location source priority — *Synced config*
+  (the desktop YAML value wins; on encrypted configs Android ignores it but
+  still writes it for desktop) or *This device only* (a local pref, never
+  synced — desktop-top/phone-bottom splits without touching sync parts).
 - **Termux-like input**: docked extra-keys bar
+- **Recent profiles**: home quick-connect card (desktop `recentProfiles`
+  parity) sized by the desktop `terminal.showRecentProfiles` key (0 = off).
   (`ESC / - HOME ↑ END PGUP` / `TAB CTRL ALT ← ↓ → PGDN`),
   sticky CTRL/ALT, direct typing with raw keystrokes (Backspace=DEL,
   Enter=CR), command-box mode, adjustable font (8–24sp).
@@ -65,7 +78,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 133 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions)
+./gradlew :app:testDebugUnitTest   # 168 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -76,7 +89,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 133/133 green)
+## Parity guarantees (tested, 168/168 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
@@ -92,13 +105,16 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Roadmap (toward full `config.yaml` parity)
 
-- **Multi-session (done — v1)**: session registry in `SshSessionViewModel`
+- **Multi-session (done — v1, incl. tab chrome)**: session registry in `SshSessionViewModel`
   (PTYs survive nav + rotation — also fixes rotation-PTY), new tab per tap
   with `reuseSession` transport sharing (desktop multiplex parity),
   Active-sessions list on home replacing disconnect-on-back (Back keeps the
   session alive), per-session warn-on-close, cap on concurrent sessions
-  (default 5, max 8). Tab bar UI + profile-colour-as-tab-colour arrive
-  with Appearance.
+  (default 5, max 8). Tab strip (top/bottom) + side drawer (left/right) +
+  background-output activity dot driven by the desktop `appearance.tabsLocation`
+  key; shell presence is an observable `hasShell` flow (branching composition
+  on the plain `shell` field renders stale nulls — green dot + dead
+  Disconnected on a live session). Reorder/rename/pin stay v2.
 - **Port forwarding**: open Local/Remote/Dynamic at connect (saved today).
 - **Connect**: `connectionMode` (proxyCommand/jumpHost/SOCKS/HTTP) stays
   direct-only (saved for desktop); terminal type + colour schemes stay

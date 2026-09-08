@@ -168,6 +168,26 @@ class ConfigDisk(context: Context) {
             org.json.JSONArray(v).toString(),
         ).apply()
 
+    /**
+     * Tab-location source priority (Settings > Window). "follow" (default) =
+     * the synced `appearance.tabsLocation` YAML wins; "local" = this device's
+     * own [localTabLocation] wins and YAML is ignored for display. Local
+     * data, never synced to YAML (recentProfiles parity). The local mode is
+     * what makes encrypted configs painless: display no longer depends on
+     * the YAML value at all.
+     */
+    var tabSource: String
+        get() = prefs().getString(KEY_TAB_SOURCE, "follow")?.takeIf { it == "local" } ?: "follow"
+        set(v) = prefs().edit().putString(KEY_TAB_SOURCE, if (v == "local") "local" else "follow").apply()
+
+    /**
+     * This device's own tab location (raw YAML value, "" = Off). Only read
+     * when [tabSource] is "local". Anything unparseable resolves to OFF.
+     */
+    var localTabLocation: String
+        get() = prefs().getString(KEY_TAB_LOCATION, "") ?: ""
+        set(v) = prefs().edit().putString(KEY_TAB_LOCATION, v).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -186,6 +206,8 @@ class ConfigDisk(context: Context) {
         const val KEY_MACRO_STEP_DELAY_MS = "terminal.macroStepDelayMs"
         const val KEY_MAX_SESSIONS = "terminal.maxSessions"
         const val KEY_RECENT_PROFILES = "home.recentProfiles"
+        const val KEY_TAB_SOURCE = "window.tabSource"
+        const val KEY_TAB_LOCATION = "window.tabLocation"
         /** Hard ceiling for [maxSessions]: 8 sockets + histories is the most a phone should hold. */
         const val MAX_SESSIONS_HARD_MAX = 8
     }

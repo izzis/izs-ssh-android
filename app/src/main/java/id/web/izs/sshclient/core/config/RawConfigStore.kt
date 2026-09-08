@@ -25,6 +25,7 @@ object RawConfigStore {
     const val KEY_VAULT = "vault"
     const val KEY_ENCRYPTED = "encrypted"
     const val KEY_TERMINAL = "terminal"
+    const val KEY_APPEARANCE = "appearance"
 
     /**
      * Desktop default for `terminal.showRecentProfiles`
@@ -89,6 +90,34 @@ object RawConfigStore {
         )
         term["showRecentProfiles"] = v.coerceIn(0, MAX_SHOW_RECENT_PROFILES)
         doc[KEY_TERMINAL] = term
+    }
+
+    /**
+     * `appearance.tabsLocation` read WITHOUT desktop-default fallback.
+     * Desktop resolves absent → `top` (configDefaults.yaml); on the phone
+     * absent means OFF (the current list-based UX, no tab chrome) — a
+     * deliberate phone default, documented in ARCHITECTURE.md. Only an
+     * explicitly synced value turns the tab UI on. Returns the raw string
+     * (or null when absent/non-string); use [resolveTabLocation] to map it.
+     * Read from [SyncRepository.Loaded.store], like [showRecentProfiles].
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun tabsLocationRaw(doc: Map<String, Any?>): String? =
+        (doc[KEY_APPEARANCE] as? Map<String, Any?>)?.get("tabsLocation") as? String
+
+    /**
+     * Explicit user set (Window settings): writes the desktop-owned
+     * `appearance.tabsLocation` key. `null` (Off) REMOVES the key — and the
+     * `appearance` map itself when left empty — restoring absent = Off.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun setTabsLocation(doc: MutableMap<String, Any?>, v: TabLocation?) {
+        val app = LinkedHashMap(
+            (doc[KEY_APPEARANCE] as? Map<String, Any?>) ?: emptyMap(),
+        )
+        if (v == null || v == TabLocation.OFF) app.remove("tabsLocation")
+        else app["tabsLocation"] = v.yamlValue
+        if (app.isEmpty()) doc.remove(KEY_APPEARANCE) else doc[KEY_APPEARANCE] = app
     }
 
     /**

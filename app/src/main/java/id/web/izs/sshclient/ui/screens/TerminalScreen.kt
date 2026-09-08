@@ -16,8 +16,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,6 +29,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PowerOff
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
@@ -61,6 +65,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -78,6 +84,11 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import id.web.izs.sshclient.core.config.TabLocation
+import id.web.izs.sshclient.core.config.effectiveTabLocation
+import id.web.izs.sshclient.core.config.ignoreEncryptedValue
+import id.web.izs.sshclient.core.config.parseTabSource
+import id.web.izs.sshclient.core.config.resolveTabLocation
 import id.web.izs.sshclient.core.ssh.SshConnector
 import id.web.izs.sshclient.core.term.TerminalInput
 import id.web.izs.sshclient.core.term.KeyStep
@@ -85,10 +96,14 @@ import id.web.izs.sshclient.core.term.loadKeyLayout
 import id.web.izs.sshclient.core.term.stepBytes
 import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.SshSessionViewModel
+import id.web.izs.sshclient.ui.components.SessionTabDrawerContent
+import id.web.izs.sshclient.ui.components.SessionTabStrip
+import id.web.izs.sshclient.ui.components.TabDrawerFrame
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 /**
  * A real interactive SSH shell: xterm-256color PTY + VT100 emulator grid.
@@ -108,6 +123,9 @@ fun TerminalScreen(
     sessionViewModel: SshSessionViewModel,
     sessionId: String,
     onBack: () -> Unit,
+    onOpenSession: (String) -> Unit = {},
+    onNewTab: () -> Unit = {},
+    onCloseTab: (String) -> Unit = {},
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -127,6 +145,40 @@ fun TerminalScreen(
     val failed by handle.failed.collectAsState()
     val hostKeyPrompt by handle.hostKeyPrompt.collectAsState()
     val emuVersion by handle.version.collectAsState()
+    // Shell presence as OBSERVABLE state: branching on the plain
+    // `handle.shell` field subscribes to nothing, so the branch group can
+    // keep evaluating a stale null forever (green dot + Disconnected row +
+    // dead Reconnect on a perfectly live session). hasShell emits on every
+    // assignment, forcing a fresh read.
+    val hasShell by handle.hasShell.collectAsState()
+    // Tab chrome (desktop appearance.tabsLocation parity): absent key (or an
+    // encrypted config, which Android ignores) = OFF = no tab UI at all —
+    // unless Settings > Window says this device has its own setting, which
+    // wins over YAML. Read every composition (cheap pref reads): returning
+    // from Settings must apply without reopening the session.
+    val tabLoc = effectiveTabLocation(
+        parseTabSource(state.disk.tabSource),
+        resolveTabLocation(state.disk.localTabLocation.ifBlank { null }),
+        ignoreEncryptedValue(
+            state.loaded?.domain?.encrypted == true,
+            state.loaded?.unlockRequired == true,
+        ),
+        state.loaded?.store ?: emptyMap(),
+    )
+    // Registry read subscribes this scope: strip/drawer follow open/close.
+    val tabs = sessionViewModel.ordered()
+    val liveProfiles = remember(state.loaded) { state.displayProfiles() }
+    fun tabTitleOf(h: id.web.izs.sshclient.ui.SshSessionHandle): String =
+        liveProfiles.find { it.id == h.profileId }?.name ?: h.profileSnapshot.name
+    var closeTarget by remember { mutableStateOf<String?>(null) }
+    // Custom side drawer (not M3): a plain boolean, no direction hacks.
+    // Strip scroll is hoisted to the VM (see tabStripScrollPx): each tab is
+    // its own destination, so a strip-local state would reset left on switch.
+    var drawerOpen by remember { mutableStateOf(false) }
+    val stripScroll = remember { ScrollState(sessionViewModel.tabStripScrollPx) }
+    LaunchedEffect(stripScroll.value) { sessionViewModel.tabStripScrollPx = stripScroll.value }
+    // This screen becoming visible = tab focused: selection + dot clear.
+    LaunchedEffect(sessionId) { sessionViewModel.select(sessionId) }
     val profile = remember(state.loaded, handle.profileId) {
         state.displayProfiles().find { it.id == handle.profileId } ?: handle.profileSnapshot
     }
@@ -140,9 +192,10 @@ fun TerminalScreen(
     // First fit per session is instant; later ones are settle-debounced
     // (see the refit below) so the keyboard animation never reflows.
     var sizedOnce by remember(sessionId) { mutableStateOf(false) }
-    // The live socket lives in the handle (rotation-safe). Read fresh each
-    // composition; [status] invalidates this scope on change.
-    val session = handle.shell
+    // The live socket lives in the handle (rotation-safe). Composition reads
+    // go through [hasShell] (observable); event handlers read handle.shell
+    // directly (fresh at event time). Never branch composition on the plain
+    // field — see hasShell above.
     var boxMode by remember { mutableStateOf(false) }
     var showKeys by remember { mutableStateOf(true) }
     var showMenu by remember { mutableStateOf(false) }
@@ -269,7 +322,7 @@ fun TerminalScreen(
      * The bar tap steals focus onto the button, so hand it straight back.
      */
     fun sendKeySteps(steps: List<KeyStep>) {
-        val s = session ?: return
+        val s = handle.shell ?: return
         val byteSteps = steps.map(::stepBytes).filter { it.isNotEmpty() }
         if (byteSteps.isEmpty()) return
         var submitted = false
@@ -308,17 +361,39 @@ fun TerminalScreen(
         onBack()
     }
 
-    fun requestDisconnect() {
+    /**
+     * [alwaysConfirm] is for the status dot: a 32dp invisible tap target
+     * next to the title is a mis-tap hazard, and an instant silent kill
+     * reads exactly like the phantom-Disconnected bug (green dot frozen +
+     * dead Reconnect). The dot always asks; the power button honors
+     * warnOnClose like desktop.
+     */
+    fun requestDisconnect(alwaysConfirm: Boolean = false) {
         // Desktop parity (sshTab): per-profile warnOnClose wins, otherwise
         // the global Settings > SSH toggle (default off). Guards an ACTIVE
         // session only — failed/connecting/closed states close at once.
         val warn = profile.options.warnOnClose
             ?: state.loaded?.domain?.ssh?.warnOnClose
             ?: false
-        if (warn && status == "connected") {
+        if (status == "connected" && (alwaysConfirm || warn)) {
             showCloseConfirm = true
         } else {
             doDisconnectAndBack()
+        }
+    }
+
+    /** Tab × : same warnOnClose gate as disconnect, then the caller closes. */
+    fun requestTabClose(sid: String) {
+        val target = tabs.find { it.sessionId == sid }
+        val live = target?.let { t -> liveProfiles.find { it.id == t.profileId } }
+        val warn = live?.options?.warnOnClose
+            ?: target?.profileSnapshot?.options?.warnOnClose
+            ?: state.loaded?.domain?.ssh?.warnOnClose
+            ?: false
+        if (warn && target?.isConnected == true) {
+            closeTarget = sid
+        } else {
+            onCloseTab(sid)
         }
     }
 
@@ -336,7 +411,35 @@ fun TerminalScreen(
     // PTY. Cleanup happens in SshSessionViewModel.onCleared() (process death)
     // or explicit disconnect above.
     BackHandler { onBack() }
+    // Drawer-open press closes the drawer first: registered after the
+    // generic handler, so it wins (LIFO) with home as the fallback.
+    if (tabLoc.isDrawer) {
+        BackHandler(enabled = drawerOpen) { drawerOpen = false }
+    }
 
+    // Side tab drawer (left/right): custom frame keeps the screen LTR — no
+    // whole-screen RTL mirror. Other modes render the Column directly.
+    TabDrawerFrame(
+        side = tabLoc,
+        open = drawerOpen && tabLoc.isDrawer,
+        onClose = { drawerOpen = false },
+        drawer = {
+            SessionTabDrawerContent(
+                sessions = tabs,
+                selectedId = sessionId,
+                titleOf = ::tabTitleOf,
+                onSelect = { sid ->
+                    drawerOpen = false
+                    if (sid != sessionId) onOpenSession(sid)
+                },
+                onCloseRequest = ::requestTabClose,
+                onNew = {
+                    drawerOpen = false
+                    onNewTab()
+                },
+            )
+        },
+    ) {
     // Stage stays full-bleed black, but the top bar now matches every other
     // page (themed surface, back arrow + title) — the slate strip is gone.
     // Back keeps the session alive; the status dot disconnects.
@@ -347,10 +450,17 @@ fun TerminalScreen(
                 .background(MaterialTheme.colorScheme.surface)
                 .padding(end = 12.dp, top = 4.dp, bottom = 4.dp),
         ) {
-            IconButton(onClick = { onBack() }) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Back (session stays alive)")
-            }
-            // Status dot sits on the NAME row so user@host below gets the
+            if (tabLoc.isDrawer) {
+                // Drawer mode: the arrow becomes the hamburger that opens
+                // the tab drawer on the YAML side. System Back still = home.
+                IconButton(onClick = { drawerOpen = true }) {
+                    Icon(Icons.Filled.Menu, contentDescription = "Open tabs")
+                }
+            } else {
+                IconButton(onClick = { onBack() }) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back (session stays alive)")
+                }
+            }            // Status dot sits on the NAME row so user@host below gets the
             // full width (green = connected, amber = connecting, red =
             // disconnected; tap to disconnect).
             Column(Modifier.weight(1f)) {
@@ -370,7 +480,7 @@ fun TerminalScreen(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier.size(32.dp).clickable(
-                            onClick = { requestDisconnect() },
+                            onClick = { requestDisconnect(alwaysConfirm = true) },
                             onClickLabel = "Disconnect",
                         ),
                     ) {
@@ -432,6 +542,18 @@ fun TerminalScreen(
                 }
             }
         }
+        // tabsLocation=top: strip under the header, above everything else.
+        if (tabLoc == TabLocation.TOP) {
+            SessionTabStrip(
+                sessions = tabs,
+                selectedId = sessionId,
+                titleOf = ::tabTitleOf,
+                onSelect = { if (it != sessionId) onOpenSession(it) },
+                onCloseRequest = ::requestTabClose,
+                onNew = onNewTab,
+                scroll = stripScroll,
+            )
+        }
         if (copiedMsg != null) {
             Text(
                 copiedMsg!!,
@@ -463,7 +585,7 @@ fun TerminalScreen(
                     }
                 }
             }
-        } else if (session == null && hostKeyPrompt == null) {
+        } else if (!hasShell && hostKeyPrompt == null) {
             if (status == "connecting…") {
                 // Loading row: live step text instead of a spinner (the user sees
                 // what is actually happening), Cancel pinned at the far right.
@@ -563,7 +685,47 @@ fun TerminalScreen(
         BoxWithConstraints(
             modifier = Modifier.weight(1f).fillMaxWidth()
                 .background(Color.Black)
-                .padding(bottom = with(dockDensity) { dockPx.toDp() }),
+                .padding(bottom = with(dockDensity) { dockPx.toDp() })
+                .pointerInput(tabLoc, drawerOpen) {
+                    // Middle-band fling opens the side drawer. NEVER consumes:
+                    // taps, scrollback scrolls and selection drags keep
+                    // working untouched. Only the middle 25%..75% counts, so
+                    // edge swipes stay the system's (Back). A fast horizontal
+                    // fling (not a slow scroll) in the drawer's opening
+                    // direction triggers it: rightward for LEFT, leftward
+                    // for RIGHT.
+                    if (!tabLoc.isDrawer || drawerOpen) return@pointerInput
+                    val rightward = tabLoc == TabLocation.LEFT
+                    val minX = size.width * 0.25f
+                    val maxX = size.width * 0.75f
+                    val vMin = with(density) { 500.dp.toPx() }
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (down.position.x < minX || down.position.x > maxX) return@awaitEachGesture
+                        val tracker = VelocityTracker()
+                        var totalX = 0f
+                        var totalY = 0f
+                        var up = false
+                        while (!up) {
+                            val ev = awaitPointerEvent()
+                            val c = ev.changes.firstOrNull { it.id == down.id }
+                            if (c == null || !c.pressed) {
+                                up = true
+                            } else {
+                                totalX += c.position.x - c.previousPosition.x
+                                totalY += c.position.y - c.previousPosition.y
+                                tracker.addPosition(c.uptimeMillis, c.position)
+                                if (ev.changes.all { !it.pressed }) up = true
+                            }
+                        }
+                        val v = try { tracker.calculateVelocity() } catch (_: Exception) {
+                            return@awaitEachGesture
+                        }
+                        val okDir = if (rightward) v.x > vMin && totalX > 0f
+                        else v.x < -vMin && totalX < 0f
+                        if (okDir && abs(totalX) > abs(totalY) * 1.5f) drawerOpen = true
+                    }
+                },
         ) {
             // Explicit tick read: the emulator mutates in place, so the tick
             // is what invalidates this scope (belt & suspenders next to key()).
@@ -629,7 +791,7 @@ fun TerminalScreen(
                         fontSp = fontSp,
                         cell = charW to lineH,
                         onTap = {
-                            if (!boxMode && session != null) {
+                            if (!boxMode && handle.shell != null) {
                                 focusRequester.requestFocus()
                                 keyboard?.show()
                             }
@@ -648,7 +810,7 @@ fun TerminalScreen(
                             // The Paste tap steals focus onto the button, so
                             // hand it straight back — otherwise typing and
                             // backspace need an extra terminal tap first.
-                            if (session != null) {
+                            if (handle.shell != null) {
                                 if (!boxMode) {
                                     mirrorExternalInput(text)
                                     focusRequester.requestFocus()
@@ -661,13 +823,27 @@ fun TerminalScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
+                // tabsLocation=bottom: strip between the grid and the extra
+                // keys — a layout sibling, so the grid shrinks instead of
+                // sliding behind it.
+                if (tabLoc == TabLocation.BOTTOM) {
+                    SessionTabStrip(
+                        sessions = tabs,
+                        selectedId = sessionId,
+                        titleOf = ::tabTitleOf,
+                        onSelect = { if (it != sessionId) onOpenSession(it) },
+                        onCloseRequest = ::requestTabClose,
+                        onNew = onNewTab,
+                        scroll = stripScroll,
+                    )
+                }
                 // Docked extra-keys bar (user-editable layout, same composable
                 // as the editor preview): layout sibling below the grid, so
                 // the grid can never slide behind it.
                 if (!boxMode && showKeys) {
                     ExtraKeysBar(
                         layout = keyLayout,
-                        enabled = session != null,
+                        enabled = hasShell,
                         ctrlActive = ctrlSticky,
                         altActive = altSticky,
                         onSendSteps = { sendKeySteps(it) },
@@ -693,10 +869,10 @@ fun TerminalScreen(
                             label = { Text("$ ") },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
-                            enabled = session != null,
+                            enabled = hasShell,
                         )
                         IconButton(
-                            enabled = session != null && boxInput.isNotBlank(),
+                            enabled = hasShell && boxInput.isNotBlank(),
                             onClick = {
                                 val line = boxInput
                                 boxInput = ""
@@ -837,6 +1013,27 @@ fun TerminalScreen(
                 }
             },
             dismissButton = null,
+        )
+        } // Column — full-bleed stage
+    } // TabDrawerFrame
+
+    // Tab × with warnOnClose: confirm, then the caller closes + navigates.
+    if (closeTarget != null) {
+        val targetTitle = tabs.find { it.sessionId == closeTarget }?.let(::tabTitleOf)
+        AlertDialog(
+            onDismissRequest = { closeTarget = null },
+            title = { Text("Close tab?") },
+            text = { Text("Close \"${targetTitle ?: "this tab"}\"? The connection drops.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val t = closeTarget
+                    closeTarget = null
+                    if (t != null) onCloseTab(t)
+                }) { Text("Close") }
+            },
+            dismissButton = {
+                TextButton(onClick = { closeTarget = null }) { Text("Cancel") }
+            },
         )
     }
 

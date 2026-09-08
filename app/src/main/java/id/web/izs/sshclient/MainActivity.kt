@@ -53,6 +53,7 @@ import id.web.izs.sshclient.ui.screens.SettingsScreen
 import id.web.izs.sshclient.ui.screens.SshSettingsScreen
 import id.web.izs.sshclient.ui.screens.VaultSettingsScreen
 import id.web.izs.sshclient.ui.screens.VaultUnlockDialog
+import id.web.izs.sshclient.ui.screens.WindowSettingsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -179,6 +180,24 @@ private fun AppNav(
 ) {
     val nav = rememberNavController()
     var limitError by remember { mutableStateOf<String?>(null) }
+    // Tab navigation stays shallow: every session hop pops back to the home
+    // list first, so the stack never grows ssh/A → ssh/B → ssh/C. Back from
+    // any terminal = home (tab switching happens in the strip/drawer).
+    // popBackStack-first: it is synchronous and reports failure, while a
+    // bare navigate+popUpTo can silently drop when a transition is already
+    // in flight — stranding a terminal destination over a removed handle
+    // (the phantom-Disconnected shape: stale green + null shell).
+    fun goHome() {
+        if (!nav.popBackStack("profiles", inclusive = false)) {
+            nav.navigate("profiles") { launchSingleTop = true }
+        }
+    }
+    fun openSessionShallow(sid: String) {
+        nav.navigate("ssh/$sid") {
+            popUpTo("profiles")
+            launchSingleTop = true
+        }
+    }
     fun openProfile(profileId: String) {
         val profile = appState.displayProfiles().find { it.id == profileId } ?: return
         try {
@@ -198,6 +217,15 @@ private fun AppNav(
             limitError = "Session limit reached (${e.max}). Close one first."
         }
     }
+    // Tab × on the current screen: close, then land on the newest remaining
+    // tab (or home when none). Closing a background tab needs no navigation.
+    fun closeTab(tid: String, currentId: String) {
+        sessionViewModel.close(tid)
+        if (tid == currentId) {
+            val next = sessionViewModel.ordered().lastOrNull()
+            if (next != null) openSessionShallow(next.sessionId) else goHome()
+        }
+    }
     NavHost(navController = nav, startDestination = startRoute) {
         composable("crash") {
             CrashReportScreen(trace = crashTrace ?: "", onDismissed = onCrashDismissed)
@@ -207,7 +235,7 @@ private fun AppNav(
                 appState,
                 sessionViewModel,
                 onOpen = { id -> openProfile(id) },
-                onOpenSession = { sid -> nav.navigate("ssh/$sid") },
+                onOpenSession = { sid -> openSessionShallow(sid) },
                 onEdit = { id -> nav.navigate("edit/$id") },
                 onAdd = { nav.navigate("edit/new") },
                 onSettings = { nav.navigate("settings") },
@@ -242,11 +270,15 @@ private fun AppNav(
             "ssh/{id}",
             arguments = listOf(navArgument("id") { type = NavType.StringType }),
         ) { back ->
+            val sid = back.arguments?.getString("id") ?: ""
             TerminalScreen(
                 appState,
                 sessionViewModel,
-                back.arguments?.getString("id") ?: "",
-                onBack = { nav.popBackStack() },
+                sid,
+                onBack = { goHome() },
+                onOpenSession = { openSessionShallow(it) },
+                onNewTab = { goHome() },
+                onCloseTab = { closeTab(it, sid) },
             )
         }
         composable(
@@ -299,7 +331,7 @@ private fun AppNav(
             PlaceholderSettingScreen("Color scheme") { nav.popBackStack() }
         }
         composable("settings/window") {
-            PlaceholderSettingScreen("Window") { nav.popBackStack() }
+            WindowSettingsScreen(appState) { nav.popBackStack() }
         }
     }
 }

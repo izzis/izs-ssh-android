@@ -47,7 +47,23 @@ class SshSessionHandle(
     val emulator: TerminalEmulator = TerminalEmulator(80, 24),
     val createdAt: Long = System.currentTimeMillis(),
 ) {
-    @Volatile var shell: SshConnector.ShellSession? = null
+    /**
+     * Shell presence as an observable flow. `shell` itself is a plain
+     * @Volatile field, and a composable that branches on a plain-field read
+     * subscribes to NOTHING — its branch group can keep a stale null forever
+     * (green dot + Disconnected row + dead Reconnect on a live session).
+     * Every assignment funnels through this setter, so the flow always
+     * matches the field; UI branches on [hasShell], never on the field.
+     */
+    @Volatile
+    var shell: SshConnector.ShellSession? = null
+        set(v) {
+            field = v
+            _hasShell.value = v != null
+        }
+
+    private val _hasShell = MutableStateFlow(false)
+    val hasShell: StateFlow<Boolean> = _hasShell.asStateFlow()
 
     private val _status = MutableStateFlow("connecting…")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -64,6 +80,11 @@ class SshSessionHandle(
     private val _version = MutableStateFlow(0L)
     val version: StateFlow<Long> = _version.asStateFlow()
 
+    // Desktop BaseTabComponent.hasActivity parity: true once output lands
+    // while this tab is NOT the selected one; cleared on select.
+    private val _activity = MutableStateFlow(false)
+    val activity: StateFlow<Boolean> = _activity.asStateFlow()
+
     @Volatile var extraTrust: KnownHostEntry? = null
     @Volatile var connectJob: Job? = null
     @Volatile var collectJob: Job? = null
@@ -74,6 +95,7 @@ class SshSessionHandle(
     fun setFailed(v: String?) { _failed.value = v }
     fun setPrompt(v: UnknownHostKeyException?) { _hostKeyPrompt.value = v }
     fun bumpVersion() { _version.value = emulator.version }
+    fun setActivity(v: Boolean) { _activity.value = v }
 
     val isConnected: Boolean get() = _status.value == "connected"
     val isConnecting: Boolean get() = _status.value == "connecting…"
@@ -87,6 +109,36 @@ class SshSessionViewModel : ViewModel() {
     fun get(sessionId: String): SshSessionHandle? = _sessions[sessionId]
 
     fun ordered(): List<SshSessionHandle> = _sessions.values.sortedBy { it.createdAt }
+
+    /**
+     * Shared horizontal scroll position (px) of the tab strip. Every tab is
+     * its own navigation destination, so a strip-local scroll state would
+     * reset to the left edge on each switch — the strip seeds from here and
+     * writes back while scrolling. Plain var (never observable): no
+     * recomposition on scroll frames.
+     */
+    @Volatile var tabStripScrollPx: Int = 0
+
+    // Which tab the user is looking at (set by TerminalScreen on compose).
+    // Drives hasActivity: output for any OTHER session lights its dot.
+    private val _selectedSessionId = MutableStateFlow<String?>(null)
+    val selectedSessionId: StateFlow<String?> = _selectedSessionId.asStateFlow()
+
+    /** Focus a tab: it becomes selected and its activity dot clears. */
+    fun select(sessionId: String) {
+        _selectedSessionId.value = sessionId
+        _sessions[sessionId]?.setActivity(false)
+    }
+
+    /**
+     * Output landed for [sessionId] (called from the reader-pump collect
+     * loop, which runs for background tabs too). Lights the activity dot
+     * unless this is the tab on screen. Extracted for unit tests.
+     */
+    fun noteOutput(sessionId: String) {
+        if (_selectedSessionId.value == sessionId) return
+        _sessions[sessionId]?.setActivity(true)
+    }
 
     /** One pooled TCP connection shared by tabs ([transportKeyOf]). */
     private class PooledTransport(val client: SSHClient, var refs: Int = 1)
@@ -118,15 +170,22 @@ class SshSessionViewModel : ViewModel() {
         return id
     }
 
-    /** Explicit tab close: kill the socket + free the cap slot. */
+    /** Explicit tab close: free the cap slot now, tear the socket down off-Main. */
     fun close(sessionId: String) {
         val h = _sessions.remove(sessionId) ?: return
+        if (_selectedSessionId.value == sessionId) _selectedSessionId.value = null
         h.connectJob?.cancel()
         h.collectJob?.cancel()
         h.connectJob = null
         h.collectJob = null
-        try { h.shell?.close() } catch (_: Exception) { }
+        // Socket teardown is network IO ( stalls on a dead VPN): never on
+        // Main — a blocked Main freezes the terminal mid-tap with zero
+        // feedback. Slot accounting above already ran synchronously.
+        val s = h.shell
         h.shell = null
+        if (s != null) viewModelScope.launch {
+            withContext(Dispatchers.IO) { closeShellQuietly(s) }
+        }
     }
 
     fun cancelConnect(sessionId: String) {
@@ -138,8 +197,11 @@ class SshSessionViewModel : ViewModel() {
     /** Unexpected I/O failure (send failed): keep the handle (red dot) for retry. */
     fun markSendFailed(sessionId: String, msg: String) {
         val h = _sessions[sessionId] ?: return
-        try { h.shell?.close() } catch (_: Exception) { }
+        val s = h.shell
         h.shell = null
+        if (s != null) viewModelScope.launch {
+            withContext(Dispatchers.IO) { closeShellQuietly(s) }
+        }
         h.setFailed(msg)
         h.setStatus("disconnected")
     }
@@ -151,8 +213,7 @@ class SshSessionViewModel : ViewModel() {
      */
     fun connect(sessionId: String, appState: AppState, cacheDir: File) {
         val h = _sessions[sessionId] ?: return
-        if (h.connecting) return
-        if (h.shell != null && h.isConnected) return
+        if (h.connecting || (h.shell != null && h.isConnected)) return
         // Retry path clears the previous failure; first connect starts clean.
         h.connecting = true
         h.setStage("Starting…")
@@ -277,6 +338,7 @@ class SshSessionViewModel : ViewModel() {
                     sess.output.collect { chunk ->
                         h.emulator.feed(chunk)
                         h.bumpVersion()
+                        noteOutput(sessionId)
                     }
                 }
             } catch (e: UnknownHostKeyException) {
@@ -359,8 +421,11 @@ class SshSessionViewModel : ViewModel() {
                 // Shell identity (not just client): a late callback must not
                 // kill a NEW shell opened by Reconnect on the same transport.
                 if (h.failed.value != null || h.shell !== deadShell) return@launch
-                try { h.shell?.close() } catch (_: Exception) { }
+                val s = h.shell
                 h.shell = null
+                if (s != null) viewModelScope.launch {
+                    withContext(Dispatchers.IO) { closeShellQuietly(s) }
+                }
                 h.setFailed("Session ended")
                 h.setStatus("disconnected")
                 return@launch
@@ -368,8 +433,10 @@ class SshSessionViewModel : ViewModel() {
             for (h in _sessions.values.toList()) {
                 val s = h.shell ?: continue
                 if (s.client !== deadClient || h.failed.value != null) continue
-                try { s.close() } catch (_: Exception) { }
                 h.shell = null
+                viewModelScope.launch {
+                    withContext(Dispatchers.IO) { closeShellQuietly(s) }
+                }
                 h.setFailed("Session ended")
                 h.setStatus("disconnected")
             }
@@ -382,8 +449,14 @@ class SshSessionViewModel : ViewModel() {
             try { h.collectJob?.cancel() } catch (_: Exception) { }
             // Fires pool releases (their IO hops may be cancelled with the
             // scope — leftovers below cover that); solo shells disconnect now.
-            try { h.shell?.close() } catch (_: Exception) { }
+            // Off-thread: socket teardown can stall on a dead network.
+            val s = h.shell
             h.shell = null
+            if (s != null) {
+                try {
+                    kotlinx.coroutines.runBlocking(Dispatchers.IO) { closeShellQuietly(s) }
+                } catch (_: Exception) { }
+            }
         }
         _sessions.clear()
         // Direct teardown: every pooled client is disconnected at most once
@@ -402,6 +475,10 @@ class SshSessionViewModel : ViewModel() {
 private fun disconnectQuietly(client: SSHClient) {
     try { client.disconnect() } catch (_: Exception) { }
     try { client.close() } catch (_: Exception) { }
+}
+
+private fun closeShellQuietly(s: SshConnector.ShellSession) {
+    try { s.close() } catch (_: Exception) { }
 }
 
 private fun readLegacyKnown(appState: AppState): List<String> = try {

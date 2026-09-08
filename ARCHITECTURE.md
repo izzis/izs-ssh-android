@@ -32,7 +32,8 @@ app/src/main/java/id/web/izs/sshclient/
   MainActivity.kt                 Boot sequence, NavHost, owns AppViewModel
   ui/
     AppViewModel.kt               Rotation-safe holder of AppState (passphrase survives rotate)
-    SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8
+    SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8,
+                                  selected tab + hasActivity dots + observable hasShell (never branch UI on the plain shell field)
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
     Theme.kt                      IzsDarkColors (dark-only Material3 theme)
     screens/
@@ -47,6 +48,8 @@ app/src/main/java/id/web/izs/sshclient/
                                   warn-on-close + host-key trust dialogs
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
       TerminalSettingsScreen.kt   Font size + scrollback buffer (applies live)
+      WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right
+      SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll) + side drawer frame (left/right, no RTL mirror) + activity dots
       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`)
       VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
       SetVaultPassphraseDialog.kt Set/change vault passphrase
@@ -59,9 +62,11 @@ app/src/main/java/id/web/izs/sshclient/
   core/
     config/
       TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options, SshGlobals
+      TabLocation.kt      appearance.tabsLocation mapping (OFF/TOP/BOTTOM/LEFT/RIGHT) + FOLLOW_YAML/LOCAL source priority (pure)
       SshDefaults.kt      Transient defaults applied on the domain view only
       ConfigMigrator.kt   Legacy migrations (name-based groups -> ids, jump hosts)
-      RawConfigStore.kt   RAW YAML document ops (update/delete profile, secrets JSON)
+      RawConfigStore.kt   RAW YAML document ops (update/delete profile, secrets JSON,
+                          terminal.showRecentProfiles + appearance.tabsLocation read/write — desktop-owned keys, never invented)
       ProfileColor.kt     Identity-color palette + hex normalize/parse (pure JVM)
     vault/
       VaultCrypto.kt      PBKDF2-HmacSHA512 x100k/salt8 -> AES-256-CBC/iv16 (pure JVM)
@@ -89,10 +94,11 @@ app/src/main/java/id/web/izs/sshclient/
       TerminalInput.kt    Pure sticky CTRL/ALT mapping (c & 0x1F, ALT = ESC prefix)
   data/local/
     ConfigDisk.kt         EncryptedSharedPreferences: sync creds, RAW YAML cache,
-                          known_hosts (TOFU), terminal prefs (font size)
+                          known_hosts (TOFU), terminal prefs (font size),
+                          Android-only home.recentProfiles + window.tabSource/tabLocation (never synced to YAML)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (17 files, 133 tests — §8)
+app/src/test/... (21 files, 168 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -106,9 +112,11 @@ and `SyncSetupScreen` are deleted). Routes: `profiles`, `ssh/{id}`,
 (`by viewModels()`), so rotation keeps the unlocked vault; the nav stack
 itself resets (no password re-asked). SSH sessions live in
 `SshSessionViewModel` (also `by viewModels()`, keyed by session UUID), so a
-rotate or a trip back to the list never drops the live PTY — Back keeps the
-session alive, only the explicit disconnect control closes it (per-session
-`warnOnClose` dialog).
+rotate or a trip back to the list never drops the live PTY — Back goes home
+(popBackStack-first, synchronous) and only the explicit disconnect control
+closes a session (per-session `warnOnClose` dialog; the header status dot
+always confirms). Session hops use shallow navigate (`launchSingleTop` +
+`popUpTo("profiles")`) so the stack never grows `ssh/A → ssh/B → ssh/C`.
 
 ## 4. Config Sync parity (Tabby Desktop)
 
@@ -237,8 +245,15 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   terminal pure black, themed surfaces, black docked key bars).
 - All sub-screens share `ScreenHeader` (back arrow + title); the terminal
   header matches it (themed surface) with a status dot on the name row —
-  green = connected, amber = connecting, red = disconnected, tap to
-  disconnect — and full-width `user@host:port` below.
+  green = connected, amber = connecting, red = disconnected. The dot always
+  asks before disconnecting (it is a 32dp invisible tap target — an instant
+  silent kill reads exactly like a dropped session); the power button honors
+  `warnOnClose` like desktop — and full-width `user@host:port` below.
+- Home Recent card (desktop `recentProfiles` parity, History icon) sized by
+  `terminal.showRecentProfiles` (0 = off); Settings > Window edits the
+  desktop `appearance.tabsLocation` (Off removes the key; encrypted configs
+  stay writable but Android ignores the value) or picks This-device-only
+  (local pref, YAML ignored for display — the painless encrypted path).
 - Profile identity color: dot selector beside Name in the General tab
   (presets + Default; custom desktop hex shows as an extra swatch), stripe
   on list rows (absent without a stored color). Terminal scheme stays in
@@ -273,7 +288,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 133 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 168 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -294,6 +309,10 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `SshCryptoProviderTest` | BC provider registration (X25519) |
 | `ExtraKeyboardTest` | layout normalize/clamp, escape codec, save-load, corrupt fallback, strict import |
 | `SshSessionRegistryTest` | new tab per tap, cap + slot reclaim, multiplexer key format |
+| `SshMultiplexTest` | shared-close releases pool ref without channel-close (MINA) |
+| `TabLocationTest` | tabsLocation resolver + FOLLOW_YAML/LOCAL priority + encrypted-OFF rules |
+| `SessionActivityTest` | background-output activity dot, select clears, close clears selection |
+| `RecentProfilesTest` | recordRecent dedup/cap/disable parity |
 
 ## 9. Build & diagnostics
 
@@ -321,10 +340,22 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   the last tab's disconnect, exactly like desktop);
   the home list shows an Active-sessions section (green/amber/red dot)
   replacing disconnect-on-back; per-session warn-on-close; cap on concurrent
-  sessions (default 5, hard max 8, tunable in Settings > Terminal, now
-  scrollable). Reader-pump death marks tabs failed (red + Retry): single
-  `exit` fails only its tab, a dead transport fails all riders. Tab bar UI +
-  profile-colour-as-tab-colour arrive with Appearance (next).
+   sessions (default 5, hard max 8, tunable in Settings > Terminal, now
+   scrollable). Reader-pump death marks tabs failed (red + Retry): single
+   `exit` fails only its tab, a dead transport fails all riders.
+- **Tab chrome (done — v1):** strip for `top`/`bottom` (status dot + profile
+  name + activity dot + × + `+`; scroll hoisted to the VM because every tab
+  is its own destination), custom side drawer for `left`/`right` (M3 drawer
+  is start-side only — whole-screen RTL mirroring is rejected; hamburger
+  replaces Back, middle-fling opens it, scrim/Back closes), Back always goes
+  home via synchronous popBackStack. Socket teardown runs off-Main (a stalled
+  VPN must never freeze the terminal mid-tap).
+- **Compose staleness lesson (phantom-Disconnected):** never branch UI on the
+  plain `shell` field — the branch group can keep evaluating a stale null
+  forever (green dot + Disconnected + dead Reconnect on a live session;
+  logging masks it by reshuffling recomposition timing). Shell presence is
+  the observable `hasShell` flow, updated at every assignment site;
+  composition branches on the flow, event handlers read the field fresh.
 - **Port forwarding:** open Local/Remote/Dynamic at connect (saved today).
 - **jumpHost / proxyCommand / SOCKS-HTTP:** saved to YAML via the
   `connectionMode` dropdown (other-mode fields nulled on save, desktop
