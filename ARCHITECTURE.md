@@ -244,8 +244,10 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   floating Copy/Paste bar (tabby-android pattern), replacing screen-copy.
 - **Full profile editor parity:** every `config.yaml` key editable and
   honored (advanced SSH opts, keepalive, ciphers, port forwarding,
-  proxy/jumpHost, terminal type) — currently connection basics only, so
-  parts of an imported YAML are display-only.
+  proxy/jumpHost, terminal type) — DONE for editing (tabs General / Ports /
+  Advanced / Ciphers / Colours-placeholder / Login scripts, defaults omitted
+  from YAML like desktop ConfigProxy); honoring at connect time
+  (jumpHost/proxy/multiplex) is still a "scheduled" stub.
 - **jumpHost / proxyCommand / SOCKS-HTTP:** currently a "scheduled" stub.
 - **Rotation keeping the live PTY** (session is screen-scoped today).
 - Multi-window / font-choice polish, search-in-buffer.

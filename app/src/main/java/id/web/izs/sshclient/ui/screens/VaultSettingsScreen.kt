@@ -97,13 +97,13 @@ fun VaultSettingsScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ScreenHeader("Vault", onBack)
         if (vault == null) {
             Icon(
                 Icons.Filled.Key,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
             )
-            Text("Vault is not configured", style = MaterialTheme.typography.headlineSmall)
             Text(
                 "Vault is an always-encrypted container for secrets such as SSH passwords and private key passphrases.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -117,7 +117,6 @@ fun VaultSettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Set master passphrase") }
         } else {
-            Text("Vault", style = MaterialTheme.typography.headlineSmall)
             Text(
                 "Encryption: ${if (encrypted) "on" else "off"} · " +
                     if (locked) "locked" else "unlocked (passphrase in RAM for this session)",
@@ -168,7 +167,6 @@ fun VaultSettingsScreen(
         if (busy) CircularProgressIndicator()
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
     }
 
     if (showSetPass) {
@@ -178,7 +176,10 @@ fun VaultSettingsScreen(
             onConfirm = { pass ->
                 showSetPass = false
                 if (changeMode) runOp({ state.repo.changeVaultPassphrase(pass) }, "Master passphrase changed")
-                else runOp({ state.repo.setVaultPassphrase(pass) }, "Vault configured")
+                else runOp(
+                    { state.repo.setVaultPassphrase(pass) },
+                    "Vault configured (saved passwords moved into the vault)",
+                )
             },
             onDismiss = { showSetPass = false },
         )
@@ -209,7 +210,13 @@ fun VaultSettingsScreen(
         AlertDialog(
             onDismissRequest = { showErase = false },
             title = { Text("Delete vault contents?") },
-            text = { Text("The vault is removed and the config is restored to plaintext. This cannot be undone.") },
+            text = {
+                Text(
+                    "The vault is removed and the config is restored to plaintext. " +
+                        "Passwords and keys stored in the vault are lost " +
+                        "(re-enter them per profile afterwards). This cannot be undone.",
+                )
+            },
             confirmButton = {
                 Button(onClick = {
                     showErase = false

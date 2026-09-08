@@ -40,11 +40,11 @@ import kotlinx.coroutines.withContext
 /**
  * Settings > Config Sync (desktop parity, mobile-combined).
  *
- * One screen for everything the old three screens (setup / cloud list /
- * options) did separately: connection (host+token+test), full cloud config
+ * One screen for connection (host+token+test), full cloud config
  * management (list / download-switch / upload / create / delete), and
- * auto-sync + parts options. Used from first-run setup AND from Settings,
- * so cloud configs can always be switched and managed.
+ * auto-sync + parts options. Reached from Settings only — first-run setup
+ * is gone (tabby-android parity: home is always the profile list on top
+ * of a seeded empty local config).
  */
 @Composable
 fun ConfigSyncScreen(
@@ -111,7 +111,7 @@ fun ConfigSyncScreen(
         Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Config Sync", style = MaterialTheme.typography.headlineSmall)
+        ScreenHeader("Config Sync", onBack)
         Text(
             "Active ID: ${state.disk.configId.takeIf { it >= 0 } ?: "-"} · " +
                 "Last remote change: ${state.disk.lastRemoteChange.ifBlank { "-" }}",
@@ -277,7 +277,6 @@ fun ConfigSyncScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Save & Check Now") }
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
     }
 
     confirmDownload?.let { meta ->

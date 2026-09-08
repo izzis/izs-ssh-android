@@ -61,7 +61,21 @@ class SyncRepository(
     )
 
     suspend fun loadLocal(): Loaded = withContext(Dispatchers.IO) {
-        val yamlStr = disk.loadYaml()
+        var yamlStr = disk.loadYaml()
+        if (yamlStr.isNullOrBlank()) {
+            // tabby-android parity (config-android.service.ts:32): a fresh
+            // install owns an empty local config, so the app is usable
+            // (add profiles) without ever touching Config Sync. Seeded to
+            // disk once — later loads see a real document.
+            val seed = linkedMapOf<String, Any?>(
+                RawConfigStore.KEY_VERSION to 1,
+                RawConfigStore.KEY_PROFILES to mutableListOf<Any?>(),
+                RawConfigStore.KEY_GROUPS to mutableListOf<Any?>(),
+                RawConfigStore.KEY_CONFIG_SYNC to LinkedHashMap<String, Any?>(),
+            )
+            disk.saveYaml(RawConfigStore.dumpRaw(seed))
+            yamlStr = disk.loadYaml()
+        }
         val raw = if (yamlStr.isNullOrBlank()) {
             linkedMapOf<String, Any?>(
                 RawConfigStore.KEY_VERSION to 1,
@@ -237,6 +251,11 @@ class SyncRepository(
      * Parity with vault.setEnabled(true): create an (initially empty) vault.
      * The plaintext config is untouched; only the vault blob is added.
      * The passphrase is remembered for the session (mobile unlock-model parity).
+     *
+     * Mobile sweep (desktop never rests passwords inline — keytar/vault only):
+     * every inline plaintext `options.password` is moved into the new vault
+     * as an ssh:password secret and stripped from the YAML, so enabling the
+     * master passphrase never leaves a duplicated secret in one file.
      */
     suspend fun setVaultPassphrase(passphrase: String): Loaded = withContext(Dispatchers.IO) {
         require(passphrase.isNotBlank()) { "Passphrase is empty" }
@@ -244,7 +263,34 @@ class SyncRepository(
         val raw = RawConfigStore.loadRaw(yamlStr)
         require(RawConfigStore.storedVault(raw) == null) { "Vault is already configured" }
         require(!RawConfigStore.isEncrypted(raw)) { "Config is already encrypted" }
-        val stored = VaultCrypto.encrypt("{}", "[]", passphrase)
+        var secrets = emptyList<id.web.izs.sshclient.core.config.VaultSecret>()
+        @Suppress("UNCHECKED_CAST")
+        val profiles = (raw[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+        raw[RawConfigStore.KEY_PROFILES] = profiles.map { pm ->
+            val map = pm as? Map<String, Any?> ?: return@map pm
+            var cur: Map<String, Any?> = map
+            RawConfigStore.inlinePasswordOf(cur)?.let { inline ->
+                secrets = SecretResolver.upsertPassword(
+                    secrets, inline.user, inline.host, inline.port, inline.value,
+                )
+                cur = RawConfigStore.withoutInlinePassword(cur)
+            }
+            // Same treatment for pasted key material (paths untouched).
+            val pems = RawConfigStore.inlineKeyPems(cur)
+            if (pems.isNotEmpty()) {
+                val name = cur["name"]?.toString() ?: "profile"
+                val refs = RawConfigStore.privateKeyRefs(cur).map { r ->
+                    if (r in pems) {
+                        val (next, ref) = SecretResolver.addFile(secrets, r, "migrated key ($name)")
+                        secrets = next
+                        ref
+                    } else r
+                }
+                cur = RawConfigStore.withPrivateKeys(cur, refs)
+            }
+            cur
+        }
+        val stored = VaultCrypto.encrypt("{}", VaultState.secretsToJson(secrets), passphrase)
         raw[RawConfigStore.KEY_VAULT] = RawConfigStore.storedVaultMap(stored)
         disk.saveYaml(RawConfigStore.dumpRaw(raw))
         rememberPassphrase(passphrase)
@@ -367,8 +413,9 @@ class SyncRepository(
             val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
             val raw = RawConfigStore.loadRaw(yamlStr)
             val encrypted = RawConfigStore.isEncrypted(raw)
-            val out: LinkedHashMap<String, Any?>
-            if (encrypted) {
+
+        val out: LinkedHashMap<String, Any?>
+        if (encrypted) {
                 val pass = rememberedPassphrase ?: throw IllegalStateException("Vault is locked")
                 val vault = RawConfigStore.storedVault(raw)
                     ?: throw IllegalStateException("Vault is not configured")
@@ -575,6 +622,159 @@ class SyncRepository(
             }
             disk.saveYaml(RawConfigStore.dumpRaw(out))
             return@withContext decryptToLoaded(out)
+        }
+        disk.saveYaml(RawConfigStore.dumpRaw(out))
+        decryptToLoaded(out)
+    }
+
+    /**
+     * Create a profile (mobile "New profile"). The id is always minted here
+     * (`ssh:custom:<slug>:<uuid>`, desktop v4 parity) and unknown raw keys cannot
+     * exist yet, so the map is built on an empty base via updateProfileMap.
+     * Vault branching mirrors [updateProfile]; secrets start empty unless the
+     * editor supplies a password/keys.
+     *
+     * @param groupId null/blank = ungrouped.
+     */
+    suspend fun createProfile(
+        profile: SshProfile,
+        groupId: String?,
+        groupName: String?,
+        secretEdits: ProfileSecretEdits = ProfileSecretEdits(),
+    ): Loaded = withContext(Dispatchers.IO) {
+        val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+        val raw = RawConfigStore.loadRaw(yamlStr)
+        val encrypted = RawConfigStore.isEncrypted(raw)
+        val vault = RawConfigStore.storedVault(raw)
+
+        val wantsSecrets = vault != null &&
+            (encrypted || secretEdits.password != null || secretEdits.newKeyPems.isNotEmpty())
+        val pass = rememberedPassphrase
+        if (wantsSecrets && pass == null) throw IllegalStateException("Vault is locked")
+
+        var secrets = emptyList<id.web.izs.sshclient.core.config.VaultSecret>()
+        var blobConfigJson = ""
+        if (wantsSecrets) {
+            val (cfg, sec) = VaultCrypto.decrypt(vault!!, pass!!)
+            secrets = VaultState.parseSecretsJson(sec)
+            blobConfigJson = cfg
+        }
+
+        var newSecrets = secrets
+        val nu = profile.options
+        if (vault != null && wantsSecrets && !secretEdits.password.isNullOrEmpty()) {
+            newSecrets = SecretResolver.upsertPassword(
+                newSecrets, nu.user, nu.host, nu.port, secretEdits.password,
+            )
+        }
+        val addedRefs = mutableListOf<String>()
+        if (wantsSecrets) {
+            for ((pem, desc) in secretEdits.newKeyPems) {
+                if (vault != null) {
+                    val (next, ref) = SecretResolver.addFile(newSecrets, pem, desc)
+                    newSecrets = next
+                    addedRefs += ref
+                }
+            }
+        }
+        val secretsChanged = newSecrets != secrets
+        val finalRefs = profile.options.privateKeys + addedRefs +
+            secretEdits.newKeyPems.filter { vault == null }.map { it.first }
+        val passwordField: String? = if (vault == null) {
+            secretEdits.password
+        } else if (secretEdits.password != null) {
+            ""
+        } else {
+            null
+        }
+
+        val groupWrite: String? = when {
+            groupId.isNullOrBlank() -> null
+            else -> {
+                @Suppress("UNCHECKED_CAST")
+                val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                    .filterIsInstance<Map<String, Any?>>()
+                    .mapNotNull { it["id"]?.toString() }.toSet()
+                RawConfigStore.resolveGroupWriteValue(rawIds, groupId, groupName)
+            }
+        }
+
+        val minted = profile.copy(id = RawConfigStore.mintProfileId("ssh", profile.name))
+        val map = RawConfigStore.updateProfileMap(
+            emptyMap(), minted, passwordField, groupWrite, finalRefs,
+        )
+
+        val out: LinkedHashMap<String, Any?>
+        if (encrypted) {
+            val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(blobConfigJson))
+            @Suppress("UNCHECKED_CAST")
+            val profiles = ((blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
+                .toMutableList()
+            profiles += map
+            blobConfig[RawConfigStore.KEY_PROFILES] = profiles
+            val stored = VaultCrypto.encrypt(
+                RawConfigStore.toJson(blobConfig), VaultState.secretsToJson(newSecrets), pass!!,
+            )
+            out = linkedMapOf(
+                RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
+                RawConfigStore.KEY_ENCRYPTED to true,
+            )
+            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+                out[RawConfigStore.KEY_CONFIG_SYNC] = it
+            }
+        } else {
+            out = LinkedHashMap(raw)
+            @Suppress("UNCHECKED_CAST")
+            val profiles = ((out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
+                .toMutableList()
+            profiles += map
+            out[RawConfigStore.KEY_PROFILES] = profiles
+            if (vault != null && secretsChanged) {
+                val stored = VaultCrypto.encrypt(blobConfigJson, VaultState.secretsToJson(newSecrets), pass!!)
+                out[RawConfigStore.KEY_VAULT] = RawConfigStore.storedVaultMap(stored)
+            }
+        }
+        disk.saveYaml(RawConfigStore.dumpRaw(out))
+        decryptToLoaded(out)
+    }
+
+    /**
+     * Append a top-level group (mobile "New group" in the profile editor).
+     * No secrets involved; encrypted shells still need unlock (re-encrypt).
+     */
+    suspend fun createGroup(id: String, name: String): Loaded = withContext(Dispatchers.IO) {
+        require(name.isNotBlank()) { "Group name is empty" }
+        val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+        val raw = RawConfigStore.loadRaw(yamlStr)
+        val encrypted = RawConfigStore.isEncrypted(raw)
+        val entry = linkedMapOf<String, Any?>("id" to id, "name" to name.trim())
+        val out: LinkedHashMap<String, Any?>
+        if (encrypted) {
+            val pass = rememberedPassphrase ?: throw IllegalStateException("Vault is locked")
+            val vault = RawConfigStore.storedVault(raw)
+                ?: throw IllegalStateException("Vault is not configured")
+            val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
+            val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
+            @Suppress("UNCHECKED_CAST")
+            val groups = ((blobConfig[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                .toMutableList()
+            groups += entry
+            blobConfig[RawConfigStore.KEY_GROUPS] = groups
+            val stored = VaultCrypto.encrypt(RawConfigStore.toJson(blobConfig), secretsJson, pass)
+            out = linkedMapOf(
+                RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
+                RawConfigStore.KEY_ENCRYPTED to true,
+            )
+            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+                out[RawConfigStore.KEY_CONFIG_SYNC] = it
+            }
+        } else {
+            out = LinkedHashMap(raw)
+            @Suppress("UNCHECKED_CAST")
+            val groups = ((out[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                .toMutableList()
+            groups += entry
+            out[RawConfigStore.KEY_GROUPS] = groups
         }
         disk.saveYaml(RawConfigStore.dumpRaw(out))
         decryptToLoaded(out)

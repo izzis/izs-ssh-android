@@ -48,16 +48,15 @@ import id.web.izs.sshclient.ui.screens.TerminalScreen
 import id.web.izs.sshclient.ui.screens.TerminalSettingsScreen
 import id.web.izs.sshclient.ui.screens.SettingsScreen
 import id.web.izs.sshclient.ui.screens.SshSettingsScreen
-import id.web.izs.sshclient.ui.screens.SyncSetupScreen
 import id.web.izs.sshclient.ui.screens.VaultSettingsScreen
 import id.web.izs.sshclient.ui.screens.VaultUnlockDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * v1 flow (desktop parity):
- * setup (host+token) -> sync (connection + cloud configs + options)
- * -> profiles (folders + search) -> terminal (real PTY shell).
+ * v1 flow (tabby-android parity): home is ALWAYS the profile list, on top
+ * of a seeded empty local config when fresh — no setup gate. Sync connects
+ * later from Settings > Config Sync; terminal is a real PTY shell.
  * Settings mirrors the desktop sidebar: Config Sync, SSH, Vault, Terminal,
  * Config file (+ Appearance/Color scheme/Window placeholders).
  *
@@ -97,16 +96,16 @@ class MainActivity : ComponentActivity() {
                     val ready = withContext(Dispatchers.IO) {
                         val ok = appState.bootLoad()
                         val crash = if (BuildConfig.DEBUG) CrashLog.read(this@MainActivity) else null
-                        val disk = appState.disk
                         when {
                             crash != null -> Boot.Ready("crash", crash)
                             !ok || appState.loaded == null ->
                                 Boot.Failed(appState.error ?: "Load failed")
-                            appState.loaded!!.needsPassphrase -> Boot.Ready("profiles")
-                            disk.loadYaml() != null -> Boot.Ready("profiles")
-                            !disk.host.isNullOrBlank() && !disk.token.isNullOrBlank() ->
-                                Boot.Ready("sync")
-                            else -> Boot.Ready("setup")
+                            // tabby-android parity: home is ALWAYS the profile
+                            // list (app-routing redirects everything there).
+                            // A fresh install owns a seeded empty config, so
+                            // profiles can be added without Config Sync; sync
+                            // connects later from Settings > Config Sync.
+                            else -> Boot.Ready("profiles")
                         }
                     }
                     boot = ready
@@ -176,45 +175,24 @@ private fun AppNav(
         composable("crash") {
             CrashReportScreen(trace = crashTrace ?: "", onDismissed = onCrashDismissed)
         }
-        composable("setup") {
-            SyncSetupScreen(appState) {
-                nav.navigate("sync") { popUpTo("setup") { inclusive = true } }
-            }
-        }
-        composable("sync") {
-            // First run (from setup) or Settings > Config Sync: after a download
-            // the flow continues to the profile list (unlock dialog auto-shows
-            // when encrypted); from Settings it just pops back.
-            ConfigSyncScreen(
-                appState,
-                onDownloaded = {
-                    if (nav.previousBackStackEntry?.destination?.route == "settings") {
-                        nav.popBackStack()
-                    } else {
-                        nav.navigate("profiles") { popUpTo("sync") { inclusive = true } }
-                    }
-                },
-                onBack = { nav.popBackStack() },
-            )
-        }
         composable("profiles") {
             ProfileListScreen(
                 appState,
                 onOpen = { id -> nav.navigate("ssh/$id") },
                 onEdit = { id -> nav.navigate("edit/$id") },
+                onAdd = { nav.navigate("edit/new") },
                 onSettings = { nav.navigate("settings") },
             )
             // Lazy-unlock parity: the non-dismissible dialog shows ONLY when the
             // listing itself is blocked (locked encrypted shell). A locked
             // plaintext-with-blob config lists fine; the passphrase is asked
             // at point of use (show-password, secret edit, first connect).
+            // onNoConfig is a no-op: a local config always exists (seeded).
             if (appState.loaded?.unlockRequired == true) {
                 VaultUnlockDialog(
                     appState,
                     onUnlocked = { },
-                    onNoConfig = {
-                        nav.navigate("setup") { popUpTo("profiles") { inclusive = true } }
-                    },
+                    onNoConfig = { },
                     dismissible = false,
                 )
             }

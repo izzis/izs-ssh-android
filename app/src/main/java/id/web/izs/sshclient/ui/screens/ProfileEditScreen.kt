@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,10 +25,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,12 +41,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import id.web.izs.sshclient.core.config.ForwardedPort
+import id.web.izs.sshclient.core.config.LoginScript
+import id.web.izs.sshclient.core.config.SshAlgorithms
+import id.web.izs.sshclient.core.config.SshProfile
 import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.launch
 
+private val EDIT_TABS = listOf("General", "Ports", "Advanced", "Ciphers", "Colours", "Login")
+
 /**
- * Profile editor (mobile v1: SSH profiles only).
+ * Profile editor with desktop-tab parity (General / Ports / Advanced /
+ * Ciphers / Colours / Login scripts).
+ *
+ * `profileId == "new"` creates a profile (repo mints `ssh:custom:<uuid>`).
+ *
+ * Default-state rule (the cloud YAML omits defaults by design): fields left
+ * at desktop defaults are REMOVED from YAML on save (see updateProfileMap);
+ * the Domain view re-applies defaults transiently. So this editor always
+ * works on the defaulted Domain model and blank/default input means "omit".
  *
  * Lazy-unlock parity: opening this screen NEVER asks for the passphrase.
  * It is requested only when vault contents are actually needed —
@@ -57,90 +75,185 @@ fun ProfileEditScreen(
     profileId: String,
     onBack: () -> Unit,
 ) {
+    val isNew = profileId == "new"
     val scope = rememberCoroutineScope()
     val original = remember(state.loaded, profileId) {
-        state.displayProfiles().find { it.id == profileId }
+        if (isNew) null
+        else state.displayProfiles().find { it.id == profileId }
     }
     val groups = remember(state.loaded) { state.displayGroups() }
     val vaultPresent = state.loaded?.domain?.vault != null
     val locked = state.loaded?.needsPassphrase == true
+    val o = original?.options
 
-    var name by remember(original) { mutableStateOf(original?.name ?: "") }
+    var tab by remember { mutableIntStateOf(0) }
+
+    // ---- General ----
+    var name by remember(original) { mutableStateOf(o?.let { original.name } ?: "") }
     var groupId by remember(original) { mutableStateOf(original?.group ?: "") }
-    var host by remember(original) { mutableStateOf(original?.options?.host ?: "") }
-    var portText by remember(original) { mutableStateOf(original?.options?.port?.toString() ?: "22") }
-    var user by remember(original) { mutableStateOf(original?.options?.user ?: "") }
-    var auth by remember(original) { mutableStateOf(original?.options?.auth ?: "password") }
+    var host by remember(original) { mutableStateOf(o?.host ?: "") }
+    var portText by remember(original) { mutableStateOf(o?.port?.toString() ?: "22") }
+    var user by remember(original) { mutableStateOf(o?.user ?: "root") }
+    var auth by remember(original) { mutableStateOf(o?.auth ?: "") }
+    // Desktop connectionMode parity (sshProfileSettings.component.ts:48-56):
+    // priority proxyCommand > jumpHost > socksProxy > httpProxy > direct.
+    // Save nulls the non-selected mode's fields (desktop save() parity).
+    var connectionMode by remember(original) {
+        mutableStateOf(
+            when {
+                !o?.proxyCommand.isNullOrBlank() -> "proxyCommand"
+                !o?.jumpHost.isNullOrBlank() -> "jumpHost"
+                !o?.socksProxyHost.isNullOrBlank() -> "socksProxy"
+                !o?.httpProxyHost.isNullOrBlank() -> "httpProxy"
+                else -> "direct"
+            },
+        )
+    }
+    var proxyCommand by remember(original) { mutableStateOf(o?.proxyCommand ?: "") }
+    var jumpHost by remember(original) { mutableStateOf(o?.jumpHost ?: "") }
+    var socksProxyHost by remember(original) { mutableStateOf(o?.socksProxyHost ?: "") }
+    var socksProxyPortText by remember(original) { mutableStateOf(o?.socksProxyPort?.toString() ?: "") }
+    var httpProxyHost by remember(original) { mutableStateOf(o?.httpProxyHost ?: "") }
+    var httpProxyPortText by remember(original) { mutableStateOf(o?.httpProxyPort?.toString() ?: "") }
     var passwordTouched by remember(original) { mutableStateOf(false) }
     var passwordText by remember(original) { mutableStateOf("") }
     var reveal by remember { mutableStateOf(false) }
     var removedRefs by remember(original) { mutableStateOf(setOf<String>()) }
     var addedKeys by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var showAddKey by remember { mutableStateOf(false) }
+
+    // ---- Ports / Ciphers / Login ----
+    var forwards by remember(original) { mutableStateOf(o?.forwardedPorts ?: emptyList()) }
+    var ciphers by remember(original) { mutableStateOf(o?.algorithms ?: SshAlgorithms.DEFAULTS) }
+    var scripts by remember(original) { mutableStateOf(o?.scripts ?: emptyList()) }
+
+    // ---- Advanced ----
+    var x11 by remember(original) { mutableStateOf(o?.x11 ?: false) }
+    var agentForward by remember(original) { mutableStateOf(o?.agentForward ?: false) }
+    var skipBanner by remember(original) { mutableStateOf(o?.skipBanner ?: false) }
+    var reuseSession by remember(original) { mutableStateOf(o?.reuseSession ?: true) }
+    var warnOnClose by remember(original) { mutableStateOf(o?.warnOnClose ?: false) }
+    var keepaliveText by remember(original) { mutableStateOf(o?.keepaliveInterval?.toString() ?: "5000") }
+    var keepaliveMaxText by remember(original) { mutableStateOf(o?.keepaliveCountMax?.toString() ?: "10") }
+    // The Domain view fills the transient 20000 default, so a stored-absent
+    // readyTimeout shows as blank (= default = omit on save). An explicit
+    // 20000 collapses to the same effective value — harmless.
+    var readyTimeoutText by remember(original) {
+        mutableStateOf(o?.readyTimeout?.takeIf { it != 20000L }?.toString() ?: "")
+    }
+
     var showUnlock by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showNewGroup by remember { mutableStateOf(false) }
+    var newGroupName by remember { mutableStateOf("") }
+    var pendingNewGroup by remember { mutableStateOf(false) }
     var pendingSave by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
 
-    if (original == null) {
+    if (!isNew && original == null) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScreenHeader("Edit profile", onBack)
             Text("Profile not found", color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
         }
         return
     }
-    if (original.type != "ssh") {
+    if (!isNew && original?.type != "ssh") {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScreenHeader("Edit profile", onBack)
             Text("Only SSH profiles can be edited on mobile v1.")
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
         }
         return
     }
 
-    val hasSavedPassword = state.passwordFor(original) != null
+    val hasSavedPassword = original?.let { state.passwordFor(it) } != null
     val effectivePassword: String? = when {
         !reveal -> null
         passwordTouched -> passwordText.ifBlank { null }
-        else -> state.passwordFor(original)
+        else -> original?.let { state.passwordFor(it) }
     }
-    val liveRefs = remember(original, removedRefs, addedKeys) {
-        (original.options.privateKeys - removedRefs)
+    val liveRefs = remember(original, removedRefs) {
+        (original?.options?.privateKeys ?: emptyList()) - removedRefs
     }
+    val secrets = SyncRepository.ProfileSecretEdits(
+        password = passwordTouched.takeIf { it }?.let { passwordText },
+        newKeyPems = addedKeys,
+        removedKeyRefs = removedRefs.toList(),
+    )
+
+    fun buildOptions() = (o ?: id.web.izs.sshclient.core.config.SshOptions()).copy(
+        host = host.trim(),
+        port = portText.toIntOrNull()?.takeIf { it in 1..65535 }
+            ?: if (isNew) 22 else (o?.port ?: 22),
+        user = user.trim().ifBlank { "root" },
+        auth = auth.ifBlank { null },
+        // Only the selected connection mode's fields survive (desktop save
+        // parity); the rest are nulled so the YAML stays unambiguous.
+        proxyCommand = proxyCommand.trim().ifBlank { null }.takeIf { connectionMode == "proxyCommand" },
+        jumpHost = jumpHost.trim().ifBlank { null }.takeIf { connectionMode == "jumpHost" },
+        socksProxyHost = socksProxyHost.trim().ifBlank { null }.takeIf { connectionMode == "socksProxy" },
+        socksProxyPort = socksProxyPortText.toIntOrNull()?.takeIf { it in 1..65535 }
+            .takeIf { connectionMode == "socksProxy" },
+        httpProxyHost = httpProxyHost.trim().ifBlank { null }.takeIf { connectionMode == "httpProxy" },
+        httpProxyPort = httpProxyPortText.toIntOrNull()?.takeIf { it in 1..65535 }
+            .takeIf { connectionMode == "httpProxy" },
+        x11 = x11,
+        agentForward = agentForward,
+        skipBanner = skipBanner,
+        reuseSession = reuseSession,
+        warnOnClose = warnOnClose.takeIf { it },
+        keepaliveInterval = keepaliveText.toLongOrNull()?.takeIf { it > 0 } ?: 5000,
+        keepaliveCountMax = keepaliveMaxText.toIntOrNull()?.takeIf { it > 0 } ?: 10,
+        readyTimeout = readyTimeoutText.toLongOrNull()?.takeIf { it > 0 },
+        algorithms = ciphers,
+        forwardedPorts = forwards,
+        scripts = scripts,
+        // Final vault refs are assembled by the repo
+        // (existing minus removed plus newly stored).
+        privateKeys = liveRefs,
+    )
 
     fun doSave() {
+        if (host.isBlank()) {
+            msg = "Host is empty"
+            return
+        }
         scope.launch {
             busy = true
             msg = null
             try {
-                val port = portText.toIntOrNull()?.takeIf { it in 1..65535 }
-                    ?: original.options.port
-                val updated = original.copy(
-                    name = name.ifBlank { original.name },
-                    group = groupId.ifBlank { null },
-                    options = original.options.copy(
-                        host = host.trim(),
-                        port = port,
-                        user = user.trim().ifBlank { original.options.user },
-                        auth = auth.ifBlank { null },
-                        // Final vault refs are assembled by the repo
-                        // (existing minus removed plus newly stored).
-                        privateKeys = liveRefs,
-                    ),
-                )
-                state.repo.updateProfile(
-                    profileId = profileId,
-                    original = original,
-                    updated = updated,
-                    newGroupId = groupId.ifBlank { "" }.takeIf { it != (original.group ?: "") },
-                    newGroupName = groups.find { it.id == groupId }?.name,
-                    secretEdits = SyncRepository.ProfileSecretEdits(
-                        password = passwordTouched.takeIf { it }?.let { passwordText },
-                        newKeyPems = addedKeys,
-                        removedKeyRefs = removedRefs.toList(),
-                    ),
-                )
+                if (isNew) {
+                    state.repo.createProfile(
+                        profile = SshProfile(
+                            id = "",
+                            name = name.ifBlank { "New profile" },
+                            options = buildOptions(),
+                        ),
+                        groupId = groupId.ifBlank { null },
+                        groupName = groups.find { it.id == groupId }?.name,
+                        secretEdits = secrets,
+                    )
+                } else {
+                    val orig = original!!
+                    val port = portText.toIntOrNull()?.takeIf { it in 1..65535 } ?: orig.options.port
+                    val updated = orig.copy(
+                        name = name.ifBlank { orig.name },
+                        group = groupId.ifBlank { null },
+                        options = buildOptions().copy(
+                            port = port,
+                            user = user.trim().ifBlank { orig.options.user },
+                        ),
+                    )
+                    state.repo.updateProfile(
+                        profileId = profileId,
+                        original = orig,
+                        updated = updated,
+                        newGroupId = groupId.ifBlank { "" }.takeIf { it != (orig.group ?: "") },
+                        newGroupName = groups.find { it.id == groupId }?.name,
+                        secretEdits = secrets,
+                    )
+                }
                 state.refresh { onBack() }
             } catch (e: IllegalStateException) {
                 // Lazy unlock: the save actually needs vault contents.
@@ -158,12 +271,37 @@ fun ProfileEditScreen(
         }
     }
 
+    fun doNewGroup(name: String) {
+        scope.launch {
+            busy = true
+            msg = null
+            try {
+                val id = java.util.UUID.randomUUID().toString()
+                state.repo.createGroup(id, name.trim())
+                state.refresh { groupId = id }
+            } catch (e: IllegalStateException) {
+                // Encrypted shell: re-encrypting needs the passphrase.
+                if ((e.message ?: "").contains("locked", ignoreCase = true)) {
+                    newGroupName = name
+                    pendingNewGroup = true
+                    showUnlock = true
+                } else {
+                    msg = "Failed: ${e.message}"
+                }
+            } catch (e: Exception) {
+                msg = "Failed: ${e.message}"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun doDelete() {
         scope.launch {
             busy = true
             msg = null
             try {
-                state.repo.deleteProfile(profileId, original)
+                state.repo.deleteProfile(profileId, original!!)
                 state.refresh { onBack() }
             } catch (e: IllegalStateException) {
                 // Lazy unlock: re-encrypting the shell needs the passphrase.
@@ -181,120 +319,96 @@ fun ProfileEditScreen(
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Edit profile", style = MaterialTheme.typography.headlineSmall)
-        OutlinedTextField(
-            value = name, onValueChange = { name = it },
-            label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader(
+            if (isNew) "New profile" else "Edit profile",
+            onBack,
+            Modifier.padding(top = 8.dp),
         )
-        GroupDropdown(groups = groups, selected = groupId, onSelect = { groupId = it })
-        OutlinedTextField(
-            value = host, onValueChange = { host = it },
-            label = { Text("Host") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = portText, onValueChange = { portText = it.filter { c -> c.isDigit() }.take(5) },
-                label = { Text("Port") }, modifier = Modifier.weight(1f), singleLine = true,
-            )
-            OutlinedTextField(
-                value = user, onValueChange = { user = it },
-                label = { Text("User") }, modifier = Modifier.weight(1f), singleLine = true,
-            )
+        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 16.dp) {
+            EDIT_TABS.forEachIndexed { i, title ->
+                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+            }
         }
-        AuthDropdown(selected = auth, onSelect = { auth = it })
-        OutlinedTextField(
-            value = if (passwordTouched) passwordText else "",
-            onValueChange = { passwordText = it; passwordTouched = true },
-            label = { Text("Password") },
-            placeholder = {
-                Text(
-                    when {
-                        locked -> "locked — tap the eye to unlock"
-                        hasSavedPassword -> "saved — leave empty to keep, clear to remove"
-                        else -> "no password saved"
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when (tab) {
+                0 -> GeneralTab(
+                    name = name, onName = { name = it },
+                    groups = groups, groupId = groupId, onGroup = { groupId = it },
+                    onNewGroup = { newGroupName = ""; showNewGroup = true },
+                    host = host, onHost = { host = it },
+                    portText = portText, onPort = { portText = it.filter { c -> c.isDigit() }.take(5) },
+                    user = user, onUser = { user = it },
+                    auth = auth, onAuth = { auth = it },
+                    connectionMode = connectionMode, onConnectionMode = { connectionMode = it },
+                    proxyCommand = proxyCommand, onProxyCommand = { proxyCommand = it },
+                    jumpHost = jumpHost, onJumpHost = { jumpHost = it },
+                    socksProxyHost = socksProxyHost, onSocksProxyHost = { socksProxyHost = it },
+                    socksProxyPortText = socksProxyPortText,
+                    onSocksProxyPort = { socksProxyPortText = it.filter { c -> c.isDigit() }.take(5) },
+                    httpProxyHost = httpProxyHost, onHttpProxyHost = { httpProxyHost = it },
+                    httpProxyPortText = httpProxyPortText,
+                    onHttpProxyPort = { httpProxyPortText = it.filter { c -> c.isDigit() }.take(5) },
+                    passwordTouched = passwordTouched,
+                    passwordText = passwordText,
+                    onPassword = { passwordText = it; passwordTouched = true },
+                    locked = locked,
+                    hasSavedPassword = hasSavedPassword,
+                    reveal = reveal,
+                    onReveal = {
+                        if (locked) {
+                            pendingSave = false
+                            showUnlock = true
+                        } else {
+                            reveal = !reveal
+                        }
                     },
+                    effectivePassword = effectivePassword,
+                    liveRefs = liveRefs,
+                    addedKeys = addedKeys,
+                    onRemoveRef = { removedRefs = removedRefs + it },
+                    onDiscardKey = { addedKeys = addedKeys - it },
+                    vaultPresent = vaultPresent,
+                    onAddKey = { showAddKey = true },
                 )
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = {
-                    if (locked) {
-                        pendingSave = false
-                        showUnlock = true
-                    } else {
-                        reveal = !reveal
-                    }
-                }) {
-                    Icon(
-                        if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                        contentDescription = if (reveal) "Hide password" else "Show password",
-                    )
-                }
-            },
-        )
-        if (reveal) {
-            Text(
-                "Current: ${effectivePassword ?: "(none)"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Text("Private keys (${liveRefs.size + addedKeys.size})", style = MaterialTheme.typography.titleMedium)
-        if (vaultPresent && locked) {
-            Text(
-                "Key list is locked — unlock to manage keys.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        for (ref in liveRefs) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    if (ref.startsWith("vault://")) "vault file • …${ref.takeLast(8)}"
-                    else ref.take(44),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
+                1 -> PortsTab(forwards = forwards, onChange = { forwards = it })
+                2 -> AdvancedTab(
+                    x11 = x11, onX11 = { x11 = it },
+                    agentForward = agentForward, onAgentForward = { agentForward = it },
+                    skipBanner = skipBanner, onSkipBanner = { skipBanner = it },
+                    reuseSession = reuseSession, onReuseSession = { reuseSession = it },
+                    warnOnClose = warnOnClose, onWarnOnClose = { warnOnClose = it },
+                    keepaliveText = keepaliveText,
+                    onKeepalive = { keepaliveText = it.filter { c -> c.isDigit() }.take(7) },
+                    keepaliveMaxText = keepaliveMaxText,
+                    onKeepaliveMax = { keepaliveMaxText = it.filter { c -> c.isDigit() }.take(4) },
+                    readyTimeoutText = readyTimeoutText,
+                    onReadyTimeout = { readyTimeoutText = it.filter { c -> c.isDigit() }.take(7) },
                 )
-                IconButton(
-                    enabled = !vaultPresent || !locked,
-                    onClick = { removedRefs = removedRefs + ref },
-                ) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Remove key")
-                }
+                3 -> CiphersTab(checked = ciphers, onChange = { ciphers = it })
+                4 -> ColoursTab()
+                else -> ScriptsTab(scriptsList = scripts, onChange = { scripts = it })
             }
         }
-        for ((pem, desc) in addedKeys) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "new • ${desc.ifBlank { "pasted key" }} (${pem.lines().size} lines)",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { addedKeys = addedKeys - (pem to desc) }) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Discard key")
-                }
-            }
+        if (busy) CircularProgressIndicator(Modifier.padding(horizontal = 16.dp))
+        msg?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
         }
-        OutlinedButton(
-            enabled = !vaultPresent || !locked,
-            onClick = { showAddKey = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Add private key") }
-        if (busy) CircularProgressIndicator()
-        msg?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+        ) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Cancel") }
-            OutlinedButton(
-                enabled = !busy,
-                onClick = { showDeleteConfirm = true },
-                modifier = Modifier.weight(1f),
-            ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            if (!isNew) {
+                OutlinedButton(
+                    enabled = !busy,
+                    onClick = { showDeleteConfirm = true },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            }
             Button(enabled = !busy, onClick = { doSave() }, modifier = Modifier.weight(1f)) {
                 Text("Save")
             }
@@ -311,13 +425,39 @@ fun ProfileEditScreen(
         )
     }
 
-    if (showDeleteConfirm) {
+    if (showNewGroup) {
+        AlertDialog(
+            onDismissRequest = { showNewGroup = false },
+            title = { Text("New group") },
+            text = {
+                OutlinedTextField(
+                    value = newGroupName,
+                    onValueChange = { newGroupName = it },
+                    label = { Text("Group name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                Button(
+                    enabled = newGroupName.isNotBlank() && !busy,
+                    onClick = {
+                        showNewGroup = false
+                        doNewGroup(newGroupName)
+                    },
+                ) { Text("Create") }
+            },
+            dismissButton = { TextButton(onClick = { showNewGroup = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showDeleteConfirm && !isNew) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("Delete this profile?") },
             text = {
                 Text(
-                    "“${original.name}” is removed from the config. " +
+                    "“${original?.name}” is removed from the config. " +
                         "Saved vault secrets are kept (they may serve other profiles). " +
                         "This cannot be undone.",
                 )
@@ -346,6 +486,10 @@ fun ProfileEditScreen(
                         pendingSave = false
                         doSave()
                     }
+                    pendingNewGroup -> {
+                        pendingNewGroup = false
+                        doNewGroup(newGroupName)
+                    }
                     else -> reveal = true
                 }
             },
@@ -353,14 +497,448 @@ fun ProfileEditScreen(
                 showUnlock = false
                 pendingSave = false
                 pendingDelete = false
+                pendingNewGroup = false
             },
             onDismiss = {
                 showUnlock = false
                 pendingSave = false
                 pendingDelete = false
+                pendingNewGroup = false
             },
             dismissible = true,
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+@Suppress("LongParameterList")
+private fun GeneralTab(
+    name: String, onName: (String) -> Unit,
+    groups: List<id.web.izs.sshclient.core.config.ProfileGroup>,
+    groupId: String, onGroup: (String) -> Unit, onNewGroup: () -> Unit,
+    host: String, onHost: (String) -> Unit,
+    portText: String, onPort: (String) -> Unit,
+    user: String, onUser: (String) -> Unit,
+    auth: String, onAuth: (String) -> Unit,
+    connectionMode: String, onConnectionMode: (String) -> Unit,
+    proxyCommand: String, onProxyCommand: (String) -> Unit,
+    jumpHost: String, onJumpHost: (String) -> Unit,
+    socksProxyHost: String, onSocksProxyHost: (String) -> Unit,
+    socksProxyPortText: String, onSocksProxyPort: (String) -> Unit,
+    httpProxyHost: String, onHttpProxyHost: (String) -> Unit,
+    httpProxyPortText: String, onHttpProxyPort: (String) -> Unit,
+    passwordTouched: Boolean, passwordText: String, onPassword: (String) -> Unit,
+    locked: Boolean, hasSavedPassword: Boolean,
+    reveal: Boolean, onReveal: () -> Unit,
+    effectivePassword: String?,
+    liveRefs: List<String>,
+    addedKeys: List<Pair<String, String>>,
+    onRemoveRef: (String) -> Unit,
+    onDiscardKey: (Pair<String, String>) -> Unit,
+    vaultPresent: Boolean,
+    onAddKey: () -> Unit,
+) {
+    OutlinedTextField(
+        value = name, onValueChange = onName,
+        label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+    )
+    GroupDropdown(groups = groups, selected = groupId, onSelect = onGroup, onNewGroup = onNewGroup)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = host, onValueChange = onHost,
+            label = { Text("Host") }, modifier = Modifier.weight(2f), singleLine = true,
+        )
+        OutlinedTextField(
+            value = portText, onValueChange = onPort,
+            label = { Text("Port") }, modifier = Modifier.weight(1f), singleLine = true,
+        )
+    }
+    OutlinedTextField(
+        value = user, onValueChange = onUser,
+        label = { Text("User") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+    )
+    AuthDropdown(selected = auth, onSelect = onAuth)
+    OutlinedTextField(
+        value = if (passwordTouched) passwordText else "",
+        onValueChange = onPassword,
+        label = { Text("Password") },
+        placeholder = {
+            Text(
+                when {
+                    locked -> "locked — tap the eye to unlock"
+                    hasSavedPassword -> "saved — leave empty to keep, clear to remove"
+                    else -> "no password saved"
+                },
+            )
+        },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = onReveal) {
+                Icon(
+                    if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                    contentDescription = if (reveal) "Hide password" else "Show password",
+                )
+            }
+        },
+    )
+    if (reveal) {
+        Text(
+            "Current: ${effectivePassword ?: "(none)"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Text("Private keys (${liveRefs.size + addedKeys.size})", style = MaterialTheme.typography.titleMedium)
+    if (vaultPresent && locked) {
+        Text(
+            "Key list is locked — unlock to manage keys.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    for (ref in liveRefs) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                if (ref.startsWith("vault://")) "vault file • …${ref.takeLast(8)}"
+                else ref.take(44),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                enabled = !vaultPresent || !locked,
+                onClick = { onRemoveRef(ref) },
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Remove key")
+            }
+        }
+    }
+    for (entry in addedKeys) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "new • ${entry.second.ifBlank { "pasted key" }} (${entry.first.lines().size} lines)",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { onDiscardKey(entry) }) {
+                Icon(Icons.Filled.Delete, contentDescription = "Discard key")
+            }
+        }
+    }
+    OutlinedButton(
+        enabled = !vaultPresent || !locked,
+        onClick = onAddKey,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text("Add private key") }
+    Text("Connection", style = MaterialTheme.typography.titleMedium)
+    ConnectionDropdown(selected = connectionMode, onSelect = onConnectionMode)
+    if (connectionMode != "direct") {
+        Text(
+            "Mobile connects direct only for now — this is saved as-is and works on desktop.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    when (connectionMode) {
+        "proxyCommand" -> OutlinedTextField(
+            value = proxyCommand, onValueChange = onProxyCommand,
+            label = { Text("Proxy command") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+        )
+        "jumpHost" -> OutlinedTextField(
+            value = jumpHost, onValueChange = onJumpHost,
+            label = { Text("Jump host (profile name or id)") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true,
+        )
+        "socksProxy" -> Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OutlinedTextField(
+                value = socksProxyHost, onValueChange = onSocksProxyHost,
+                label = { Text("SOCKS host") }, modifier = Modifier.weight(1f), singleLine = true,
+            )
+            OutlinedTextField(
+                value = socksProxyPortText, onValueChange = onSocksProxyPort,
+                label = { Text("Port") }, modifier = Modifier.weight(1f), singleLine = true,
+            )
+        }
+        "httpProxy" -> Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OutlinedTextField(
+                value = httpProxyHost, onValueChange = onHttpProxyHost,
+                label = { Text("HTTP proxy host") }, modifier = Modifier.weight(1f), singleLine = true,
+            )
+            OutlinedTextField(
+                value = httpProxyPortText, onValueChange = onHttpProxyPort,
+                label = { Text("Port") }, modifier = Modifier.weight(1f), singleLine = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PortsTab(forwards: List<ForwardedPort>, onChange: (List<ForwardedPort>) -> Unit) {
+    Text("Port forwarding", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Local/Remote listen on interface:port and reach target:port. Dynamic is a SOCKS proxy (target hidden).",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    for ((i, f) in forwards.withIndex()) {
+        ForwardCard(
+            f = f,
+            onUpdate = { onChange(forwards.toMutableList().also { it[i] = f }) },
+            onRemove = { onChange(forwards.toMutableList().also { it.removeAt(i) }) },
+        )
+    }
+    OutlinedButton(
+        onClick = { onChange(forwards + ForwardedPort()) },
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text("Add forwarding") }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ForwardCard(f: ForwardedPort, onUpdate: (ForwardedPort) -> Unit, onRemove: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            var typeOpen by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = typeOpen,
+                onExpandedChange = { typeOpen = it },
+                modifier = Modifier.weight(1f),
+            ) {
+                OutlinedTextField(
+                    value = f.type, onValueChange = { },
+                    readOnly = true, label = { Text("Type") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeOpen) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                )
+                ExposedDropdownMenu(expanded = typeOpen, onDismissRequest = { typeOpen = false }) {
+                    for (t in listOf("Local", "Remote", "Dynamic")) {
+                        DropdownMenuItem(
+                            text = { Text(t) },
+                            onClick = { onUpdate(f.copy(type = t)); typeOpen = false },
+                        )
+                    }
+                }
+            }
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Filled.Delete, contentDescription = "Remove forwarding")
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = f.host, onValueChange = { onUpdate(f.copy(host = it)) },
+                label = { Text("Listen interface") }, modifier = Modifier.weight(1f), singleLine = true,
+            )
+            OutlinedTextField(
+                value = f.port.toString(), onValueChange = { onUpdate(f.copy(port = it.toIntOrNull() ?: f.port)) },
+                label = { Text("Listen port") }, modifier = Modifier.weight(1f), singleLine = true,
+            )
+        }
+        if (f.type != "Dynamic") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = f.targetAddress, onValueChange = { onUpdate(f.copy(targetAddress = it)) },
+                    label = { Text("Target host") }, modifier = Modifier.weight(1f), singleLine = true,
+                )
+                OutlinedTextField(
+                    value = f.targetPort.toString(),
+                    onValueChange = { onUpdate(f.copy(targetPort = it.toIntOrNull() ?: f.targetPort)) },
+                    label = { Text("Target port") }, modifier = Modifier.weight(1f), singleLine = true,
+                )
+            }
+        }
+        OutlinedTextField(
+            value = f.description, onValueChange = { onUpdate(f.copy(description = it)) },
+            label = { Text("Description") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+        )
+    }
+}
+
+@Composable
+@Suppress("LongParameterList")
+private fun AdvancedTab(
+    x11: Boolean, onX11: (Boolean) -> Unit,
+    agentForward: Boolean, onAgentForward: (Boolean) -> Unit,
+    skipBanner: Boolean, onSkipBanner: (Boolean) -> Unit,
+    reuseSession: Boolean, onReuseSession: (Boolean) -> Unit,
+    warnOnClose: Boolean, onWarnOnClose: (Boolean) -> Unit,
+    keepaliveText: String, onKeepalive: (String) -> Unit,
+    keepaliveMaxText: String, onKeepaliveMax: (String) -> Unit,
+    readyTimeoutText: String, onReadyTimeout: (String) -> Unit,
+) {
+    Text("Session", style = MaterialTheme.typography.titleMedium)
+    CheckRow("X11 forwarding", x11, onX11)
+    CheckRow("Forward SSH agent", agentForward, onAgentForward)
+    CheckRow("Skip banner", skipBanner, onSkipBanner)
+    CheckRow("Reuse session", reuseSession, onReuseSession)
+    CheckRow("Warn before closing", warnOnClose, onWarnOnClose)
+    Text("Timeouts", style = MaterialTheme.typography.titleMedium)
+    OutlinedTextField(
+        value = keepaliveText, onValueChange = onKeepalive,
+        label = { Text("Keepalive interval (ms, default 5000)") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true,
+    )
+    OutlinedTextField(
+        value = keepaliveMaxText, onValueChange = onKeepaliveMax,
+        label = { Text("Keepalive max misses (default 10)") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true,
+    )
+    OutlinedTextField(
+        value = readyTimeoutText, onValueChange = onReadyTimeout,
+        label = { Text("Ready timeout (ms, blank = default)") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true,
+    )
+}
+
+@Composable
+private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Checkbox(checked = checked, onCheckedChange = onChange)
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun CiphersTab(checked: Map<String, List<String>>, onChange: (Map<String, List<String>>) -> Unit) {
+    Text("Algorithms", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Uncheck to restrict negotiation. Untouched lists stay at desktop defaults and are omitted from the config.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    val labels = mapOf(
+        SshAlgorithms.CIPHER to "Ciphers",
+        SshAlgorithms.KEX to "Key exchange",
+        SshAlgorithms.HMAC to "HMAC",
+        SshAlgorithms.SERVER_HOST_KEY to "Host keys",
+        SshAlgorithms.COMPRESSION to "Compression",
+    )
+    for (type in SshAlgorithms.TYPES) {
+        Text(labels.getValue(type), style = MaterialTheme.typography.titleSmall)
+        val defaults = SshAlgorithms.DEFAULTS.getValue(type)
+        val current = checked[type] ?: defaults
+        val candidates = (defaults + current.filter { it !in defaults }).distinct()
+        for (algo in candidates) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Checkbox(
+                    checked = algo in current,
+                    onCheckedChange = { on ->
+                        val next = if (on) current + algo else current - algo
+                        onChange(checked + (type to next))
+                    },
+                )
+                Text(
+                    algo,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColoursTab() {
+    Text("Colours", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Color schemes are managed on desktop for now — the stored value is " +
+            "preserved untouched when you save. Mobile scheme editing is planned.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ScriptsTab(scriptsList: List<LoginScript>, onChange: (List<LoginScript>) -> Unit) {
+    Text("Login scripts", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Wait for expect, then send. Regex and optional tweak matching.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    for ((i, s) in scriptsList.withIndex()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Step ${i + 1}",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onChange(scriptsList.toMutableList().also { it.removeAt(i) }) }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Remove step")
+                }
+            }
+            OutlinedTextField(
+                value = s.expect,
+                onValueChange = { v -> onChange(scriptsList.toMutableList().also { it[i] = s.copy(expect = v) }) },
+                label = { Text("Expect") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            )
+            OutlinedTextField(
+                value = s.send,
+                onValueChange = { v -> onChange(scriptsList.toMutableList().also { it[i] = s.copy(send = v) }) },
+                label = { Text("Send") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Checkbox(
+                        checked = s.isRegex,
+                        onCheckedChange = { v ->
+                            onChange(scriptsList.toMutableList().also { it[i] = s.copy(isRegex = v) })
+                        },
+                    )
+                    Text("Regex", style = MaterialTheme.typography.bodyMedium)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Checkbox(
+                        checked = s.optional,
+                        onCheckedChange = { v ->
+                            onChange(scriptsList.toMutableList().also { it[i] = s.copy(optional = v) })
+                        },
+                    )
+                    Text("Optional", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+    OutlinedButton(
+        onClick = { onChange(scriptsList + LoginScript()) },
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text("Add step") }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConnectionDropdown(selected: String, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val titles = mapOf(
+        "direct" to "Direct",
+        "proxyCommand" to "Proxy command",
+        "jumpHost" to "Jump host",
+        "socksProxy" to "SOCKS proxy",
+        "httpProxy" to "HTTP proxy",
+    )
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = titles[selected] ?: "Direct", onValueChange = { },
+            readOnly = true, label = { Text("Connection") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for ((value, title) in titles) {
+                DropdownMenuItem(
+                    text = { Text(title) },
+                    onClick = { onSelect(value); expanded = false },
+                )
+            }
+        }
     }
 }
 
@@ -370,6 +948,7 @@ private fun GroupDropdown(
     groups: List<id.web.izs.sshclient.core.config.ProfileGroup>,
     selected: String,
     onSelect: (String) -> Unit,
+    onNewGroup: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val label = when {
@@ -394,6 +973,10 @@ private fun GroupDropdown(
                     onClick = { onSelect(g.id); expanded = false },
                 )
             }
+            DropdownMenuItem(
+                text = { Text("New group…") },
+                onClick = { expanded = false; onNewGroup() },
+            )
         }
     }
 }
@@ -401,23 +984,29 @@ private fun GroupDropdown(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AuthDropdown(selected: String, onSelect: (String) -> Unit) {
+    // Desktop parity (sshProfileSettings.component.pug:110-171): Auto is
+    // auth=null (try everything); the connect layer already tries password
+    // then keys regardless of this value.
     var expanded by remember { mutableStateOf(false) }
-    val choices = remember(selected) {
-        (listOf("password", "publicKey", "agent", "keyboardInteractive") + selected)
-            .filter { it.isNotBlank() }.distinct()
-    }
+    val choices = listOf(
+        "" to "Auto",
+        "password" to "Password",
+        "publicKey" to "Key",
+        "agent" to "Agent",
+        "keyboardInteractive" to "Interactive",
+    )
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
-            value = selected.ifBlank { "password" }, onValueChange = { },
+            value = choices.toMap()[selected] ?: selected, onValueChange = { },
             readOnly = true, label = { Text("Auth method") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier.fillMaxWidth().menuAnchor(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            for (c in choices) {
+            for ((value, label) in choices) {
                 DropdownMenuItem(
-                    text = { Text(c) },
-                    onClick = { onSelect(c); expanded = false },
+                    text = { Text(label) },
+                    onClick = { onSelect(value); expanded = false },
                 )
             }
         }

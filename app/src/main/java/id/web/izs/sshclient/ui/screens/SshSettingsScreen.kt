@@ -10,7 +10,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,7 +46,7 @@ fun SshSettingsScreen(
     var msg by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("SSH", style = MaterialTheme.typography.headlineSmall)
+        ScreenHeader("SSH", onBack)
         if (encrypted) {
             Text(
                 "This config is encrypted: SSH options live inside the vault blob " +
@@ -102,6 +101,5 @@ fun SshSettingsScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Save") }
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
     }
 }

@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -47,6 +49,7 @@ fun ProfileListScreen(
     state: AppState,
     onOpen: (profileId: String) -> Unit,
     onEdit: (profileId: String) -> Unit,
+    onAdd: () -> Unit,
     onSettings: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -76,11 +79,24 @@ fun ProfileListScreen(
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Profiles (${profiles.size})",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.weight(1f),
+            Icon(
+                Icons.Filled.Terminal,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
             )
+            Text(
+                "izs SSH",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
+            )
+            Text(
+                "${profiles.size}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(onClick = onAdd) {
+                Icon(Icons.Filled.Add, contentDescription = "New profile")
+            }
             IconButton(onClick = onSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = "Settings")
             }
@@ -96,7 +112,7 @@ fun ProfileListScreen(
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (!state.loading && profiles.isEmpty()) {
             Text(
-                "No SSH profiles yet. Open Settings > Config Sync to download a cloud config.",
+                "No SSH profiles yet. Tap + to create one, or open Settings > Config Sync to download a cloud config.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -282,7 +298,7 @@ private fun ProfileCard(
                         if (n > 0) add("$n key")
                     }.joinToString(" + ").ifBlank { "no saved credentials" }
                     Text(
-                        "auth: ${profile.options.auth ?: "?"} · $creds",
+                        "auth: ${profile.options.auth ?: "auto"} · $creds",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

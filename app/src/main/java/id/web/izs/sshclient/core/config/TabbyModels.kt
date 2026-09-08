@@ -52,16 +52,103 @@ data class SshOptions(
     val privateKeys: List<String> = emptyList(),
     val keepaliveInterval: Long = 5000,
     val keepaliveCountMax: Int = 10,
-    val readyTimeout: Long? = 20000,
+    /** Null = desktop default (no explicit timeout in YAML). */
+    val readyTimeout: Long? = null,
     val jumpHost: String? = null,
     val agentForward: Boolean = false,
+    val x11: Boolean = false,
+    val skipBanner: Boolean = false,
+    /** Null = desktop default (falls back to the global ssh.warnOnClose). */
+    val warnOnClose: Boolean? = null,
     val proxyCommand: String? = null,
     val socksProxyHost: String? = null,
     val socksProxyPort: Int? = null,
     val httpProxyHost: String? = null,
     val httpProxyPort: Int? = null,
     val reuseSession: Boolean = true,
+    /**
+     * Empty = desktop defaults (filled transiently by SshDefaults, never
+     * written to YAML — the cloud omits defaults by design).
+     * Keys: cipher, kex, hmac, serverHostKey, compression.
+     */
+    val algorithms: Map<String, List<String>> = emptyMap(),
+    val forwardedPorts: List<ForwardedPort> = emptyList(),
+    val scripts: List<LoginScript> = emptyList(),
 )
+
+/** Desktop ForwardedPortConfig parity (tabby-ssh/src/api/interfaces.ts). */
+data class ForwardedPort(
+    /** Local | Remote | Dynamic (Dynamic hides target = SOCKS proxy). */
+    val type: String = "Local",
+    /** Listen interface + port. */
+    val host: String = "127.0.0.1",
+    val port: Int = 8000,
+    /** Destination (unused for Dynamic). */
+    val targetAddress: String = "127.0.0.1",
+    val targetPort: Int = 80,
+    val description: String = "",
+)
+
+/** Desktop LoginScript parity (tabby-terminal loginScriptProcessing.ts). */
+data class LoginScript(
+    val expect: String = "",
+    val send: String = "",
+    val isRegex: Boolean = false,
+    val optional: Boolean = false,
+)
+
+/**
+ * Default algorithm lists, verbatim from tabby-ssh/src/algorithms.ts
+ * defaultAlgorithms (russh-supported subset, kex-strict appended).
+ * Desktop sorts every list on save EXCEPT compression.
+ */
+object SshAlgorithms {
+    const val KEX = "kex"
+    const val SERVER_HOST_KEY = "serverHostKey"
+    const val CIPHER = "cipher"
+    const val HMAC = "hmac"
+    const val COMPRESSION = "compression"
+
+    val TYPES = listOf(CIPHER, KEX, HMAC, SERVER_HOST_KEY, COMPRESSION)
+
+    val DEFAULTS: Map<String, List<String>> = mapOf(
+        KEX to listOf(
+            "mlkem768x25519-sha256",
+            "curve25519-sha256",
+            "curve25519-sha256@libssh.org",
+            "diffie-hellman-group16-sha512",
+            "diffie-hellman-group14-sha256",
+            "ext-info-c",
+            "ext-info-s",
+            "kex-strict-c-v00@openssh.com",
+            "kex-strict-s-v00@openssh.com",
+        ),
+        SERVER_HOST_KEY to listOf(
+            "ssh-ed25519",
+            "ecdsa-sha2-nistp256",
+            "ecdsa-sha2-nistp521",
+            "rsa-sha2-256",
+            "rsa-sha2-512",
+            "ssh-rsa",
+        ),
+        CIPHER to listOf(
+            "chacha20-poly1305@openssh.com",
+            "aes256-gcm@openssh.com",
+            "aes256-ctr",
+            "aes192-ctr",
+            "aes128-ctr",
+        ),
+        HMAC to listOf(
+            "hmac-sha2-512-etm@openssh.com",
+            "hmac-sha2-256-etm@openssh.com",
+            "hmac-sha2-512",
+            "hmac-sha2-256",
+            "hmac-sha1-etm@openssh.com",
+            "hmac-sha1",
+        ),
+        COMPRESSION to listOf("none"),
+    )
+}
 
 data class ProfileGroup(
     val id: String,

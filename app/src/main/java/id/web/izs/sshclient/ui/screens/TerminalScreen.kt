@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,7 +26,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
@@ -271,29 +273,54 @@ fun TerminalScreen(
         return
     }
 
-    // Full-bleed black stage (Termux/tabby-android): header bar, terminal
-    // grid and docked key bars share one dark surface — no cards, no gaps.
+    // Stage stays full-bleed black, but the top bar now matches every other
+    // page (themed surface, back arrow + title) — the slate strip is gone.
+    // goBack() still disconnects first; a session picker comes with the
+    // multi-session update.
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
-                .background(Color(0xFF1E2A34))
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(end = 12.dp, top = 4.dp, bottom = 4.dp),
         ) {
+            IconButton(onClick = { goBack() }) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+            }
+            // Status dot sits on the NAME row so user@host below gets the
+            // full width (green = connected, amber = connecting, red =
+            // disconnected; tap to disconnect, same as the back arrow).
             Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        profile.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val dot = when (status) {
+                        "connected" -> Color(0xFF4CAF50)
+                        "connecting…" -> Color(0xFFFFC107)
+                        else -> MaterialTheme.colorScheme.error
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.size(32.dp).clickable(
+                            onClick = { goBack() },
+                            onClickLabel = "Disconnect",
+                        ),
+                    ) {
+                        Box(Modifier.size(12.dp).background(dot, CircleShape))
+                    }
+                }
                 Text(
-                    profile.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    "${profile.options.user}@${profile.options.host}:${profile.options.port} · $status",
+                    "${profile.options.user}@${profile.options.host}:${profile.options.port}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             IconButton(onClick = {
@@ -336,15 +363,7 @@ fun TerminalScreen(
                     )
                 }
             }
-            IconButton(onClick = { goBack() }) {
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = "Disconnect",
-                    tint = MaterialTheme.colorScheme.error,
-                )
-            }
         }
-        HorizontalDivider(thickness = 1.dp, color = Color.White.copy(alpha = 0.08f))
         if (copied) {
             Text(
                 "Screen copied",

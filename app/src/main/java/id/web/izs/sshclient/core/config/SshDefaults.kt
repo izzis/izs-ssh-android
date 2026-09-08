@@ -16,7 +16,11 @@ object SshDefaults {
                 keepaliveInterval = if (o.keepaliveInterval <= 0) 5000 else o.keepaliveInterval,
                 keepaliveCountMax = if (o.keepaliveCountMax <= 0) 10 else o.keepaliveCountMax,
                 readyTimeout = o.readyTimeout ?: 20000,
-                reuseSession = true,
+                // Desktop ctor parity (profiles.ts:57-60): missing algorithm
+                // keys fall back to the built-in lists, transiently.
+                algorithms = SshAlgorithms.TYPES.associateWith { k ->
+                    o.algorithms[k] ?: SshAlgorithms.DEFAULTS.getValue(k)
+                },
             ),
         )
     }

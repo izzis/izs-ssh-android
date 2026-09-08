@@ -254,14 +254,54 @@ object RawConfigStore {
                 readyTimeout = (o["readyTimeout"] as? Number)?.toLong(),
                 jumpHost = o["jumpHost"]?.toString(),
                 agentForward = o["agentForward"] as? Boolean ?: false,
+                x11 = o["x11"] as? Boolean ?: false,
+                skipBanner = o["skipBanner"] as? Boolean ?: false,
+                warnOnClose = o["warnOnClose"] as? Boolean,
                 proxyCommand = o["proxyCommand"]?.toString(),
                 socksProxyHost = o["socksProxyHost"]?.toString(),
                 socksProxyPort = (o["socksProxyPort"] as? Number)?.toInt(),
                 httpProxyHost = o["httpProxyHost"]?.toString(),
                 httpProxyPort = (o["httpProxyPort"] as? Number)?.toInt(),
                 reuseSession = o["reuseSession"] as? Boolean ?: true,
+                algorithms = parseAlgorithms(o["algorithms"]),
+                forwardedPorts = parseForwardedPorts(o["forwardedPorts"]),
+                scripts = parseLoginScripts(o["scripts"]),
             ),
         )
+    }
+
+    private fun parseAlgorithms(raw: Any?): Map<String, List<String>> {
+        val m = raw as? Map<String, Any?> ?: return emptyMap()
+        return SshAlgorithms.TYPES.mapNotNull { k ->
+            val list = (m[k] as? List<*>)?.map { it.toString() }
+            if (list == null) null else k to list
+        }.toMap()
+    }
+
+    private fun parseForwardedPorts(raw: Any?): List<ForwardedPort> {
+        val list = raw as? List<*> ?: return emptyList()
+        return list.filterIsInstance<Map<String, Any?>>().map { m ->
+            ForwardedPort(
+                type = m["type"]?.toString() ?: "Local",
+                host = m["host"]?.toString() ?: "127.0.0.1",
+                port = (m["port"] as? Number)?.toInt() ?: 8000,
+                targetAddress = m["targetAddress"]?.toString() ?: "127.0.0.1",
+                targetPort = (m["targetPort"] as? Number)?.toInt() ?: 80,
+                description = m["description"]?.toString() ?: "",
+            )
+        }
+    }
+
+    private fun parseLoginScripts(raw: Any?): List<LoginScript> {
+        val list = raw as? List<*> ?: return emptyList()
+        return list.filterIsInstance<Map<String, Any?>>().map { m ->
+            LoginScript(
+                expect = m["expect"]?.toString() ?: "",
+                send = m["send"]?.toString() ?: "",
+                isRegex = m["isRegex"] as? Boolean ?: false,
+                optional = m["optional"] as? Boolean ?: false,
+            )
+        }
     }
 
     /**
@@ -357,6 +397,62 @@ object RawConfigStore {
         }
         opts["privateKeys"] = privateKeys.toList()
         if (o.jumpHost != null) opts["jumpHost"] = o.jumpHost else opts.remove("jumpHost")
+        // Desktop ConfigProxy parity: keys the editor owns are written only
+        // when they differ from the built-in defaults, otherwise removed —
+        // the cloud YAML stores non-defaults, defaults come from code.
+        val d = SshOptions()
+        if (o.keepaliveInterval != d.keepaliveInterval) opts["keepaliveInterval"] = o.keepaliveInterval
+        else opts.remove("keepaliveInterval")
+        if (o.keepaliveCountMax != d.keepaliveCountMax) opts["keepaliveCountMax"] = o.keepaliveCountMax
+        else opts.remove("keepaliveCountMax")
+        if (o.readyTimeout != null) opts["readyTimeout"] = o.readyTimeout else opts.remove("readyTimeout")
+        if (o.agentForward) opts["agentForward"] = true else opts.remove("agentForward")
+        if (o.x11) opts["x11"] = true else opts.remove("x11")
+        if (o.skipBanner) opts["skipBanner"] = true else opts.remove("skipBanner")
+        if (o.warnOnClose == true) opts["warnOnClose"] = true else opts.remove("warnOnClose")
+        if (o.reuseSession != d.reuseSession) opts["reuseSession"] = o.reuseSession
+        else opts.remove("reuseSession")
+        if (o.proxyCommand != null) opts["proxyCommand"] = o.proxyCommand else opts.remove("proxyCommand")
+        if (o.socksProxyHost != null) opts["socksProxyHost"] = o.socksProxyHost
+        else opts.remove("socksProxyHost")
+        if (o.socksProxyPort != null) opts["socksProxyPort"] = o.socksProxyPort
+        else opts.remove("socksProxyPort")
+        if (o.httpProxyHost != null) opts["httpProxyHost"] = o.httpProxyHost
+        else opts.remove("httpProxyHost")
+        if (o.httpProxyPort != null) opts["httpProxyPort"] = o.httpProxyPort
+        else opts.remove("httpProxyPort")
+        if (o.algorithms == SshAlgorithms.DEFAULTS) opts.remove("algorithms")
+        else if (o.algorithms.isNotEmpty()) {
+            // Desktop sorts on save except compression (profiles.ts + editor).
+            val sorted = LinkedHashMap<String, Any?>()
+            for (k in SshAlgorithms.TYPES) {
+                val list = o.algorithms[k] ?: continue
+                sorted[k] = if (k == SshAlgorithms.COMPRESSION) list.toList() else list.sorted()
+            }
+            opts["algorithms"] = sorted
+        }
+        if (o.forwardedPorts.isNotEmpty()) {
+            opts["forwardedPorts"] = o.forwardedPorts.map { f ->
+                linkedMapOf<String, Any?>(
+                    "type" to f.type,
+                    "host" to f.host,
+                    "port" to f.port,
+                    "targetAddress" to f.targetAddress,
+                    "targetPort" to f.targetPort,
+                    "description" to f.description,
+                )
+            }
+        } else opts.remove("forwardedPorts")
+        if (o.scripts.isNotEmpty()) {
+            opts["scripts"] = o.scripts.map { s ->
+                linkedMapOf<String, Any?>(
+                    "expect" to s.expect,
+                    "send" to s.send,
+                    "isRegex" to s.isRegex,
+                    "optional" to s.optional,
+                )
+            }
+        } else opts.remove("scripts")
         out["options"] = opts
         return out
     }
@@ -410,4 +506,72 @@ object RawConfigStore {
     }
 
     fun isHttps(host: String): Boolean = host.startsWith("https://", ignoreCase = true)
+
+    /**
+     * Desktop id parity (profiles.service.ts): `<type>:custom:<slug>:<uuid>`.
+     * slugify approximation: lowercase, non-alphanumerics collapse to '-'.
+     */
+    fun slugify(name: String): String {
+        val s = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+        return s.ifBlank { "profile" }
+    }
+
+    fun mintProfileId(type: String, name: String): String =
+        "$type:custom:${slugify(name)}:${java.util.UUID.randomUUID()}"
+
+    /** Inline plaintext password carrier (desktop: transient, never at rest). */
+    data class InlinePassword(val user: String, val host: String, val port: Int, val value: String)
+
+    /**
+     * Returns the inline `options.password` when it is a real plaintext
+     * secret (null when absent, blank, or already a vault:// ref).
+     * Parse fallbacks (root/22) match parseProfile so secret keys resolve.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun inlinePasswordOf(profile: Map<String, Any?>): InlinePassword? {
+        val o = profile["options"] as? Map<String, Any?> ?: return null
+        val pw = o["password"]?.toString() ?: return null
+        if (pw.isBlank() || pw.startsWith("vault://")) return null
+        return InlinePassword(
+            user = o["user"]?.toString() ?: "root",
+            host = o["host"]?.toString() ?: "",
+            port = (o["port"] as? Number)?.toInt() ?: 22,
+            value = pw,
+        )
+    }
+
+    /** Copy of the profile map with the inline password key removed. */
+    @Suppress("UNCHECKED_CAST")
+    fun withoutInlinePassword(profile: Map<String, Any?>): LinkedHashMap<String, Any?> {
+        val out = LinkedHashMap<String, Any?>(profile)
+        val o = LinkedHashMap<String, Any?>(profile["options"] as? Map<String, Any?> ?: emptyMap())
+        o.remove("password")
+        out["options"] = o
+        return out
+    }
+
+    /** All `options.privateKeys` entries as strings (refs, PEM, or paths). */
+    @Suppress("UNCHECKED_CAST")
+    fun privateKeyRefs(profile: Map<String, Any?>): List<String> {
+        val o = profile["options"] as? Map<String, Any?> ?: return emptyList()
+        return (o["privateKeys"] as? List<*>)?.map { it.toString() } ?: emptyList()
+    }
+
+    /**
+     * Pasted PEM contents resting inline (desktop keeps keys as refs/paths,
+     * never PEM in YAML). Key PATHS are intentionally NOT swept — they are
+     * meaningful entries desktop resolves, not secrets.
+     */
+    fun inlineKeyPems(profile: Map<String, Any?>): List<String> =
+        privateKeyRefs(profile).filter { !it.startsWith("vault://") && it.contains("-----BEGIN") }
+
+    /** Copy of the profile map with the given final key-ref list. */
+    @Suppress("UNCHECKED_CAST")
+    fun withPrivateKeys(profile: Map<String, Any?>, refs: List<String>): LinkedHashMap<String, Any?> {
+        val out = LinkedHashMap<String, Any?>(profile)
+        val o = LinkedHashMap<String, Any?>(profile["options"] as? Map<String, Any?> ?: emptyMap())
+        o["privateKeys"] = refs.toList()
+        out["options"] = o
+        return out
+    }
 }
