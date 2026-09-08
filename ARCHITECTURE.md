@@ -32,6 +32,7 @@ app/src/main/java/id/web/izs/sshclient/
   MainActivity.kt                 Boot sequence, NavHost, owns AppViewModel
   ui/
     AppViewModel.kt               Rotation-safe holder of AppState (passphrase survives rotate)
+    SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
     Theme.kt                      IzsDarkColors (dark-only Material3 theme)
     screens/
@@ -91,7 +92,7 @@ app/src/main/java/id/web/izs/sshclient/
                           known_hosts (TOFU), terminal prefs (font size)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (16 files, 127 tests — §8)
+app/src/test/... (17 files, 133 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -103,8 +104,11 @@ reached from Settings and never gates boot (the `setup`/`sync` start routes
 and `SyncSetupScreen` are deleted). Routes: `profiles`, `ssh/{id}`,
 `edit/new`, `edit/{id}` (+ settings sections). `AppState` is created once per `AppViewModel`
 (`by viewModels()`), so rotation keeps the unlocked vault; the nav stack
-itself resets (reconnect is one tap, no password re-asked) and SSH sessions
-are screen-scoped (a rotate drops the live PTY by design, v1 scope).
+itself resets (no password re-asked). SSH sessions live in
+`SshSessionViewModel` (also `by viewModels()`, keyed by session UUID), so a
+rotate or a trip back to the list never drops the live PTY — Back keeps the
+session alive, only the explicit disconnect control closes it (per-session
+`warnOnClose` dialog).
 
 ## 4. Config Sync parity (Tabby Desktop)
 
@@ -269,7 +273,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 127 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 133 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -289,6 +293,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `SshAlgorithmFactoriesTest` | defaults resolve (known skips), order, null-on-defaults, per-category fallback |
 | `SshCryptoProviderTest` | BC provider registration (X25519) |
 | `ExtraKeyboardTest` | layout normalize/clamp, escape codec, save-load, corrupt fallback, strict import |
+| `SshSessionRegistryTest` | new tab per tap, cap + slot reclaim, multiplexer key format |
 
 ## 9. Build & diagnostics
 
@@ -305,11 +310,17 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 10. Roadmap (missing vs Tabby config.yaml)
 
-- **Multi-session (todo — prerequisite for anything multiplexing-shaped):**
-  session registry in `AppViewModel` (PTYs survive nav + rotation, which
-  also fixes the rotation-PTY item below); session picker replacing
-  disconnect-on-back; profile-colour strip as tab colour; per-session
-  warn-on-close; cap on concurrent sessions for weak phones.
+- **Multi-session (done — v1):** session registry in `SshSessionViewModel`
+  (PTYs survive nav + rotation, which fixed the rotation-PTY drop); every
+  profile tap opens a new tab while `reuseSession=true` (default) shares one
+  TCP transport per `host:port:user:proxy…` key (desktop multiplexer parity —
+  extra tabs skip re-auth, one reader pump per channel, refcounted teardown);
+  the home list shows an Active-sessions section (green/amber/red dot)
+  replacing disconnect-on-back; per-session warn-on-close; cap on concurrent
+  sessions (default 5, hard max 8, tunable in Settings > Terminal, now
+  scrollable). Reader-pump death marks tabs failed (red + Retry): single
+  `exit` fails only its tab, a dead transport fails all riders. Tab bar UI +
+  profile-colour-as-tab-colour arrive with Appearance (next).
 - **Port forwarding:** open Local/Remote/Dynamic at connect (saved today).
 - **jumpHost / proxyCommand / SOCKS-HTTP:** saved to YAML via the
   `connectionMode` dropdown (other-mode fields nulled on save, desktop

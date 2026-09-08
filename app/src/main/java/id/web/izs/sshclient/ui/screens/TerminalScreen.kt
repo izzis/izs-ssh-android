@@ -7,8 +7,6 @@ import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
 import id.web.izs.sshclient.BuildConfig
-import id.web.izs.sshclient.core.config.KnownHostEntry
-import id.web.izs.sshclient.core.ssh.UnknownHostKeyException
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,7 +26,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.PowerOff
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
@@ -51,6 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -80,32 +79,34 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import id.web.izs.sshclient.core.ssh.SshConnector
-import id.web.izs.sshclient.core.term.TerminalEmulator
 import id.web.izs.sshclient.core.term.TerminalInput
 import id.web.izs.sshclient.core.term.KeyStep
 import id.web.izs.sshclient.core.term.loadKeyLayout
 import id.web.izs.sshclient.core.term.stepBytes
 import id.web.izs.sshclient.ui.AppState
-import kotlinx.coroutines.CancellationException
+import id.web.izs.sshclient.ui.SshSessionViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 
 /**
  * A real interactive SSH shell: xterm-256color PTY + VT100 emulator grid.
  * Direct typing is primary (soft keyboard streams raw keystrokes, so vim
  * and htop work); the old command box stays as an option via the toggle.
  *
+ * Multi-session: the PTY lives in [SshSessionViewModel] (survives rotation
+ * and navigation). This composable only observes the handle. Back never
+ * closes the connection — only the explicit disconnect control does.
+ *
  * Lazy unlock: a locked vault prompts for the passphrase before connecting,
- * then connects automatically. Disconnect returns straight to the list.
+ * then connects automatically.
  */
 @Composable
 fun TerminalScreen(
     state: AppState,
-    profileId: String,
+    sessionViewModel: SshSessionViewModel,
+    sessionId: String,
     onBack: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -113,23 +114,35 @@ fun TerminalScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
-    val profile = remember(state.loaded, profileId) {
-        state.displayProfiles().find { it.id == profileId }
+    val handle = remember(sessionId) { sessionViewModel.get(sessionId) }
+    if (handle == null) {
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Session closed", color = MaterialTheme.colorScheme.error)
+            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
+        }
+        return
+    }
+    val status by handle.status.collectAsState()
+    val stage by handle.stage.collectAsState()
+    val failed by handle.failed.collectAsState()
+    val hostKeyPrompt by handle.hostKeyPrompt.collectAsState()
+    val emuVersion by handle.version.collectAsState()
+    val profile = remember(state.loaded, handle.profileId) {
+        state.displayProfiles().find { it.id == handle.profileId } ?: handle.profileSnapshot
     }
     val locked = state.loaded?.needsPassphrase == true
 
-    val emulator = remember(profileId) { TerminalEmulator(80, 24) }
+    val emulator = handle.emulator
     // Scrollback pref (Settings > Terminal): applied live on every
     // composition — deliberately impure, the setter only trims and never
     // triggers recomposition, so there is no loop risk.
     emulator.maxHistory = state.disk.terminalScrollback
-    var emuVersion by remember(profileId) { mutableStateOf(0L) }
     // First fit per session is instant; later ones are settle-debounced
     // (see the refit below) so the keyboard animation never reflows.
-    var sizedOnce by remember(profileId) { mutableStateOf(false) }
-    var session by remember { mutableStateOf<SshConnector.ShellSession?>(null) }
-    var status by remember { mutableStateOf("connecting…") }
-    var failed by remember { mutableStateOf<String?>(null) }
+    var sizedOnce by remember(sessionId) { mutableStateOf(false) }
+    // The live socket lives in the handle (rotation-safe). Read fresh each
+    // composition; [status] invalidates this scope on change.
+    val session = handle.shell
     var boxMode by remember { mutableStateOf(false) }
     var showKeys by remember { mutableStateOf(true) }
     var showMenu by remember { mutableStateOf(false) }
@@ -157,18 +170,7 @@ fun TerminalScreen(
     var copiedMsg by remember { mutableStateOf<String?>(null) }
     var showUnlock by remember { mutableStateOf(false) }
     var showCloseConfirm by remember { mutableStateOf(false) }
-    // Host-key trust: unknown/changed keys pause the connect with a desktop-
-    // parity prompt instead of auto-trusting (verify ON) — see requestTrust.
-    var hostKeyPrompt by remember { mutableStateOf<UnknownHostKeyException?>(null) }
-    // Trust accepted on this screen (remembered or once): carried straight
-    // into the retry because state.refresh() is fire-and-forget — the
-    // reloaded domain may not have the new entry yet (double-prompt race).
-    var extraTrust by remember { mutableStateOf<KnownHostEntry?>(null) }
     var pendingConnect by remember { mutableStateOf(false) }
-    // Guards the double-fire race (effect refires on unlock while a connect
-    // is already in flight) that used to open two sessions and trip the
-    // crypto provider swap.
-    var connecting by remember { mutableStateOf(false) }
     // WebView-based terminals clear their hidden textarea on Enter,
     // so the web view resets composing and predictions start fresh each line.
     // Compose must ask for the same explicitly — restartInput() resets the
@@ -186,26 +188,23 @@ fun TerminalScreen(
         try { imm.restartInput(view) } catch (_: Exception) { }
     }
 
-    fun readKnown(): List<String> = try {
-        val arr = JSONArray(state.disk.loadKnownHostsJson() ?: "[]")
-        List(arr.length()) { arr.getString(it) }
-    } catch (_: Exception) { emptyList() }
-
     fun setFont(v: Float) {
         val c = v.coerceIn(8f, 24f)
         fontSp = c
         state.disk.terminalFontSp = c
     }
 
-    fun sendRaw(text: String) {        val s = session ?: return
+    fun doConnect() {
+        sessionViewModel.connect(sessionId, state, context.cacheDir)
+    }
+
+    fun sendRaw(text: String) {
+        val s = handle.shell ?: return
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { s.sendRaw(text) }
             } catch (e: Exception) {
-                failed = "Send failed: ${e.message}"
-                s.close()
-                session = null
-                status = "disconnected"
+                sessionViewModel.markSendFailed(sessionId, "Send failed: ${e.message}")
             }
         }
     }
@@ -255,10 +254,7 @@ fun TerminalScreen(
                 ctrlSticky = false
                 altSticky = false
             } catch (e: Exception) {
-                failed = "Send failed: ${e.message}"
-                s.close()
-                session = null
-                status = "disconnected"
+                sessionViewModel.markSendFailed(sessionId, "Send failed: ${e.message}")
             }
         }
     }
@@ -290,143 +286,44 @@ fun TerminalScreen(
         keyboard?.show()
     }
 
-    // Live connect step for the loading row (replaces the spinner: the user
-    // sees what is actually happening). Written from IO via onStage.
-    var stage by remember { mutableStateOf("Starting…") }
-    // Abort handle for Cancel: killing the job mid-connect must not surface
-    // as a failure (CancellationException bypasses the error path).
-    var connectJob by remember { mutableStateOf<Job?>(null) }
-
-    fun doConnect() {
-        val p = profile ?: return
-        if (connecting) return
-        connecting = true
-        stage = "Starting…"
-        connectJob = scope.launch {
-            failed = null
-            status = "connecting…"
-            try {
-                // Legacy prefs trust rides along for lazy self-healing (matched
-                // lines upgrade to YAML entries, then retire); the YAML list
-                // is the single source of trust.
-                val legacy = withContext(Dispatchers.IO) { readKnown() }
-                val sess = withContext(Dispatchers.IO) {
-                    SshConnector().openShell(
-                        profile = p,
-                        password = state.passwordFor(p),
-                        keys = state.keysFor(p).map {
-                            SshConnector.KeyInput(pem = it.first, passphrase = it.second)
-                        },
-                        keyPassphrases = state.keyPassphrases(),
-                        verifyHostKeys = state.loaded?.domain?.ssh?.verifyHostKeys ?: true,
-                        knownHosts = state.loaded?.domain?.ssh?.knownHosts ?: emptyList(),
-                        legacyKnownHostLines = legacy,
-                        oneTimeTrust = extraTrust,
-                        timeoutMs = p.options.readyTimeout ?: 20000,
-                        cacheDir = context.cacheDir,
-                        onStage = { s -> scope.launch { stage = s } },
-                    )
-                }
-                session = sess
-                status = "connected"
-                // A legacy line matched: promote it to YAML now (locked vault
-                // keeps session-only trust — same rule as accept-remember).
-                sess.trustUpgrade?.let { entry ->
-                    scope.launch {
-                        try {
-                            sess.trustUpgradeLine?.let { line ->
-                                state.repo.persistTrustUpgrade(entry, line)
-                                state.refresh()
-                            }
-                        } catch (_: Exception) { }
-                    }
-                }
-                scope.launch {
-                    sess.output.collect { chunk ->
-                        emulator.feed(chunk)
-                        emuVersion = emulator.version
-                    }
-                }
-            } catch (e: UnknownHostKeyException) {
-                hostKeyPrompt = e
-                status = "disconnected"
-            } catch (e: CancellationException) {
-                // Cancel pressed (or screen left): quiet abort, never a failure.
-                status = "disconnected"
-                throw e
-            } catch (e: Exception) {
-                failed = e.message ?: "Connect failed"
-                status = "disconnected"
-            } finally {
-                connecting = false
-                connectJob = null
-            }
-        }
-    }
-
-    /**
-     * Desktop hostKeyPromptModal parity: remember persists to `ssh.knownHosts`
-     * (uploaded later via the normal sync path); once retries without
-     * storing; disconnect aborts. A locked vault degrades remember to once
-     * (session-only trust) instead of failing the connect.
-     */
     fun acceptHostKey(remember: Boolean) {
-        val prompt = hostKeyPrompt ?: return
-        hostKeyPrompt = null
-        val entry = KnownHostEntry(prompt.host, prompt.port, prompt.keyType, prompt.digest)
-        if (!remember) {
-            extraTrust = entry
-            doConnect()
-            return
-        }
-        scope.launch {
-            failed = null
-            try {
-                withContext(Dispatchers.IO) { state.repo.appendKnownHost(entry) }
-                state.refresh()
-            } catch (e: Exception) {
-                // Locked vault (or disk hiccup): YAML skipped, session trust
-                // below still connects now (persisted on a later save).
-            }
-            extraTrust = entry
-            doConnect()
-        }
+        sessionViewModel.acceptHostKey(sessionId, remember, state, context.cacheDir)
     }
 
-    fun doDisconnect() {
-        session?.close()
-        session = null
-        status = "disconnected"
-    }
-
+    /** Back never closes: the session survives in the registry. */
     fun goBack() {
-        doDisconnect()
+        onBack()
+    }
+
+    /** Explicit disconnect: close the socket, free the slot, leave. */
+    fun doDisconnectAndBack() {
+        sessionViewModel.close(sessionId)
         onBack()
     }
 
     /** Abort an in-flight connect (never surfaces as a failure) and leave. */
     fun cancelConnect() {
-        connectJob?.cancel()
-        connectJob = null
-        goBack()
+        sessionViewModel.cancelConnect(sessionId)
+        sessionViewModel.close(sessionId)
+        onBack()
     }
 
-    fun requestClose() {
+    fun requestDisconnect() {
         // Desktop parity (sshTab): per-profile warnOnClose wins, otherwise
         // the global Settings > SSH toggle (default off). Guards an ACTIVE
         // session only — failed/connecting/closed states close at once.
-        val warn = profile?.options?.warnOnClose
+        val warn = profile.options.warnOnClose
             ?: state.loaded?.domain?.ssh?.warnOnClose
             ?: false
         if (warn && status == "connected") {
             showCloseConfirm = true
         } else {
-            goBack()
+            doDisconnectAndBack()
         }
     }
 
-    LaunchedEffect(profileId, state.loaded) {
-        if (profile != null && session == null && failed == null && !connecting) {
+    LaunchedEffect(sessionId, state.loaded) {
+        if (handle.shell == null && failed == null && hostKeyPrompt == null && !handle.connecting) {
             if (locked) {
                 pendingConnect = true
                 showUnlock = true
@@ -435,23 +332,14 @@ fun TerminalScreen(
             }
         }
     }
-    DisposableEffect(profileId) {
-        onDispose { session?.close() }
-    }
-    BackHandler { requestClose() }
-
-    if (profile == null) {
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Profile not found", color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
-        }
-        return
-    }
+    // No DisposableEffect close: rotation and navigation must NOT kill the
+    // PTY. Cleanup happens in SshSessionViewModel.onCleared() (process death)
+    // or explicit disconnect above.
+    BackHandler { onBack() }
 
     // Stage stays full-bleed black, but the top bar now matches every other
     // page (themed surface, back arrow + title) — the slate strip is gone.
-    // goBack() still disconnects first; a session picker comes with the
-    // multi-session update.
+    // Back keeps the session alive; the status dot disconnects.
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -459,12 +347,12 @@ fun TerminalScreen(
                 .background(MaterialTheme.colorScheme.surface)
                 .padding(end = 12.dp, top = 4.dp, bottom = 4.dp),
         ) {
-            IconButton(onClick = { requestClose() }) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+            IconButton(onClick = { onBack() }) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Back (session stays alive)")
             }
             // Status dot sits on the NAME row so user@host below gets the
             // full width (green = connected, amber = connecting, red =
-            // disconnected; tap to disconnect, same as the back arrow).
+            // disconnected; tap to disconnect).
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -482,7 +370,7 @@ fun TerminalScreen(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier.size(32.dp).clickable(
-                            onClick = { requestClose() },
+                            onClick = { requestDisconnect() },
                             onClickLabel = "Disconnect",
                         ),
                     ) {
@@ -498,11 +386,16 @@ fun TerminalScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            IconButton(onClick = {
-                clipboard.setText(AnnotatedString(emulator.plainText()))
-                copiedMsg = "Screen copied"
-            }) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy screen")
+            // Explicit disconnect (the status dot does the same): a power
+            // icon reads as "kill this session", unlike the ambiguous dot.
+            // Back (arrow / system) never disconnects — session stays alive.
+            IconButton(onClick = { requestDisconnect() }) {
+                Icon(
+                    Icons.Filled.PowerOff,
+                    contentDescription = "Disconnect",
+                    tint = if (status == "connected") MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             IconButton(onClick = { boxMode = !boxMode }) {
                 Icon(
@@ -566,27 +459,53 @@ fun TerminalScreen(
                                 doConnect()
                             }
                         }) { Text("Retry") }
-                        OutlinedButton(onClick = { goBack() }) { Text("Close") }
+                        OutlinedButton(onClick = { doDisconnectAndBack() }) { Text("Close") }
                     }
                 }
             }
-        } else if (session == null) {
-            // Loading row: live step text instead of a spinner (the user sees
-            // what is actually happening), Cancel pinned at the far right.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-            ) {
-                Text(
-                    stage,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(onClick = { cancelConnect() }) { Text("Cancel") }
+        } else if (session == null && hostKeyPrompt == null) {
+            if (status == "connecting…") {
+                // Loading row: live step text instead of a spinner (the user sees
+                // what is actually happening), Cancel pinned at the far right.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                ) {
+                    Text(
+                        stage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(onClick = { cancelConnect() }) { Text("Cancel") }
+                }
+            } else {
+                // Unexpected disconnect (network loss, background kill): kept
+                // in the registry (red dot) for reconnect.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                ) {
+                    Text(
+                        "Disconnected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(onClick = {
+                        if (state.loaded?.needsPassphrase == true) {
+                            pendingConnect = true
+                            showUnlock = true
+                        } else {
+                            doConnect()
+                        }
+                    }) { Text("Reconnect") }
+                    OutlinedButton(onClick = { doDisconnectAndBack() }) { Text("Close") }
+                }
             }
         }
         // Keyboard dock:
@@ -662,8 +581,12 @@ fun TerminalScreen(
             suspend fun applySize(c: Int, r: Int) {
                 val t0 = if (BuildConfig.DEBUG) System.nanoTime() else 0L
                 emulator.resize(c, r)
-                emuVersion = emulator.version
-                session?.resize(c, r, (c * charW).toInt(), (r * lineH).toInt())
+                handle.bumpVersion()
+                try {
+                    withContext(Dispatchers.IO) {
+                        handle.shell?.resize(c, r, (c * charW).toInt(), (r * lineH).toInt())
+                    }
+                } catch (_: Exception) { }
                 if (BuildConfig.DEBUG) {
                     Log.d("TvPerf", "resize ${c}x$r ms=${(System.nanoTime() - t0) / 1_000_000.0}")
                 }
@@ -686,10 +609,17 @@ fun TerminalScreen(
                 applySize(c, r)
                 sizedOnce = true
             }
-            LaunchedEffect(session) {
+            LaunchedEffect(status) {
                 // Fresh shells start at 80x24: correct the server at once.
-                val s = session ?: return@LaunchedEffect
-                s.resize(emulator.cols, emulator.rows, (emulator.cols * charW).toInt(), (emulator.rows * lineH).toInt())
+                // Keyed on status (shell itself is not observable): fires on
+                // connect and on rotate-while-connected via refit above.
+                if (status != "connected") return@LaunchedEffect
+                val s = handle.shell ?: return@LaunchedEffect
+                try {
+                    withContext(Dispatchers.IO) {
+                        s.resize(emulator.cols, emulator.rows, (emulator.cols * charW).toInt(), (emulator.rows * lineH).toInt())
+                    }
+                } catch (_: Exception) { }
             }
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -772,10 +702,9 @@ fun TerminalScreen(
                                 boxInput = ""
                                 scope.launch {
                                     try {
-                                        withContext(Dispatchers.IO) { session?.send(line) }
+                                        withContext(Dispatchers.IO) { handle.shell?.send(line) }
                                     } catch (e: Exception) {
-                                        failed = "Send failed: ${e.message}"
-                                        doDisconnect()
+                                        sessionViewModel.markSendFailed(sessionId, "Send failed: ${e.message}")
                                     }
                                 }
                             },
@@ -815,10 +744,10 @@ fun TerminalScreen(
     if (showCloseConfirm) {        AlertDialog(
             onDismissRequest = { showCloseConfirm = false },
             title = { Text("Disconnect?") },
-            text = { Text("“${profile?.name}” is still connected.") },
+            text = { Text("“${profile.name}” is still connected.") },
             confirmButton = {
                 TextButton(
-                    onClick = { showCloseConfirm = false; goBack() },
+                    onClick = { showCloseConfirm = false; doDisconnectAndBack() },
                 ) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
@@ -901,8 +830,7 @@ fun TerminalScreen(
                     ) { Text("Accept just this once") }
                     TextButton(
                         onClick = {
-                            hostKeyPrompt = null
-                            failed = "Host key rejected"
+                            sessionViewModel.rejectHostKey(sessionId)
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
@@ -925,11 +853,13 @@ fun TerminalScreen(
             onNoConfig = {
                 showUnlock = false
                 pendingConnect = false
+                sessionViewModel.close(sessionId)
                 onBack()
             },
             onDismiss = {
                 showUnlock = false
                 pendingConnect = false
+                sessionViewModel.close(sessionId)
                 onBack()
             },
             dismissible = true,

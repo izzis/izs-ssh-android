@@ -1,6 +1,8 @@
 package id.web.izs.sshclient.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -54,6 +56,7 @@ fun TerminalSettingsScreen(
     var boxText by remember { mutableStateOf(scrollback.toString()) }
     var stepDelayMs by remember { mutableLongStateOf(state.disk.macroStepDelayMs) }
     var delayText by remember { mutableStateOf(stepDelayMs.toString()) }
+    var maxSessions by remember { mutableIntStateOf(state.disk.maxSessions) }
 
     fun commitScrollback(v: Int) {
         val c = v.coerceIn(0, SCROLLBACK_MAX)
@@ -69,7 +72,10 @@ fun TerminalSettingsScreen(
         state.disk.macroStepDelayMs = c
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         ScreenHeader("Terminal", onBack)
         Text("Extra keys", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -202,5 +208,32 @@ fun TerminalSettingsScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Text("Max sessions", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Concurrent SSH sessions kept alive in the background. Back never " +
+                "disconnects; the Active sessions list re-attaches. Big-RAM " +
+                "phones can raise to ${id.web.izs.sshclient.data.local.ConfigDisk.MAX_SESSIONS_HARD_MAX}.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = {
+                    maxSessions = (maxSessions - 1).coerceIn(1, id.web.izs.sshclient.data.local.ConfigDisk.MAX_SESSIONS_HARD_MAX)
+                    state.disk.maxSessions = maxSessions
+                },
+            ) { Icon(Icons.Filled.Remove, contentDescription = "Less") }
+            Text(
+                "$maxSessions",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+            IconButton(
+                onClick = {
+                    maxSessions = (maxSessions + 1).coerceIn(1, id.web.izs.sshclient.data.local.ConfigDisk.MAX_SESSIONS_HARD_MAX)
+                    state.disk.maxSessions = maxSessions
+                },
+            ) { Icon(Icons.Filled.Add, contentDescription = "More") }
+        }
     }
 }

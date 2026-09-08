@@ -141,6 +141,15 @@ class ConfigDisk(context: Context) {
             v.coerceIn(0L, id.web.izs.sshclient.core.term.MAX_MACRO_STEP_DELAY_MS),
         ).apply()
 
+    /**
+     * Max concurrent SSH sessions (multi-session cap). Default 5 for typical
+     * phones (5 x 5000 history lines is ~10-15MB + 5 sockets); big-RAM phones
+     * can raise to [MAX_SESSIONS_HARD_MAX]. Enforced in SshSessionViewModel.
+     */
+    var maxSessions: Int
+        get() = prefs().getInt(KEY_MAX_SESSIONS, 5).coerceIn(1, MAX_SESSIONS_HARD_MAX)
+        set(v) = prefs().edit().putInt(KEY_MAX_SESSIONS, v.coerceIn(1, MAX_SESSIONS_HARD_MAX)).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -157,5 +166,8 @@ class ConfigDisk(context: Context) {
         const val KEY_TERMINAL_SCROLLBACK = "terminal.scrollback"
         const val KEY_EXTRA_KEYS = "terminal.extraKeys"
         const val KEY_MACRO_STEP_DELAY_MS = "terminal.macroStepDelayMs"
+        const val KEY_MAX_SESSIONS = "terminal.maxSessions"
+        /** Hard ceiling for [maxSessions]: 8 sockets + histories is the most a phone should hold. */
+        const val MAX_SESSIONS_HARD_MAX = 8
     }
 }

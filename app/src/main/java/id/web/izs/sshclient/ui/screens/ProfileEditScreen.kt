@@ -902,8 +902,11 @@ private fun AdvancedTab(
     CheckRow("Skip banner", skipBanner, onSkipBanner)
     CheckRow("Reuse session", reuseSession, onReuseSession)
     Text(
-        "The four options above are stored for desktop and have no effect " +
-            "on mobile (no X server, no ssh-agent, no banner display, no multiplexing).",
+        "Reuse session shares one connection for all tabs of this profile " +
+            "(desktop multiplex parity: extra tabs skip re-auth). Off means " +
+            "every tab connects separately. The other three options are " +
+            "stored for desktop and have no effect on mobile " +
+            "(no X server, no ssh-agent, no banner display).",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

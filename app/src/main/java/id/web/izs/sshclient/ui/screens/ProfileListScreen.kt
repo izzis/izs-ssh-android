@@ -29,7 +29,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +46,8 @@ import id.web.izs.sshclient.core.config.SshDefaults
 import id.web.izs.sshclient.core.config.SshProfile
 import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.ui.AppState
+import id.web.izs.sshclient.ui.SshSessionHandle
+import id.web.izs.sshclient.ui.SshSessionViewModel
 
 /**
  * Home page: SSH profiles grouped into folders per group (nested via
@@ -54,7 +58,9 @@ import id.web.izs.sshclient.ui.AppState
 @Composable
 fun ProfileListScreen(
     state: AppState,
+    sessionViewModel: SshSessionViewModel,
     onOpen: (profileId: String) -> Unit,
+    onOpenSession: (sessionId: String) -> Unit,
     onEdit: (profileId: String) -> Unit,
     onAdd: () -> Unit,
     onSettings: () -> Unit,
@@ -107,6 +113,15 @@ fun ProfileListScreen(
             IconButton(onClick = onSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = "Settings")
             }
+        }
+        val liveSessions = sessionViewModel.ordered()
+        if (liveSessions.isNotEmpty()) {
+            ActiveSessionsSection(
+                sessions = liveSessions,
+                maxSessions = state.disk.maxSessions,
+                onOpenSession = onOpenSession,
+                onCloseSession = { sessionViewModel.close(it) },
+            )
         }
         OutlinedTextField(
             value = query,
@@ -217,6 +232,59 @@ private fun addNode(n: GroupNode, depth: Int, expanded: Set<String>, out: Mutabl
     if (n.group.id !in expanded) return
     for (c in n.children) addNode(c, depth + 1, expanded, out)
     for (p in n.profiles) out += HomeRow.Profile(p, depth + 1)
+}
+
+/**
+ * Multi-session entry point (v1): live sessions above search, Tabby-Android
+ * style. Green dot = connected, amber = connecting, red = disconnected
+ * (network loss / background kill kept for reconnect). Tap re-attaches
+ * without opening a duplicate; x closes the tab and frees the cap slot.
+ */
+@Composable
+private fun ActiveSessionsSection(
+    sessions: List<SshSessionHandle>,
+    maxSessions: Int,
+    onOpenSession: (String) -> Unit,
+    onCloseSession: (String) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Active sessions (${sessions.size}/$maxSessions)",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            for (h in sessions) {
+                val status by h.status.collectAsState()
+                val dot = when (status) {
+                    "connected" -> Color(0xFF4CAF50)
+                    "connecting…" -> Color(0xFFFFC107)
+                    else -> MaterialTheme.colorScheme.error
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { onOpenSession(h.sessionId) },
+                ) {
+                    Box(Modifier.size(12.dp).background(dot, CircleShape))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(h.profileSnapshot.name, style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            SshDefaults.quickName(
+                                h.profileSnapshot.options.user,
+                                h.profileSnapshot.options.host,
+                                h.profileSnapshot.options.port,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { onCloseSession(h.sessionId) }) {
+                        Text("✕", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

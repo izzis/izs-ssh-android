@@ -38,6 +38,8 @@ import id.web.izs.sshclient.data.local.CrashLog
 import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.AppViewModel
 import id.web.izs.sshclient.ui.IzsDarkColors
+import id.web.izs.sshclient.ui.SessionLimitReached
+import id.web.izs.sshclient.ui.SshSessionViewModel
 import id.web.izs.sshclient.ui.screens.ConfigFileScreen
 import id.web.izs.sshclient.ui.screens.ConfigSyncScreen
 import id.web.izs.sshclient.ui.screens.KeyboardLayoutScreen
@@ -75,6 +77,9 @@ class MainActivity : ComponentActivity() {
     // Rotation-safe: the vault passphrase lives in AppState (RAM-only by
     // design) and must survive Activity recreation — never re-ask it.
     private val appHolder: AppViewModel by viewModels()
+    // Multi-session registry: PTYs survive rotation + navigation here.
+    // RAM-only like the passphrase; process death clears all sessions.
+    private val sshHolder: SshSessionViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -129,6 +134,7 @@ class MainActivity : ComponentActivity() {
                             is Boot.Ready ->
                                 AppNav(
                                     appState = appState,
+                                    sessionViewModel = sshHolder,
                                     startRoute = b.startRoute,
                                     crashTrace = b.crashTrace,
                                     onCrashDismissed = {
@@ -166,11 +172,24 @@ private fun BootFailedScreen(
 @Composable
 private fun AppNav(
     appState: AppState,
+    sessionViewModel: SshSessionViewModel,
     startRoute: String,
     crashTrace: String?,
     onCrashDismissed: () -> Unit,
 ) {
     val nav = rememberNavController()
+    var limitError by remember { mutableStateOf<String?>(null) }
+    fun openProfile(profileId: String) {
+        val profile = appState.displayProfiles().find { it.id == profileId } ?: return
+        try {
+            // Every tap opens a NEW tab (desktop parity); connection sharing
+            // is decided inside connect() from reuseSession.
+            val sid = sessionViewModel.create(profile, appState.disk.maxSessions)
+            nav.navigate("ssh/$sid")
+        } catch (e: SessionLimitReached) {
+            limitError = "Session limit reached (${e.max}). Close one first."
+        }
+    }
     NavHost(navController = nav, startDestination = startRoute) {
         composable("crash") {
             CrashReportScreen(trace = crashTrace ?: "", onDismissed = onCrashDismissed)
@@ -178,11 +197,25 @@ private fun AppNav(
         composable("profiles") {
             ProfileListScreen(
                 appState,
-                onOpen = { id -> nav.navigate("ssh/$id") },
+                sessionViewModel,
+                onOpen = { id -> openProfile(id) },
+                onOpenSession = { sid -> nav.navigate("ssh/$sid") },
                 onEdit = { id -> nav.navigate("edit/$id") },
                 onAdd = { nav.navigate("edit/new") },
                 onSettings = { nav.navigate("settings") },
             )
+            if (limitError != null) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { limitError = null },
+                    title = { Text("Too many sessions") },
+                    text = { Text(limitError!!) },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = { limitError = null }) {
+                            Text("OK")
+                        }
+                    },
+                )
+            }
             // Lazy-unlock parity: the non-dismissible dialog shows ONLY when the
             // listing itself is blocked (locked encrypted shell). A locked
             // plaintext-with-blob config lists fine; the passphrase is asked
@@ -203,6 +236,7 @@ private fun AppNav(
         ) { back ->
             TerminalScreen(
                 appState,
+                sessionViewModel,
                 back.arguments?.getString("id") ?: "",
                 onBack = { nav.popBackStack() },
             )

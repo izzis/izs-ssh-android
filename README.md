@@ -65,7 +65,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 127 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys)
+./gradlew :app:testDebugUnitTest   # 133 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -76,7 +76,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 127/127 green)
+## Parity guarantees (tested, 133/133 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
@@ -92,11 +92,13 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Roadmap (toward full `config.yaml` parity)
 
-- **Multi-session (todo)**: session registry in `AppViewModel` (PTYs survive
-  nav + rotation — also fixes rotation-PTY), session picker replacing
-  disconnect-on-back, profile-colour strip as tab colour, per-session
-  warn-on-close, cap on concurrent sessions. Prerequisite for anything
-  multiplexing-shaped.
+- **Multi-session (done — v1)**: session registry in `SshSessionViewModel`
+  (PTYs survive nav + rotation — also fixes rotation-PTY), new tab per tap
+  with `reuseSession` transport sharing (desktop multiplex parity),
+  Active-sessions list on home replacing disconnect-on-back (Back keeps the
+  session alive), per-session warn-on-close, cap on concurrent sessions
+  (default 5, max 8). Tab bar UI + profile-colour-as-tab-colour arrive
+  with Appearance.
 - **Port forwarding**: open Local/Remote/Dynamic at connect (saved today).
 - **Connect**: `connectionMode` (proxyCommand/jumpHost/SOCKS/HTTP) stays
   direct-only (saved for desktop); terminal type + colour schemes stay

@@ -28,8 +28,12 @@ import kotlin.concurrent.thread
  * - agent auth: not supported on Android (no ssh-agent) -> clear message
  * - jumpHost / proxyCommand / socks-http proxy: parsed + preserved,
  *   but v1 connect shows a "scheduled for v2" message (never silently ignored)
- * - forwardedPorts / x11 / skipBanner / reuseSession: saved for desktop,
+ * - forwardedPorts / x11 / skipBanner: saved for desktop,
  *   not applied on mobile yet
+ * - reuseSession: honored via transport sharing ([connectTransport] once per
+ *   [transportKeyOf], [openShellOnTransport] per tab — desktop multiplexer
+ *   parity). Every profile tap opens a new tab; true shares the TCP
+ *   connection (no re-auth), false connects separately per tab
  * - Host-key verification: desktop `ssh.knownHosts` trust (prompt on
  *   unknown/changed, known-first negotiation so phone and desktop pick the
  *   same server key). Trust lives in the YAML as the single source.
@@ -39,12 +43,34 @@ class SshConnector {
     data class KeyInput(val pem: String, val passphrase: String? = null)
 
     /**
+     * An authenticated transport (TCP + auth, no channel yet). Multiplexing
+     * shares one of these across tabs; each tab opens its own shell channel
+     * via [openShellOnTransport]. Call [close] to tear the connection down.
+     */
+    class ConnectedTransport internal constructor(
+        val client: SSHClient,
+        var trustUpgrade: id.web.izs.sshclient.core.config.KnownHostEntry? = null,
+        var trustUpgradeLine: String? = null,
+    ) {
+        fun close() {
+            try { client.disconnect() } catch (_: Exception) { }
+            try { client.close() } catch (_: Exception) { }
+        }
+    }
+
+    /**
      * A persistent interactive shell (a real connection, not an exec probe).
      * Output chunks stream into [output]; the reader pump ends when the
      * session closes. Call [close] when leaving the screen.
+     *
+     * Multiplexing: several shells may ride one [client]. [onClosed] lets the
+     * owner (session registry) refcount the shared transport — null keeps the
+     * legacy behavior (close() also disconnects the client). [onDied] fires
+     * once when the reader pump ends WITHOUT an explicit close (network drop
+     * or server-side end); it runs on the reader thread, so hop threads.
      */
     class ShellSession internal constructor(
-        private val client: SSHClient,
+        val client: SSHClient,
         private val session: Session,
         private val shell: Session.Shell,
         val output: MutableSharedFlow<String>,
@@ -57,6 +83,9 @@ class SshConnector {
         internal var trustUpgrade: id.web.izs.sshclient.core.config.KnownHostEntry? = null
         /** Legacy prefs line that produced [trustUpgrade] — retired on persist. */
         internal var trustUpgradeLine: String? = null
+        internal var onClosed: (() -> Unit)? = null
+        internal var onDied: (() -> Unit)? = null
+        private val closeState = AtomicBoolean(false)
         suspend fun send(line: String) = withContext(Dispatchers.IO) {
             shell.outputStream.write((line + "\n").toByteArray(Charsets.UTF_8))
             shell.outputStream.flush()
@@ -81,17 +110,33 @@ class SshConnector {
             }
 
         fun close() {
+            if (!closeState.compareAndSet(false, true)) return
             try { session.close() } catch (_: Exception) { }
-            try { client.disconnect() } catch (_: Exception) { }
-            try { client.close() } catch (_: Exception) { }
+            // The reader pump may already have fired onDied just before this;
+            // the owner guards via registry lookup, so both orders are safe.
+            try { onClosed?.invoke() } catch (_: Exception) { }
+            if (onClosed == null) {
+                try { client.disconnect() } catch (_: Exception) { }
+                try { client.close() } catch (_: Exception) { }
+            }
+        }
+
+        /** Reader-pump callback: unexpected end (drop or server-side end). */
+        internal fun notifyDied() {
+            if (!closeState.get()) {
+                try { onDied?.invoke() } catch (_: Exception) { }
+            }
         }
     }
 
     /**
-     * Open a persistent PTY shell. Same guards and auth order as
-     * [testConnect] (password, then keys one by one with key-passphrase
-     * candidates). Throws IllegalStateException with a user-facing message
-     * when the connection or auth fails.
+     * Open a persistent PTY shell: connect + auth, then one shell channel.
+     * Same guards and auth order as before (password, then keys one by one
+     * with key-passphrase candidates). Throws IllegalStateException with a
+     * user-facing message when the connection or auth fails.
+     *
+     * Multiplexing uses the split below directly ([connectTransport] once per
+     * transport, [openShellOnTransport] once per tab).
      *
      * @param onStage live step text for the connecting UI (called from IO —
      * the caller hops threads). English-only, user-facing.
@@ -109,6 +154,41 @@ class SshConnector {
         cacheDir: File,
         onStage: (String) -> Unit = {},
     ): ShellSession = withContext(Dispatchers.IO) {
+        val t = connectTransport(
+            profile, password, keys, keyPassphrases, verifyHostKeys,
+            knownHosts, legacyKnownHostLines, oneTimeTrust, timeoutMs, cacheDir, onStage,
+        )
+        try {
+            openShellOnTransport(t.client, profile, onStage).also {
+                it.trustUpgrade = t.trustUpgrade
+                it.trustUpgradeLine = t.trustUpgradeLine
+            }
+        } catch (e: Exception) {
+            t.close()
+            throw e
+        }
+    }
+
+    /**
+     * Transport half of [openShell]: TCP connect + host-key verification +
+     * auth + keepalive. No channel is opened — the caller opens one shell per
+     * tab via [openShellOnTransport] and eventually tears down via
+     * [ConnectedTransport.close]. On failure the client is torn down here, so
+     * success always transfers ownership out.
+     */
+    suspend fun connectTransport(
+        profile: SshProfile,
+        password: String?,
+        keys: List<KeyInput>,
+        keyPassphrases: List<String> = emptyList(),
+        verifyHostKeys: Boolean,
+        knownHosts: List<id.web.izs.sshclient.core.config.KnownHostEntry>,
+        legacyKnownHostLines: List<String> = emptyList(),
+        oneTimeTrust: id.web.izs.sshclient.core.config.KnownHostEntry? = null,
+        timeoutMs: Long,
+        cacheDir: File,
+        onStage: (String) -> Unit = {},
+    ): ConnectedTransport = withContext(Dispatchers.IO) {
         val o = profile.options
         if (!o.jumpHost.isNullOrBlank() || !o.proxyCommand.isNullOrBlank() ||
             !o.socksProxyHost.isNullOrBlank() || !o.httpProxyHost.isNullOrBlank()
@@ -187,54 +267,83 @@ class SshConnector {
                 } catch (_: Exception) {
                     // Best-effort: a dead keepalive must never fail the session.
                 }
-                onStage("Opening shell…")
-                val session = client.startSession()
-                try {
-                    // xterm-256color (not dumb): fullscreen apps gate colors
-                    // and cursor addressing on TERM.
-                    session.allocatePTY("xterm-256color", 80, 24, 0, 0, emptyMap())
-                    val shell = session.startShell()
-                    val flow = MutableSharedFlow<String>(extraBufferCapacity = 512)
-                    val sess = ShellSession(client, session, shell, flow)
-                    sess.trustUpgrade = verifier.trustUpgrade
-                    sess.trustUpgradeLine = verifier.trustUpgradeLine
-                    // Login tab: unconditional scripts at session ready, then
-                    // per-chunk expect/send automation (LoginScriptRunner).
-                    val scriptRunner = o.scripts.takeIf { it.isNotEmpty() }?.let { LoginScriptRunner(it) }
-                    if (scriptRunner != null) onStage("Running login scripts…")
-                    scriptRunner?.runUnconditional()?.forEach { sess.send(it) }
-                    thread(isDaemon = true, name = "ssh-shell-reader") {
-                        try {
-                            // Char-based (not byte chunks): multi-byte UTF-8
-                            // box-drawing chars never split across emits.
-                            val reader = shell.inputStream.reader(Charsets.UTF_8)
-                            val buf = CharArray(4096)
-                            while (true) {
-                                val n = reader.read(buf)
-                                if (n < 0) break
-                                if (n > 0) {
-                                    val chunk = String(buf, 0, n)
-                                    flow.tryEmit(chunk)
-                                    // The runner is touched only on this
-                                    // thread; sends block briefly via
-                                    // runBlocking (rare and tiny).
-                                    scriptRunner?.onOutput(chunk)?.forEach { runBlocking { sess.send(it) } }
-                                }
-                            }
-                        } catch (_: Exception) {
-                            // Session closed -> pump ends.
-                        }
-                    }
-                    return@withTimeout sess
-                } catch (e: Exception) {
-                    try { session.close() } catch (_: Exception) { }
-                    throw e
-                }
+                return@withTimeout ConnectedTransport(
+                    client,
+                    verifier.trustUpgrade,
+                    verifier.trustUpgradeLine,
+                )
             }
         } catch (e: Exception) {
             try { client.disconnect() } catch (_: Exception) { }
             try { client.close() } catch (_: Exception) { }
             throw e
+        }
+    }
+
+    /**
+     * Channel half of [openShell]: one PTY shell over an already-authenticated
+     * [client] (own fresh transport or a multiplex-shared one). Reader pump +
+     * login scripts included. The channel close never touches the transport —
+     * [ShellSession.close] (plus the owner's hooks) owns that decision.
+     */
+    suspend fun openShellOnTransport(
+        client: SSHClient,
+        profile: SshProfile,
+        onStage: (String) -> Unit = {},
+    ): ShellSession = withContext(Dispatchers.IO) {
+        val o = profile.options
+        onStage("Opening shell…")
+        val session = client.startSession()
+        try {
+            // xterm-256color (not dumb): fullscreen apps gate colors
+            // and cursor addressing on TERM.
+            session.allocatePTY("xterm-256color", 80, 24, 0, 0, emptyMap())
+            val shell = session.startShell()
+            val flow = MutableSharedFlow<String>(extraBufferCapacity = 512)
+            val sess = ShellSession(client, session, shell, flow)
+            // Login tab: unconditional scripts at session ready, then
+            // per-chunk expect/send automation (LoginScriptRunner).
+            val scriptRunner = o.scripts.takeIf { it.isNotEmpty() }?.let { LoginScriptRunner(it) }
+            if (scriptRunner != null) onStage("Running login scripts…")
+            scriptRunner?.runUnconditional()?.forEach { sess.send(it) }
+            startReaderPump(shell, flow, scriptRunner, sess)
+            return@withContext sess
+        } catch (e: Exception) {
+            try { session.close() } catch (_: Exception) { }
+            throw e
+        }
+    }
+
+    /** Reader pump: char-based emits (multi-byte UTF-8 never splits) + death hook. */
+    private fun startReaderPump(
+        shell: Session.Shell,
+        flow: MutableSharedFlow<String>,
+        scriptRunner: LoginScriptRunner?,
+        sess: ShellSession,
+    ) {
+        thread(isDaemon = true, name = "ssh-shell-reader") {
+            try {
+                // Char-based (not byte chunks): multi-byte UTF-8
+                // box-drawing chars never split across emits.
+                val reader = shell.inputStream.reader(Charsets.UTF_8)
+                val buf = CharArray(4096)
+                while (true) {
+                    val n = reader.read(buf)
+                    if (n < 0) break
+                    if (n > 0) {
+                        val chunk = String(buf, 0, n)
+                        flow.tryEmit(chunk)
+                        // The runner is touched only on this
+                        // thread; sends block briefly via
+                        // runBlocking (rare and tiny).
+                        scriptRunner?.onOutput(chunk)?.forEach { runBlocking { sess.send(it) } }
+                    }
+                }
+            } catch (_: Exception) {
+                // Session closed -> pump ends.
+            } finally {
+                sess.notifyDied()
+            }
         }
     }
 
@@ -377,4 +486,28 @@ class SshConnector {
                 entries, host, port, offeredHostKeys, hostKeysCustom,
             ).toMutableList()
     }
+}
+
+/**
+ * Desktop multiplexer-key parity (`sshMultiplexer.service.ts`): transports
+ * are shared per `host:port:user:proxy…` (plus the jump chain on desktop).
+ * Jump/proxy connects throw on mobile v1, but the fields stay in the key so
+ * sharing can never cross them once supported. Port/user are normalized
+ * exactly like [SshConnector.connectTransport] resolves them.
+ *
+ * Pure JVM — unit-tested.
+ */
+fun transportKeyOf(o: id.web.izs.sshclient.core.config.SshOptions): String {
+    val port = if (o.port > 0) o.port else 22
+    val user = o.user.ifBlank { "root" }
+    return listOf(
+        o.host,
+        port.toString(),
+        user,
+        o.proxyCommand ?: "",
+        o.socksProxyHost ?: "",
+        (o.socksProxyPort ?: 0).toString(),
+        o.httpProxyHost ?: "",
+        (o.httpProxyPort ?: 0).toString(),
+    ).joinToString(":")
 }
