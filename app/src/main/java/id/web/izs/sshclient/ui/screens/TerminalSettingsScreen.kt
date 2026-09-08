@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -26,14 +27,17 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.term.MAX_MACRO_STEP_DELAY_MS
 import id.web.izs.sshclient.ui.AppState
+import kotlinx.coroutines.launch
 
 /**
  * Settings > Terminal: font size (same pref as the A-/A+ menu), the
@@ -57,6 +61,15 @@ fun TerminalSettingsScreen(
     var stepDelayMs by remember { mutableLongStateOf(state.disk.macroStepDelayMs) }
     var delayText by remember { mutableStateOf(stepDelayMs.toString()) }
     var maxSessions by remember { mutableIntStateOf(state.disk.maxSessions) }
+    // terminal.showRecentProfiles (YAML, desktop Profiles > Advanced parity).
+    // Absent key = desktop default; encrypted stores are desktop-edited.
+    val encrypted = state.loaded?.domain?.encrypted == true
+    var maxRecent by remember(state.loaded) {
+        mutableIntStateOf(RawConfigStore.showRecentProfiles(state.loaded?.store ?: emptyMap()))
+    }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     fun commitScrollback(v: Int) {
         val c = v.coerceIn(0, SCROLLBACK_MAX)
@@ -70,6 +83,29 @@ fun TerminalSettingsScreen(
         stepDelayMs = c
         delayText = c.toString()
         state.disk.macroStepDelayMs = c
+    }
+
+    // Desktop parity (ngModelChange=config.save()): applies live, no Save
+    // button. On failure the stepper reverts and the error shows.
+    fun commitMaxRecent(v: Int) {
+        val c = v.coerceIn(0, RawConfigStore.MAX_SHOW_RECENT_PROFILES)
+        val old = maxRecent
+        maxRecent = c
+        msg = null
+        scope.launch {
+            busy = true
+            try {
+                state.repo.updateLocalRaw { raw ->
+                    RawConfigStore.setShowRecentProfiles(raw, c)
+                }
+                state.refresh()
+            } catch (e: Exception) {
+                maxRecent = old
+                msg = "Failed: ${e.message}"
+            } finally {
+                busy = false
+            }
+        }
     }
 
     Column(
@@ -235,5 +271,37 @@ fun TerminalSettingsScreen(
                 },
             ) { Icon(Icons.Filled.Add, contentDescription = "More") }
         }
+        Text("Recent profiles", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "How many recently connected profiles the home page lists for " +
+                "quick connect (desktop Profiles > Advanced). 0 hides the list. " +
+                "Synced via YAML like desktop.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (encrypted) {
+            Text(
+                "Encrypted config: edited on desktop, read-only here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = { commitMaxRecent(maxRecent - 1) },
+                enabled = !encrypted && !busy,
+            ) { Icon(Icons.Filled.Remove, contentDescription = "Less") }
+            Text(
+                "$maxRecent",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+            IconButton(
+                onClick = { commitMaxRecent(maxRecent + 1) },
+                enabled = !encrypted && !busy,
+            ) { Icon(Icons.Filled.Add, contentDescription = "More") }
+        }
+        msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        if (busy) CircularProgressIndicator()
     }
 }

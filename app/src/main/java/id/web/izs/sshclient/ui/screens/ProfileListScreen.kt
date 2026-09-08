@@ -20,9 +20,11 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.config.ProfileGroup
+import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.SshDefaults
 import id.web.izs.sshclient.core.config.SshProfile
 import id.web.izs.sshclient.core.config.profileColorArgb
@@ -122,6 +126,33 @@ fun ProfileListScreen(
                 onOpenSession = onOpenSession,
                 onCloseSession = { sessionViewModel.close(it) },
             )
+        }
+        // Recent profiles (desktop start-page parity): N most-recently launched,
+        // N = terminal.showRecentProfiles (0 hides). Ids resolve against the
+        // live list, so deleted profiles prune themselves out.
+        val maxRecent = remember(state.loaded) {
+            RawConfigStore.showRecentProfiles(state.loaded?.store ?: emptyMap())
+        }
+        if (maxRecent > 0) {
+            val byId = remember(profiles) { profiles.associateBy { it.id } }
+            // Prefs read per composition (cheap): returning from a session
+            // must show the just-launched profile without a reload.
+            val recentIds = state.disk.recentProfileIds.take(maxRecent)
+            val recent = remember(recentIds, byId) { recentIds.mapNotNull { byId[it] } }
+            if (recentIds.size != recent.size) {
+                // Prune ONLY against a fully loaded list: on a locked
+                // encrypted store (or while loading) profiles are empty, and
+                // pruning then would wipe recents before unlock. Desktop never
+                // faces this (its store is always readable).
+                if (!state.loading && state.loaded?.unlockRequired != true) {
+                    LaunchedEffect(recentIds, state.loaded) {
+                        state.disk.recentProfileIds = recent.map { it.id }
+                    }
+                }
+            }
+            if (recent.isNotEmpty()) {
+                RecentSection(recent = recent, onOpen = onOpen)
+            }
         }
         OutlinedTextField(
             value = query,
@@ -280,6 +311,55 @@ private fun ActiveSessionsSection(
                     }
                     IconButton(onClick = { onCloseSession(h.sessionId) }) {
                         Text("✕", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentSection(
+    recent: List<SshProfile>,
+    onOpen: (String) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Filled.History,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    "Recent",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            for (p in recent) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { onOpen(p.id) },
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(p.name, style = MaterialTheme.typography.titleSmall)
+                        if (p.type == "ssh") {
+                            Text(
+                                SshDefaults.quickName(p.options.user, p.options.host, p.options.port),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

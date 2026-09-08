@@ -24,6 +24,17 @@ object RawConfigStore {
     const val KEY_CONFIG_SYNC = "configSync"
     const val KEY_VAULT = "vault"
     const val KEY_ENCRYPTED = "encrypted"
+    const val KEY_TERMINAL = "terminal"
+
+    /**
+     * Desktop default for `terminal.showRecentProfiles`
+     * (tabby-core configDefaults.yaml + Profiles > Advanced number input,
+     * min 0, "Set to 0 to disable"). Absent key = this, never invented.
+     */
+    const val DEFAULT_SHOW_RECENT_PROFILES = 3
+
+    /** UI bound for the Android stepper (desktop itself has no max). */
+    const val MAX_SHOW_RECENT_PROFILES = 20
 
     /** Parts opsional parity desktop: hotkeys, appearance, vault. */
     val OPTIONAL_PARTS = listOf("hotkeys", "appearance", "vault")
@@ -52,6 +63,33 @@ object RawConfigStore {
     }
 
     fun dumpRaw(doc: Map<String, Any?>): String = yaml().dump(doc)
+
+    /**
+     * `terminal.showRecentProfiles` read with desktop-default fallback.
+     * Negative garbage coerces to 0 (disabled); non-numeric to the default.
+     * Read from [SyncRepository.Loaded.store] (decrypted merged view when
+     * unlocked, outer raw otherwise) — never from the defaulted Domain view.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun showRecentProfiles(doc: Map<String, Any?>): Int {
+        val n = ((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("showRecentProfiles") as? Number)
+            ?.toInt() ?: return DEFAULT_SHOW_RECENT_PROFILES
+        return n.coerceAtLeast(0)
+    }
+
+    /**
+     * Explicit user set (stepper): creates the `terminal` map when absent.
+     * Like desktop (`ngModelChange=config.save()`), an explicit set is
+     * persisted even when it equals the default.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun setShowRecentProfiles(doc: MutableMap<String, Any?>, v: Int) {
+        val term = LinkedHashMap(
+            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+        )
+        term["showRecentProfiles"] = v.coerceIn(0, MAX_SHOW_RECENT_PROFILES)
+        doc[KEY_TERMINAL] = term
+    }
 
     /**
      * Parse a vault-blob config JSON object into a raw document (decrypt path).

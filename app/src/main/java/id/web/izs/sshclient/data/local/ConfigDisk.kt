@@ -150,6 +150,24 @@ class ConfigDisk(context: Context) {
         get() = prefs().getInt(KEY_MAX_SESSIONS, 5).coerceIn(1, MAX_SESSIONS_HARD_MAX)
         set(v) = prefs().edit().putInt(KEY_MAX_SESSIONS, v.coerceIn(1, MAX_SESSIONS_HARD_MAX)).apply()
 
+    /**
+     * Recent profile ids, most-recent first (desktop `localStorage['recentProfiles']`
+     * parity — local data, never synced to YAML). Stored as a JSON array;
+     * corrupt content falls back to empty. Pruned against the profile list
+     * at display time (deleted profiles drop out).
+     */
+    var recentProfileIds: List<String>
+        get() = try {
+            val arr = org.json.JSONArray(prefs().getString(KEY_RECENT_PROFILES, "[]") ?: "[]")
+            List(arr.length()) { arr.getString(it) }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        set(v) = prefs().edit().putString(
+            KEY_RECENT_PROFILES,
+            org.json.JSONArray(v).toString(),
+        ).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -167,7 +185,18 @@ class ConfigDisk(context: Context) {
         const val KEY_EXTRA_KEYS = "terminal.extraKeys"
         const val KEY_MACRO_STEP_DELAY_MS = "terminal.macroStepDelayMs"
         const val KEY_MAX_SESSIONS = "terminal.maxSessions"
+        const val KEY_RECENT_PROFILES = "home.recentProfiles"
         /** Hard ceiling for [maxSessions]: 8 sockets + histories is the most a phone should hold. */
         const val MAX_SESSIONS_HARD_MAX = 8
     }
+}
+
+/**
+ * Desktop `launchProfile` recents parity (profiles.service.ts): dedup, unshift
+ * to front, cap at [max]. `max <= 0` clears (desktop "Set to 0 to disable").
+ * Pure for unit tests; persistence stays in [ConfigDisk.recentProfileIds].
+ */
+fun recordRecent(current: List<String>, id: String, max: Int): List<String> {
+    if (max <= 0) return emptyList()
+    return (listOf(id) + current.filter { it != id }).take(max)
 }

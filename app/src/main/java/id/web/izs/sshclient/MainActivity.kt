@@ -185,6 +185,14 @@ private fun AppNav(
             // Every tap opens a NEW tab (desktop parity); connection sharing
             // is decided inside connect() from reuseSession.
             val sid = sessionViewModel.create(profile, appState.disk.maxSessions)
+            // Desktop launchProfile parity: record recents at launch (not on
+            // connect success). Cap-blocked taps throw above, so never recorded.
+            val maxRecent = id.web.izs.sshclient.core.config.RawConfigStore.showRecentProfiles(
+                appState.loaded?.store ?: emptyMap(),
+            )
+            appState.disk.recentProfileIds = id.web.izs.sshclient.data.local.recordRecent(
+                appState.disk.recentProfileIds, profileId, maxRecent,
+            )
             nav.navigate("ssh/$sid")
         } catch (e: SessionLimitReached) {
             limitError = "Session limit reached (${e.max}). Close one first."
