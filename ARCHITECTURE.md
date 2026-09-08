@@ -36,10 +36,11 @@ app/src/main/java/id/web/izs/sshclient/
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
     Theme.kt                      IzsDarkColors (dark-only Material3 theme)
     screens/
-      SyncSetupScreen.kt          Sync host + token setup
-      ConfigSyncScreen.kt         Connection + cloud configs + up/download
-      ProfileListScreen.kt        Groups + search + profile list, edit entry point
-      ProfileEditScreen.kt        Rename/move/edit connection fields, add/remove keys, delete
+      ScreenHeader.kt           Shared sub-screen top bar (back arrow + title)
+      ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only)
+      ProfileListScreen.kt        Home: logo + name header, count, add button, groups + search
+      ProfileEditScreen.kt        Tabbed editor (General/Ports/Advanced/Ciphers/
+                                  Colours-placeholder/Login), new profile + new group
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
       TerminalSettingsScreen.kt   Font size + scrollback buffer (applies live)
@@ -49,9 +50,8 @@ app/src/main/java/id/web/izs/sshclient/
       VaultSettingsScreen.kt      Vault management (set/change/erase, encrypt-config toggle)
       SshSettingsScreen.kt        SSH defaults (kept separate from desktop format)
       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
-      ConfigSyncScreen.kt         (see above)
       CrashReportScreen.kt        Shows last crash trace with copy button
-      PlaceholderSettingScreen.kt "Scheduled" stubs (jumpHost/proxy etc.)
+      PlaceholderSettingScreen.kt "Scheduled" stubs (colours, proxy connect, etc.)
   core/
     config/
       TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options
@@ -79,16 +79,17 @@ app/src/main/java/id/web/izs/sshclient/
                           known_hosts (TOFU), terminal prefs (font size)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (10 files, 63 tests — §8)
+app/src/test/... (11 files, 75 tests — §8)
 ```
 
 ## 3. Boot & navigation
 
 `MainActivity.setContent` computes the start destination **before** the
 NavHost composes (no post-compose navigation): crash report > load failure >
-`profiles` (vault present or cached YAML) > `sync` (host+token known) >
-`setup`. Routes: `setup`, `sync`, `profiles`, `ssh/{id}`, `edit/{id}` (+
-settings sections). `AppState` is created once per `AppViewModel`
+`profiles` — always. Fresh installs seed an empty config; Tabby Sync is
+reached from Settings and never gates boot (the `setup`/`sync` start routes
+and `SyncSetupScreen` are deleted). Routes: `profiles`, `ssh/{id}`,
+`edit/new`, `edit/{id}` (+ settings sections). `AppState` is created once per `AppViewModel`
 (`by viewModels()`), so rotation keeps the unlocked vault; the nav stack
 itself resets (reconnect is one tap, no password re-asked) and SSH sessions
 are screen-scoped (a rotate drops the live PTY by design, v1 scope).
@@ -108,6 +109,8 @@ are screen-scoped (a rotate drops the live PTY by design, v1 scope).
 - **Secret URIs:** `ssh:password{user,host,port}` (exact match, then
   host-nulled fallback — never fuzzy), `ssh:key-passphrase{hash}`,
   `file{id}=base64(PEM)` <-> `vault://id`.
+- **Set-vault sweep:** setting a vault passphrase moves inline plaintext
+  passwords + PEM keys into the vault once (single save, no duplicates).
 - **Host keys:** TOFU store in app prefs, kept separate from the desktop
   `ssh.knownHosts` format so uploads never pollute it. Unknown/changed keys
   prompt (new = trust dialog, changed = danger dialog).
@@ -200,17 +203,21 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 ## 7. UI conventions
 
 - English-only UI strings/comments; dark-only theme (`IzsDarkColors`,
-  terminal pure black, `#1E2A34` header bar, black docked key bars).
+  terminal pure black, themed surfaces, black docked key bars).
+- All sub-screens share `ScreenHeader` (back arrow + title); the terminal
+  header matches it (themed surface) with a status dot on the name row —
+  green = connected, amber = connecting, red = disconnected, tap to
+  disconnect — and full-width `user@host:port` below.
 - Extra-keys rows: `ESC / - HOME UP END PGUP` and
   `TAB CTRL ALT LEFT DOWN RIGHT PGDN`; special keys bypass stickies via
   `sendSpecial`. Font size pref `terminal.fontSp` (8–24sp, default 14).
-- Header is slim: title + copy + box-mode toggle + `⋮` menu (font ±, extra
-  keys on/off) + ✕ disconnect. Copy screen puts `plainText()` on clipboard.
+- Terminal header extras: copy (puts `plainText()` on clipboard) +
+  box-mode toggle + `⋮` menu (font ±, extra keys on/off).
 - `http://` sync hosts allowed for self-hosted LAN (with in-app warning).
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 66 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 75 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -223,6 +230,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `VaultStateTest` | pure resolve + `unlockRequired` rules |
 | `TerminalEmulatorTest` | VT100 ops + pending-wrap regression + scrollback cap/trim/alt |
 | `TerminalInputTest` | sticky CTRL/ALT mapping |
+| `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers |
 | `SshCryptoProviderTest` | BC provider registration (X25519) |
 
 ## 9. Build & diagnostics
@@ -248,6 +256,8 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   Advanced / Ciphers / Colours-placeholder / Login scripts, defaults omitted
   from YAML like desktop ConfigProxy); honoring at connect time
   (jumpHost/proxy/multiplex) is still a "scheduled" stub.
-- **jumpHost / proxyCommand / SOCKS-HTTP:** currently a "scheduled" stub.
+- **jumpHost / proxyCommand / SOCKS-HTTP:** saved to YAML via the
+  `connectionMode` dropdown (other-mode fields nulled on save, desktop
+  priority), but connect is direct-only — a "scheduled" stub.
 - **Rotation keeping the live PTY** (session is screen-scoped today).
 - Multi-window / font-choice polish, search-in-buffer.

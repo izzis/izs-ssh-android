@@ -17,8 +17,12 @@ technical design.
 - **Vault**: PBKDF2-HmacSHA512 + AES-256-CBC interop with desktop vaults;
   lazy unlock (passphrase asked only when a secret is actually needed);
   survives rotation via ViewModel; RAM-only, never written to disk.
-- **Profiles**: groups, search, edit (rename/move/host/port/user/password,
-  add/remove keys, delete), live RAW `config.yaml` viewer.
+- **Profiles**: home list (search, groups, add button), tabbed editor —
+  General (connection-mode dropdown, Auto auth, new/existing groups),
+  Ports (forwarding), Advanced, Ciphers, Login scripts; Colours is a
+  scheduled placeholder. New profiles get desktop-shape ids
+  (`ssh:custom:<slug>:<uuid>`), fields at desktop defaults are omitted
+  from YAML, live RAW `config.yaml` viewer.
 - **Terminal**: real PTY shell (sshj), VT100/xterm-subset emulator, colors,
   alt-buffer (vim/htop), **scrollback with drag-to-read + follow-bottom**,
   window-change on resize, TOFU host-key guard,
@@ -54,17 +58,18 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 66 unit tests (vault, sync, emulator)
+./gradlew :app:testDebugUnitTest   # 75 unit tests (vault, sync, emulator, profiles)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-1. Open the app → enter sync host + token (or start with local config).
+1. Open the app → the profile list (fresh installs start empty; Tabby Sync
+   lives under Settings, never blocks boot).
 2. Pick a profile → unlock the vault when asked → a real shell opens.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 66/66 green)
+## Parity guarantees (tested, 75/75 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
@@ -76,9 +81,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## Roadmap (toward full `config.yaml` parity, min. tabby-android level)
 
 - Text selection with start/end drag handles + Copy/Paste bar.
-- Full profile editor: every `config.yaml` key editable and honored
-  (keepalive, ciphers, port forwarding, proxy/jumpHost, terminal type).
-- `jumpHost` / `proxyCommand` / SOCKS-HTTP support (stub today).
+- Profile connect parity: `connectionMode` (proxyCommand/jumpHost/SOCKS/HTTP)
+  is saved to YAML but connect is direct-only today; keepalive, terminal
+  type, colour schemes still unwritten.
 - Keep the live PTY across rotation; search-in-buffer.
 
 ## Layout
