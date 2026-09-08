@@ -26,6 +26,7 @@ technical design.
   mobile are labeled desktop-only, live RAW `config.yaml` viewer.
 - **Terminal**: real PTY shell (sshj), VT100/xterm-subset emulator, colors,
   alt-buffer (vim/htop), **scrollback with drag-to-read + follow-bottom**,
+  **text selection (long-press word, drag handles, floating Copy)**,
   window-change on resize, host-key trust prompt (unknown/changed keys,
   desktop `ssh.knownHosts` format, known-first negotiation),
   password + multi-key auth. Connect honors login scripts
@@ -62,7 +63,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 104 unit tests (vault, sync, emulator, profiles, connect opts, host trust)
+./gradlew :app:testDebugUnitTest   # 112 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -73,7 +74,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 104/104 green)
+## Parity guarantees (tested, 112/112 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

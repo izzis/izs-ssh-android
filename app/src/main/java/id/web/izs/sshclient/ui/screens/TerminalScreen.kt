@@ -38,7 +38,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -73,15 +72,19 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.web.izs.sshclient.core.ssh.SshConnector
 import id.web.izs.sshclient.core.term.TerminalEmulator
 import id.web.izs.sshclient.core.term.TerminalInput
 import id.web.izs.sshclient.ui.AppState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -127,11 +130,16 @@ fun TerminalScreen(
     var showKeys by remember { mutableStateOf(true) }
     var showMenu by remember { mutableStateOf(false) }
     var boxInput by remember { mutableStateOf("") }
-    var kbText by remember { mutableStateOf("") }
+    // Hidden field MIRROR: diff-based streaming needs the field to match the
+    // shell's input buffer AND carry an explicit end-of-text cursor. A plain
+    // String value leaves the IME cursor wherever it was (stale 0 after a
+    // programmatic set), so typing lands mid-text and backspace misses —
+    // TextFieldValue pins the cursor where the edits actually go.
+    var kbText by remember { mutableStateOf(TextFieldValue("")) }
     var fontSp by remember { mutableStateOf(state.disk.terminalFontSp) }
     var ctrlSticky by remember { mutableStateOf(false) }
     var altSticky by remember { mutableStateOf(false) }
-    var copied by remember { mutableStateOf(false) }
+    var copiedMsg by remember { mutableStateOf<String?>(null) }
     var showUnlock by remember { mutableStateOf(false) }
     var showCloseConfirm by remember { mutableStateOf(false) }
     // Host-key trust: unknown/changed keys pause the connect with a desktop-
@@ -153,7 +161,13 @@ fun TerminalScreen(
     val view = LocalView.current
     val imm = remember(context) { context.getSystemService(InputMethodManager::class.java) }
     fun resetImeLine() {
-        kbText = ""
+        kbText = TextFieldValue("")
+        try { imm.restartInput(view) } catch (_: Exception) { }
+    }
+    /** Mirror external input (paste) into the field with the cursor pinned at the end. */
+    fun mirrorExternalInput(text: String) {
+        val merged = kbText.text + text
+        kbText = TextFieldValue(merged, TextRange(merged.length))
         try { imm.restartInput(view) } catch (_: Exception) { }
     }
 
@@ -203,11 +217,19 @@ fun TerminalScreen(
         altSticky = false
     }
 
+    // Live connect step for the loading row (replaces the spinner: the user
+    // sees what is actually happening). Written from IO via onStage.
+    var stage by remember { mutableStateOf("Starting…") }
+    // Abort handle for Cancel: killing the job mid-connect must not surface
+    // as a failure (CancellationException bypasses the error path).
+    var connectJob by remember { mutableStateOf<Job?>(null) }
+
     fun doConnect() {
         val p = profile ?: return
         if (connecting) return
         connecting = true
-        scope.launch {
+        stage = "Starting…"
+        connectJob = scope.launch {
             failed = null
             status = "connecting…"
             try {
@@ -229,6 +251,7 @@ fun TerminalScreen(
                         oneTimeTrust = extraTrust,
                         timeoutMs = p.options.readyTimeout ?: 20000,
                         cacheDir = context.cacheDir,
+                        onStage = { s -> scope.launch { stage = s } },
                     )
                 }
                 session = sess
@@ -254,11 +277,16 @@ fun TerminalScreen(
             } catch (e: UnknownHostKeyException) {
                 hostKeyPrompt = e
                 status = "disconnected"
+            } catch (e: CancellationException) {
+                // Cancel pressed (or screen left): quiet abort, never a failure.
+                status = "disconnected"
+                throw e
             } catch (e: Exception) {
                 failed = e.message ?: "Connect failed"
                 status = "disconnected"
             } finally {
                 connecting = false
+                connectJob = null
             }
         }
     }
@@ -301,6 +329,13 @@ fun TerminalScreen(
     fun goBack() {
         doDisconnect()
         onBack()
+    }
+
+    /** Abort an in-flight connect (never surfaces as a failure) and leave. */
+    fun cancelConnect() {
+        connectJob?.cancel()
+        connectJob = null
+        goBack()
     }
 
     fun requestClose() {
@@ -392,7 +427,7 @@ fun TerminalScreen(
             }
             IconButton(onClick = {
                 clipboard.setText(AnnotatedString(emulator.plainText()))
-                copied = true
+                copiedMsg = "Screen copied"
             }) {
                 Icon(Icons.Filled.ContentCopy, contentDescription = "Copy screen")
             }
@@ -431,12 +466,19 @@ fun TerminalScreen(
                 }
             }
         }
-        if (copied) {
+        if (copiedMsg != null) {
             Text(
-                "Screen copied",
+                copiedMsg!!,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
             )
+        }
+        // Copy confirmations clear themselves; the next copy re-arms.
+        LaunchedEffect(copiedMsg) {
+            if (copiedMsg != null) {
+                delay(2500)
+                copiedMsg = null
+            }
         }
         if (failed != null) {
             Card(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
@@ -456,13 +498,22 @@ fun TerminalScreen(
                 }
             }
         } else if (session == null) {
+            // Loading row: live step text instead of a spinner (the user sees
+            // what is actually happening), Cancel pinned at the far right.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
             ) {
-                CircularProgressIndicator()
-                OutlinedButton(onClick = { goBack() }) { Text("Close") }
+                Text(
+                    stage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(onClick = { cancelConnect() }) { Text("Cancel") }
             }
         }
         // Keyboard dock imitating tabby-android (terminal.component.ts):
@@ -580,6 +631,29 @@ fun TerminalScreen(
                                 keyboard?.show()
                             }
                         },
+                        onCopySelection = { text ->
+                            clipboard.setText(AnnotatedString(text))
+                            copiedMsg = "Selection copied"
+                        },
+                        onPasteSelection = { text ->
+                            // The hidden field mirrors the shell's input
+                            // buffer for diff-based typing: a paste that
+                            // bypasses it would leave backspace dead (field
+                            // empty while the line has text). Mirror first so
+                            // delete/continue-typing diff correctly; skip in
+                            // box mode (its own field owns the buffer there).
+                            // The Paste tap steals focus onto the button, so
+                            // hand it straight back — otherwise typing and
+                            // backspace need an extra terminal tap first.
+                            if (session != null) {
+                                if (!boxMode) {
+                                    mirrorExternalInput(text)
+                                    focusRequester.requestFocus()
+                                    keyboard?.show()
+                                }
+                                sendRaw(text)
+                            }
+                        },
                         sidePadPx = sidePadPx,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -681,13 +755,15 @@ fun TerminalScreen(
             BasicTextField(
                 value = kbText,
                 onValueChange = { next ->
-                    val common = kbText.commonPrefixWith(next).length
-                    val removed = kbText.length - common
+                    val prev = kbText.text
+                    val cur = next.text
+                    val common = prev.commonPrefixWith(cur).length
+                    val removed = prev.length - common
                     repeat(removed) { sendRaw(DEL) }
-                    val added = next.substring(common).replace(LF, CR)
+                    val added = cur.substring(common).replace(LF, CR)
                     if (added.isNotEmpty()) sendCooked(added)
                     // New line (or buffer cap): fresh IME state per line.
-                    if (added.contains(CR) || next.length > 48) resetImeLine()
+                    if (added.contains(CR) || cur.length > 48) resetImeLine()
                     else kbText = next
                 },
                 keyboardOptions = KeyboardOptions(autoCorrect = false, imeAction = ImeAction.Done),

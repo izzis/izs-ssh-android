@@ -92,7 +92,7 @@ app/src/main/java/id/web/izs/sshclient/
                           known_hosts (TOFU), terminal prefs (font size)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (14 files, 104 tests — §8)
+app/src/test/... (15 files, 112 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -247,11 +247,30 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   `sendSpecial`. Font size pref `terminal.fontSp` (8–24sp, default 14).
 - Terminal header extras: copy (puts `plainText()` on clipboard) +
   box-mode toggle + `⋮` menu (font ±, extra keys on/off).
+- Connecting row: live stage text from the connector (crypto / connect /
+  password / key i-of-n / shell / login scripts) instead of a spinner, with
+  Cancel at the far right aborting the in-flight job (quiet, never a failure).
+- Text selection: born ONLY from a committed hold (word) or a triple-tap
+  (line). Two-stage hold: 300ms ticks haptically (release = commit word,
+  move = scroll); ~600ms commits and extends the nearest endpoint until
+  release. Summoning is vetoed once scrolled content moves (24dp drift
+  backstop for clamped edges). Endpoints also move via immediate handle
+  drags (press-on-handle locks scroll at down); edge-zone auto-scroll. Endpoints move via immediate handle drags (a press on a
+  handle locks scroll at down, so no second hold is needed; dragging into
+  the edge zone auto-scrolls).
+  Scroll stays on even while selecting (it locks only for an armed endpoint
+  drag); tap clears. Copy/Paste float above the selection in an opaque
+  pill (below when no room; Paste sends the clipboard to the session,
+  mirrors it into the input buffer so backspace keeps working, and refocuses
+  the keyboard).
+  While selecting, user scrolling is off, output-follow freezes, tap clears;
+  absolute rows are scroll-stable so handles track the text (a history
+  shrink, resize, font change, or alt-buffer switch drops the selection).
 - `http://` sync hosts allowed for self-hosted LAN (with in-app warning).
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 104 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 112 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -263,6 +282,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `VaultManageTest` | set/change/erase passphrase, encrypt-config toggle |
 | `VaultStateTest` | pure resolve + `unlockRequired` rules |
 | `TerminalEmulatorTest` | VT100 ops + pending-wrap regression + scrollback cap/trim/alt |
+| `TextSelectionTest` | range extraction, order/clamp, scroll-stability, word expansion |
 | `TerminalInputTest` | sticky CTRL/ALT mapping |
 | `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers, color/icon round-trip, global warnOnClose |
 | `HostKeyTrustTest` | ssh-keygen digest vector, exact match/mismatch/port identity, legacy upgrade, negotiation order, knownHosts upsert |
@@ -294,6 +314,4 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 - **jumpHost / proxyCommand / SOCKS-HTTP:** saved to YAML via the
   `connectionMode` dropdown (other-mode fields nulled on save, desktop
   priority), but connect is direct-only — a "scheduled" stub.
-- **Text selection with handles:** long-press -> start/end drag handles +
-  floating Copy/Paste bar (tabby-android pattern), replacing screen-copy.
 - Multi-window / font-choice polish, search-in-buffer.

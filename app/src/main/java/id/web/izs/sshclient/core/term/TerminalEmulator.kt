@@ -106,6 +106,74 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
 
     fun cellAt(x: Int, y: Int): Cell = grid[y.coerceIn(0, rows - 1)][x.coerceIn(0, cols - 1)]
 
+    /** A cell address in absolute rows (scrollback history above the live grid). */
+    data class SelPoint(val row: Int, val col: Int)
+
+    /** Absolute row count: scrollback history + live grid rows. */
+    fun totalRowCount(): Int = historyRowCount() + rows
+
+    /**
+     * Absolute-row text padded with blanks to [cols] (history rows may be
+     * narrower after a resize). Out-of-range rows read as blank.
+     */
+    fun textAtRow(row: Int): String {
+        val total = totalRowCount()
+        if (total == 0) return ""
+        val r = row.coerceIn(0, total - 1)
+        val h = historyRowCount()
+        return buildString {
+            for (x in 0 until cols) {
+                append(if (r < h) historyCell(r, x)?.ch ?: ' ' else cellAt(x, r - h).ch)
+            }
+        }
+    }
+
+    /**
+     * Terminal-style selection text between two points (inclusive ends,
+     * per-line trailing blanks trimmed, lines joined with LF). Points may
+     * come in either order and past the edges — all clamped.
+     */
+    fun selectedText(a: SelPoint, b: SelPoint): String {
+        val total = totalRowCount()
+        if (total == 0 || cols == 0) return ""
+        var r0 = a.row.coerceIn(0, total - 1)
+        var c0 = a.col.coerceIn(0, cols - 1)
+        var r1 = b.row.coerceIn(0, total - 1)
+        var c1 = b.col.coerceIn(0, cols - 1)
+        if (r0 > r1 || (r0 == r1 && c0 > c1)) {
+            val tr = r0; r0 = r1; r1 = tr
+            val tc = c0; c0 = c1; c1 = tc
+        }
+        // Trailing blank rows contribute no trailing newlines to the copy
+        // (a select-to-bottom drag pastes clean), middle blanks are kept.
+        return buildString {
+            for (r in r0..r1) {
+                val line = textAtRow(r)
+                val from = if (r == r0) c0 else 0
+                val to = if (r == r1) c1 else cols - 1
+                append(line.substring(from, (to + 1).coerceAtMost(line.length)).trimEnd())
+                if (r != r1) append('\n')
+            }
+        }.trimEnd('\n')
+    }
+
+    /**
+     * Word-select expansion for long-press: the surrounding non-blank run.
+     * A blank cell selects just itself (the copy button stays hidden until
+     * the range covers real text).
+     */
+    fun expandWord(row: Int, col: Int): Pair<Int, Int> {
+        val line = textAtRow(row)
+        if (line.isEmpty()) return col to col
+        val c = col.coerceIn(0, line.length - 1)
+        if (line[c] == ' ') return c to c
+        var s = c
+        while (s > 0 && line[s - 1] != ' ') s--
+        var e = c
+        while (e < line.length - 1 && line[e + 1] != ' ') e++
+        return s to e
+    }
+
     /** Plain-text snapshot (history + current grid) for copy-to-clipboard. */
     fun plainText(): String = buildString {
         for (row in history) {

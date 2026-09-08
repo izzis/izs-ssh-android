@@ -92,6 +92,9 @@ class SshConnector {
      * [testConnect] (password, then keys one by one with key-passphrase
      * candidates). Throws IllegalStateException with a user-facing message
      * when the connection or auth fails.
+     *
+     * @param onStage live step text for the connecting UI (called from IO —
+     * the caller hops threads). English-only, user-facing.
      */
     suspend fun openShell(
         profile: SshProfile,
@@ -104,6 +107,7 @@ class SshConnector {
         oneTimeTrust: id.web.izs.sshclient.core.config.KnownHostEntry? = null,
         timeoutMs: Long,
         cacheDir: File,
+        onStage: (String) -> Unit = {},
     ): ShellSession = withContext(Dispatchers.IO) {
         val o = profile.options
         if (!o.jumpHost.isNullOrBlank() || !o.proxyCommand.isNullOrBlank() ||
@@ -130,6 +134,7 @@ class SshConnector {
         client.transport.config.keepAliveProvider = KeepAliveProvider.KEEP_ALIVE
         try {
             withTimeout(timeoutMs.coerceIn(5_000, 120_000)) {
+                onStage("Preparing crypto…")
                 ensureProvider()
                 val (offeredHostKeys, hostKeysCustom) =
                     SshAlgorithmFactories.effectiveHostKeys(o.algorithms)
@@ -139,6 +144,7 @@ class SshConnector {
                     offeredHostKeys, hostKeysCustom,
                 )
                 client.addHostKeyVerifier(verifier)
+                onStage("Connecting to $user@${o.host}:$port…")
                 try {
                     client.connect(o.host, port)
                 } catch (e: UnknownHostKeyException) {
@@ -151,6 +157,7 @@ class SshConnector {
                 }
                 var lastErr = ""
                 if (!password.isNullOrBlank()) {
+                    onStage("Authenticating with password…")
                     try {
                         client.authPassword(user, password)
                     } catch (e: Exception) {
@@ -158,8 +165,9 @@ class SshConnector {
                     }
                 }
                 if (!client.isAuthenticated) {
-                    for (k in keys) {
-                        if (k.pem.isBlank()) continue
+                    val usable = keys.filter { it.pem.isNotBlank() }
+                    for ((i, k) in usable.withIndex()) {
+                        onStage("Trying private key ${i + 1} of ${usable.size}…")
                         if (tryKeyAuth(client, user, k.pem, listOf(k.passphrase) + keyPassphrases, cacheDir)) break
                         else lastErr = "publickey auth failed"
                     }
@@ -179,6 +187,7 @@ class SshConnector {
                 } catch (_: Exception) {
                     // Best-effort: a dead keepalive must never fail the session.
                 }
+                onStage("Opening shell…")
                 val session = client.startSession()
                 try {
                     // xterm-256color (not dumb): fullscreen apps gate colors
@@ -192,6 +201,7 @@ class SshConnector {
                     // Login tab: unconditional scripts at session ready, then
                     // per-chunk expect/send automation (LoginScriptRunner).
                     val scriptRunner = o.scripts.takeIf { it.isNotEmpty() }?.let { LoginScriptRunner(it) }
+                    if (scriptRunner != null) onStage("Running login scripts…")
                     scriptRunner?.runUnconditional()?.forEach { sess.send(it) }
                     thread(isDaemon = true, name = "ssh-shell-reader") {
                         try {
