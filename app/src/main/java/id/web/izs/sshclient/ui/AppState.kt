@@ -9,6 +9,7 @@ import id.web.izs.sshclient.core.config.SshDefaults
 import id.web.izs.sshclient.core.config.SshProfile
 import id.web.izs.sshclient.core.config.VaultSecret
 import id.web.izs.sshclient.core.sync.SyncRepository
+import id.web.izs.sshclient.core.vault.SavedKeyInfo
 import id.web.izs.sshclient.core.vault.SecretResolver
 import id.web.izs.sshclient.data.local.ConfigDisk
 import kotlinx.coroutines.CoroutineScope
@@ -148,6 +149,18 @@ class AppState(
         }
         return out
     }
+
+    /**
+     * Vault-stored private keys (desktop vault.selectAndStoreFile parity).
+     * Empty when the vault is missing or locked — callers gate on that.
+     */
+    fun savedKeys(): List<SavedKeyInfo> = SecretResolver.fileSecrets(secrets())
+
+    /** Display label for an attached key ref: vault description, else a short id tail. */
+    fun keyLabel(ref: String): String =
+        savedKeys().find { it.ref == ref }?.description?.takeIf { it.isNotBlank() }
+            ?: if (ref.startsWith(SecretResolver.VAULT_PREFIX)) "vault file • …${ref.takeLast(8)}"
+            else ref.take(44)
 
     /**
      * All saved key-passphrase values. Desktop keys them by key hash

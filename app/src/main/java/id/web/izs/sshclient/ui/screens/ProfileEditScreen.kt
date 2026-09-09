@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -62,6 +63,7 @@ import id.web.izs.sshclient.core.config.TerminalColorScheme
 import id.web.izs.sshclient.core.config.normalizeProfileColor
 import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.core.sync.SyncRepository
+import id.web.izs.sshclient.core.vault.SavedKeyInfo
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.launch
 
@@ -139,7 +141,12 @@ fun ProfileEditScreen(
     var reveal by remember { mutableStateOf(false) }
     var removedRefs by remember(original) { mutableStateOf(setOf<String>()) }
     var addedKeys by remember { mutableStateOf(listOf<Pair<String, String>>()) }
+    // Existing vault refs attached in this session (desktop selector parity:
+    // no vault write, the ref is just added to options.privateKeys on save).
+    var attachedRefs by remember(original) { mutableStateOf(listOf<String>()) }
     var showAddKey by remember { mutableStateOf(false) }
+    var showUseSaved by remember { mutableStateOf(false) }
+    var pendingUseSaved by remember { mutableStateOf(false) }
 
     // ---- Colours ----
     // Per-profile terminal scheme override (desktop sshProfileSettings
@@ -201,6 +208,9 @@ fun ProfileEditScreen(
     val liveRefs = remember(original, removedRefs) {
         (original?.options?.privateKeys ?: emptyList()) - removedRefs
     }
+    // Vault keys available to attach (empty while locked — the picker then
+    // routes through unlock first, like the desktop "Vault is locked" throw).
+    val savedKeys = remember(state.loaded) { state.savedKeys() }
     val secrets = SyncRepository.ProfileSecretEdits(
         password = passwordTouched.takeIf { it }?.let { passwordText },
         newKeyPems = addedKeys,
@@ -234,8 +244,9 @@ fun ProfileEditScreen(
         forwardedPorts = forwards,
         scripts = scripts,
         // Final vault refs are assembled by the repo
-        // (existing minus removed plus newly stored).
-        privateKeys = liveRefs,
+        // (existing minus removed plus newly stored). Vault refs attached
+        // from already-stored keys ride along untouched (no vault write).
+        privateKeys = liveRefs + attachedRefs,
     )
 
     fun doSave() {
@@ -400,8 +411,20 @@ fun ProfileEditScreen(
                     addedKeys = addedKeys,
                     onRemoveRef = { removedRefs = removedRefs + it },
                     onDiscardKey = { addedKeys = addedKeys - it },
+                    attachedRefs = attachedRefs,
+                    onDiscardAttached = { attachedRefs = attachedRefs - it },
+                    keyLabel = { state.keyLabel(it) },
+                    savedKeys = savedKeys,
                     vaultPresent = vaultPresent,
                     onAddKey = { showAddKey = true },
+                    onUseSavedKey = {
+                        if (locked) {
+                            pendingUseSaved = true
+                            showUnlock = true
+                        } else {
+                            showUseSaved = true
+                        }
+                    },
                 )
                 1 -> PortsTab(forwards = forwards, onChange = { forwards = it })
                 2 -> AdvancedTab(
@@ -449,12 +472,31 @@ fun ProfileEditScreen(
     }
 
     if (showAddKey) {
+        // Desktop addNewFile parity: the label defaults to
+        // "private key for <profile>" (desktop appends the picked file name,
+        // which paste has none of) — the field is optional, not required.
+        val defaultKeyDesc = "private key for ${name.ifBlank { original?.name ?: "New profile" }}"
         AddKeyDialog(
+            defaultDesc = defaultKeyDesc,
             onAdd = { pem, desc ->
                 showAddKey = false
                 addedKeys = addedKeys + (pem to desc)
             },
             onDismiss = { showAddKey = false },
+        )
+    }
+
+    if (showUseSaved) {
+        UseSavedKeyDialog(
+            saved = savedKeys,
+            // Already attached refs (stored or pasted this session) are
+            // hidden so the same key cannot be attached twice.
+            attached = (liveRefs + attachedRefs).toSet(),
+            onConfirm = { refs ->
+                showUseSaved = false
+                attachedRefs = attachedRefs + refs
+            },
+            onDismiss = { showUseSaved = false },
         )
     }
 
@@ -511,6 +553,10 @@ fun ProfileEditScreen(
             onUnlocked = {
                 showUnlock = false
                 when {
+                    pendingUseSaved -> {
+                        pendingUseSaved = false
+                        showUseSaved = true
+                    }
                     pendingDelete -> {
                         pendingDelete = false
                         doDelete()
@@ -531,12 +577,14 @@ fun ProfileEditScreen(
                 pendingSave = false
                 pendingDelete = false
                 pendingNewGroup = false
+                pendingUseSaved = false
             },
             onDismiss = {
                 showUnlock = false
                 pendingSave = false
                 pendingDelete = false
                 pendingNewGroup = false
+                pendingUseSaved = false
             },
             dismissible = true,
         )
@@ -570,8 +618,13 @@ private fun GeneralTab(
     addedKeys: List<Pair<String, String>>,
     onRemoveRef: (String) -> Unit,
     onDiscardKey: (Pair<String, String>) -> Unit,
+    attachedRefs: List<String>,
+    onDiscardAttached: (String) -> Unit,
+    keyLabel: (String) -> String,
+    savedKeys: List<SavedKeyInfo>,
     vaultPresent: Boolean,
     onAddKey: () -> Unit,
+    onUseSavedKey: () -> Unit,
 ) {
     var showColour by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -610,31 +663,47 @@ private fun GeneralTab(
         label = { Text("User") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
     AuthDropdown(selected = auth, onSelect = onAuth)
-    OutlinedTextField(
-        value = if (passwordTouched) passwordText else "",
-        onValueChange = onPassword,
-        label = { Text("Password") },
-        placeholder = {
-            Text(
-                when {
-                    locked -> "locked — tap the eye to unlock"
-                    hasSavedPassword -> "saved — leave empty to keep, clear to remove"
-                    else -> "no password saved"
-                },
-            )
-        },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(onClick = onReveal) {
-                Icon(
-                    if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                    contentDescription = if (reveal) "Hide password" else "Show password",
+    // Desktop parity (sshProfileSettings "Set password / Forget"): Forget
+    // stages the removal — the saved password is dropped when you Save
+    // (repo removes the vault secret / plaintext literal; nothing is
+    // written before that, like every other edit on this screen).
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = if (passwordTouched) passwordText else "",
+            onValueChange = onPassword,
+            label = { Text("Password") },
+            placeholder = {
+                Text(
+                    when {
+                        locked -> "locked — tap the eye to unlock"
+                        hasSavedPassword -> "saved — leave empty to keep, clear to remove"
+                        else -> "no password saved"
+                    },
                 )
-            }
-        },
-    )
+            },
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = onReveal) {
+                    Icon(
+                        if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (reveal) "Hide password" else "Show password",
+                    )
+                }
+            },
+        )
+        if (hasSavedPassword && !passwordTouched) {
+            TextButton(onClick = { onPassword("") }) { Text("Forget") }
+        }
+    }
+    if (passwordTouched && passwordText.isEmpty() && hasSavedPassword) {
+        Text(
+            "Password will be forgotten when you Save.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     if (reveal) {
         Text(
             "Current: ${effectivePassword ?: "(none)"}",
@@ -642,7 +711,10 @@ private fun GeneralTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    Text("Private keys (${liveRefs.size + addedKeys.size})", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Private keys (${liveRefs.size + addedKeys.size + attachedRefs.size})",
+        style = MaterialTheme.typography.titleMedium,
+    )
     if (vaultPresent && locked) {
         Text(
             "Key list is locked — unlock to manage keys.",
@@ -653,8 +725,7 @@ private fun GeneralTab(
     for (ref in liveRefs) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(
-                if (ref.startsWith("vault://")) "vault file • …${ref.takeLast(8)}"
-                else ref.take(44),
+                keyLabel(ref),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
@@ -678,11 +749,43 @@ private fun GeneralTab(
             }
         }
     }
-    OutlinedButton(
-        enabled = !vaultPresent || !locked,
-        onClick = onAddKey,
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text("Add private key") }
+    for (ref in attachedRefs) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "saved • ${keyLabel(ref)}",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { onDiscardAttached(ref) }) {
+                Icon(Icons.Filled.Delete, contentDescription = "Detach key")
+            }
+        }
+    }
+    if (vaultPresent) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                enabled = !locked,
+                onClick = onAddKey,
+                modifier = Modifier.weight(1f),
+            ) { Text("Paste new") }
+            OutlinedButton(
+                onClick = onUseSavedKey,
+                modifier = Modifier.weight(1f),
+            ) { Text("Use saved (${savedKeys.size})") }
+        }
+        if (locked) {
+            Text(
+                "Unlock to paste a new key or pick a saved one.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else {
+        OutlinedButton(
+            onClick = onAddKey,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Add private key") }
+    }
     Text("Connection", style = MaterialTheme.typography.titleMedium)
     ConnectionDropdown(selected = connectionMode, onSelect = onConnectionMode)
     if (connectionMode != "direct") {
@@ -1201,31 +1304,109 @@ private fun AuthDropdown(selected: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun AddKeyDialog(onAdd: (pem: String, desc: String) -> Unit, onDismiss: () -> Unit) {
+private fun AddKeyDialog(defaultDesc: String, onAdd: (pem: String, desc: String) -> Unit, onDismiss: () -> Unit) {
     var pem by remember { mutableStateOf("") }
     var desc by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add private key") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // The PEM box is a FIXED-height window (long pastes scroll
+            // inside it) and the whole content scrolls too, so the label
+            // field below is always reachable on small screens.
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 OutlinedTextField(
                     value = pem, onValueChange = { pem = it },
                     label = { Text("Paste PEM (or key path for plaintext configs)") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
                     minLines = 3,
                 )
                 OutlinedTextField(
                     value = desc, onValueChange = { desc = it },
-                    label = { Text("Description (vault label)") },
+                    label = { Text("Description (optional label)") },
+                    placeholder = { Text(defaultDesc) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
             }
         },
         confirmButton = {
-            Button(enabled = pem.isNotBlank(), onClick = { onAdd(pem.trim(), desc.trim()) }) {
+            Button(
+                enabled = pem.isNotBlank(),
+                onClick = { onAdd(pem.trim(), desc.trim().ifBlank { defaultDesc }) },
+            ) {
                 Text("Add")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Desktop vault.selectAndStoreFile selector parity ("Select file": existing
+ * vault keys by description, multi-pick on mobile). Picking attaches the
+ * `vault://` ref — the vault payload itself is never rewritten.
+ */
+@Composable
+private fun UseSavedKeyDialog(
+    saved: List<SavedKeyInfo>,
+    attached: Set<String>,
+    onConfirm: (List<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val available = remember(saved, attached) { saved.filter { it.ref !in attached } }
+    var picked by remember(available) { mutableStateOf(setOf<String>()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Use saved key") },
+        text = {
+            if (available.isEmpty()) {
+                Text("No other saved keys in the vault — paste one with “Paste new” first.")
+            } else {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    for (k in available) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                picked = if (k.ref in picked) picked - k.ref else picked + k.ref
+                            },
+                        ) {
+                            Checkbox(
+                                checked = k.ref in picked,
+                                onCheckedChange = { on ->
+                                    picked = if (on) picked + k.ref else picked - k.ref
+                                },
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    k.description.ifBlank { "saved key" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    "…${k.ref.takeLast(8)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (available.isNotEmpty()) {
+                Button(
+                    enabled = picked.isNotEmpty(),
+                    onClick = { onConfirm(available.filter { it.ref in picked }.map { it.ref }) },
+                ) {
+                    Text("Add (${picked.size})")
+                }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

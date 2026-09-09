@@ -7,7 +7,14 @@ import id.web.izs.sshclient.core.config.VaultSecret
  * - ssh:password key {user,host,port} (port defaults to 22 for matching)
  * - ssh:key-passphrase key {hash}
  * - file key {id,description} value base64(PEM); secure storage holds PEM text
+ *
+ * Note: desktop has NO profile-level `description` (Profile interface +
+ * editProfileModal) — only ForwardedPortConfig.description and the vault
+ * file-secret label. Mobile models exactly those two, nothing more.
  */
+/** A vault-stored private key: its `vault://` ref + desktop `key.description` label. */
+data class SavedKeyInfo(val ref: String, val description: String)
+
 object SecretResolver {
     const val TYPE_PASSWORD = "ssh:password"
     const val TYPE_PASSPHRASE = "ssh:key-passphrase"
@@ -89,6 +96,16 @@ object SecretResolver {
         )
         return (secrets + entry) to (VAULT_PREFIX + id)
     }
+
+    /**
+     * Vault-stored private keys for the "use saved key" picker (desktop
+     * vault.selectAndStoreFile selector parity: existing files listed by
+     * `key.description`, picking one returns its `vault://` ref without
+     * touching the vault payload).
+     */
+    fun fileSecrets(secrets: List<VaultSecret>): List<SavedKeyInfo> =
+        secrets.filter { it.type == TYPE_FILE && it.key["id"] != null }
+            .map { SavedKeyInfo(VAULT_PREFIX + it.key["id"], it.key["description"] ?: "") }
 
     fun removeFile(secrets: List<VaultSecret>, ref: String): List<VaultSecret> {
         if (!ref.startsWith(VAULT_PREFIX)) return secrets

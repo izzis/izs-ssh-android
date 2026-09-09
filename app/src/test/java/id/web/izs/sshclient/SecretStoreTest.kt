@@ -64,6 +64,22 @@ class SecretStoreTest {
     }
 
     @Test
+    fun `fileSecrets lists vault keys with descriptions for the picker`() {
+        val pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----"
+        val (s1, ref1) = SecretResolver.addFile(emptyList(), pem, "laptop key")
+        val (s2, ref2) = SecretResolver.addFile(s1, pem, "")
+        val all = s2 + pw("root", "h", 22, "pw1")
+        val listed = SecretResolver.fileSecrets(all)
+        assertEquals(2, listed.size)
+        assertEquals(ref1, listed[0].ref)
+        assertEquals("laptop key", listed[0].description)
+        assertEquals(ref2, listed[1].ref)
+        assertEquals("", listed[1].description)
+        // Non-file secrets never leak into the key picker.
+        assertTrue(listed.none { it.ref.isBlank() })
+    }
+
+    @Test
     fun `secretsToJson round-trips through parseSecretsJson`() {
         val secrets = listOf(
             pw("root", "h", 22, "s3cr3t pâss"),
