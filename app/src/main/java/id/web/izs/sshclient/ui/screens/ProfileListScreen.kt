@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -72,8 +74,10 @@ fun ProfileListScreen(
     onEdit: (profileId: String) -> Unit,
     onAdd: () -> Unit,
     onSettings: () -> Unit,
+    onExit: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    var showExitConfirm by remember { mutableStateOf(false) }
     // Recent section is the only collapsible one (Active stays expanded).
     var recentCollapsed by rememberSaveable { mutableStateOf(false) }
     // ConfigDisk prefs are not observable: bump to refresh the recent list
@@ -161,6 +165,9 @@ fun ProfileListScreen(
                 }
                 IconButton(onClick = onSettings) {
                     Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                }
+                IconButton(onClick = { showExitConfirm = true }) {
+                    Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Exit app")
                 }
             }
         }
@@ -253,6 +260,30 @@ fun ProfileListScreen(
                 )
             }
         }
+    }
+    // Explicit exit: Back already goes home, so home needs its own way out.
+    // Sessions are closed first (their sockets tear down off-Main), then the
+    // activity finishes and the process drops with it.
+    if (showExitConfirm) {
+        val n = liveSessions.size
+        AlertDialog(
+            onDismissRequest = { showExitConfirm = false },
+            title = { Text("Exit app?") },
+            text = {
+                Text(
+                    if (n > 0) "$n active session${if (n > 1) "s" else ""} will be disconnected."
+                    else "No active sessions.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { showExitConfirm = false; onExit() },
+                ) { Text("Exit", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitConfirm = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

@@ -85,10 +85,16 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 168 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents)
+./gradlew :app:testDebugUnitTest   # 169 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Zero-warning policy: every build (main + test sourcesets) must finish with
+0 warnings. Fix the code first (migrate off deprecated APIs, restructure
+the nullable logic) — `@Suppress` is the LAST resort, never a shortcut to
+silence the compiler: each one must carry a comment stating WHY it is safe
+and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 
 1. Open the app → the profile list (fresh installs start empty; Tabby Sync
    lives under Settings, never blocks boot).
@@ -96,7 +102,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 168/168 green)
+## Parity guarantees (tested, 169/169 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

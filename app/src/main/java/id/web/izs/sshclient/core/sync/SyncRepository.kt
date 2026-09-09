@@ -130,6 +130,7 @@ class SyncRepository(
      * throws "Vault is locked" and the caller keeps session-only trust.
      * Server upload follows the normal Upload/auto path (never on accept).
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun appendKnownHost(entry: id.web.izs.sshclient.core.config.KnownHostEntry): Loaded =
         withContext(Dispatchers.IO) {
             val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
@@ -312,6 +313,7 @@ class SyncRepository(
      * as an ssh:password secret and stripped from the YAML, so enabling the
      * master passphrase never leaves a duplicated secret in one file.
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun setVaultPassphrase(passphrase: String): Loaded = withContext(Dispatchers.IO) {
         require(passphrase.isNotBlank()) { "Passphrase is empty" }
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
@@ -380,6 +382,7 @@ class SyncRepository(
      * which bricks the file; mobile restores plaintext (blob removed,
      * encryption off) so the config stays loadable.
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun eraseVault(): Loaded = withContext(Dispatchers.IO) {
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
         val raw = RawConfigStore.loadRaw(yamlStr)
@@ -419,6 +422,7 @@ class SyncRepository(
      * Both directions require an unlocked vault; the UI prompts first
      * (desktop vault.load() -> getPassphrase() modal parity).
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun setConfigEncrypted(encrypted: Boolean): Loaded = withContext(Dispatchers.IO) {
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
         val raw = RawConfigStore.loadRaw(yamlStr)
@@ -463,6 +467,7 @@ class SyncRepository(
      * the blob must be re-encrypted, secrets payload passed through
      * byte-identical).
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun deleteProfile(profileId: String, original: SshProfile): Loaded =
         withContext(Dispatchers.IO) {
             val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
@@ -534,6 +539,7 @@ class SyncRepository(
      * @throws IllegalStateException("Vault is locked") when secrets must be
      * touched while locked — the UI prompts for the passphrase and retries.
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun updateProfile(
         profileId: String,
         original: SshProfile,
@@ -560,7 +566,8 @@ class SyncRepository(
         var secrets = emptyList<id.web.izs.sshclient.core.config.VaultSecret>()
         var blobConfigJson = ""
         if (wantsSecrets) {
-            val (cfg, sec) = VaultCrypto.decrypt(vault!!, pass!!)
+            // Smart cast: wantsSecrets implies vault != null.
+            val (cfg, sec) = VaultCrypto.decrypt(vault, pass!!)
             secrets = VaultState.parseSecretsJson(sec)
             blobConfigJson = cfg
         }
@@ -569,7 +576,7 @@ class SyncRepository(
         var newSecrets = secrets
         val ou = original.options
         val nu = updated.options
-        if (vault != null && wantsSecrets) {
+        if (wantsSecrets) {
             val pw = secretEdits.password
             if (pw != null) {
                 newSecrets = if (pw.isEmpty()) {
@@ -589,11 +596,10 @@ class SyncRepository(
         val addedRefs = mutableListOf<String>()
         if (wantsSecrets) {
             for ((pem, desc) in secretEdits.newKeyPems) {
-                if (vault != null) {
-                    val (next, ref) = SecretResolver.addFile(newSecrets, pem, desc)
-                    newSecrets = next
-                    addedRefs += ref
-                }
+                // Smart cast: wantsSecrets implies vault != null.
+                val (next, ref) = SecretResolver.addFile(newSecrets, pem, desc)
+                newSecrets = next
+                addedRefs += ref
             }
             for (ref in secretEdits.removedKeyRefs) {
                 newSecrets = SecretResolver.removeFile(newSecrets, ref)
@@ -691,6 +697,7 @@ class SyncRepository(
      *
      * @param groupId null/blank = ungrouped.
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun createProfile(
         profile: SshProfile,
         groupId: String?,
@@ -710,14 +717,15 @@ class SyncRepository(
         var secrets = emptyList<id.web.izs.sshclient.core.config.VaultSecret>()
         var blobConfigJson = ""
         if (wantsSecrets) {
-            val (cfg, sec) = VaultCrypto.decrypt(vault!!, pass!!)
+            // Smart cast: wantsSecrets implies vault != null.
+            val (cfg, sec) = VaultCrypto.decrypt(vault, pass!!)
             secrets = VaultState.parseSecretsJson(sec)
             blobConfigJson = cfg
         }
 
         var newSecrets = secrets
         val nu = profile.options
-        if (vault != null && wantsSecrets && !secretEdits.password.isNullOrEmpty()) {
+        if (wantsSecrets && !secretEdits.password.isNullOrEmpty()) {
             newSecrets = SecretResolver.upsertPassword(
                 newSecrets, nu.user, nu.host, nu.port, secretEdits.password,
             )
@@ -725,11 +733,10 @@ class SyncRepository(
         val addedRefs = mutableListOf<String>()
         if (wantsSecrets) {
             for ((pem, desc) in secretEdits.newKeyPems) {
-                if (vault != null) {
-                    val (next, ref) = SecretResolver.addFile(newSecrets, pem, desc)
-                    newSecrets = next
-                    addedRefs += ref
-                }
+                // Smart cast: wantsSecrets implies vault != null.
+                val (next, ref) = SecretResolver.addFile(newSecrets, pem, desc)
+                newSecrets = next
+                addedRefs += ref
             }
         }
         val secretsChanged = newSecrets != secrets
@@ -797,6 +804,7 @@ class SyncRepository(
      * Append a top-level group (mobile "New group" in the profile editor).
      * No secrets involved; encrypted shells still need unlock (re-encrypt).
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun createGroup(id: String, name: String): Loaded = withContext(Dispatchers.IO) {
         require(name.isNotBlank()) { "Group name is empty" }
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")

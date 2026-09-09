@@ -59,12 +59,13 @@ class VaultStateTest {
     fun `shell unlocked resolves secrets and merged view`() {
         val v = VaultState.resolve(shell(), pass)
         assertFalse(v.needsPassphrase)
-        assertEquals(1, v.secrets!!.size)
+        val secrets = requireNotNull(v.secrets)
+        assertEquals(1, secrets.size)
         assertEquals(1, RawConfigStore.toDomain(v.domainDoc).profiles.size)
         assertTrue(v.store.containsKey("profiles"))
         assertEquals(
             "s3cr3t",
-            SecretResolver.findPassword(v.secrets!!, "root", "10.0.0.1", 22)!!.value,
+            SecretResolver.findPassword(secrets, "root", "10.0.0.1", 22)?.value,
         )
     }
 
@@ -85,10 +86,11 @@ class VaultStateTest {
     fun `toggle-OFF doc unlocked keeps resolving secrets`() {
         val v = VaultState.resolve(offDoc(), pass)
         assertFalse(v.needsPassphrase)
-        assertEquals(1, v.secrets!!.size)
+        val secrets = requireNotNull(v.secrets)
+        assertEquals(1, secrets.size)
         assertEquals(
             "s3cr3t",
-            SecretResolver.findPassword(v.secrets!!, "root", "10.0.0.1", 22)!!.value,
+            SecretResolver.findPassword(secrets, "root", "10.0.0.1", 22)?.value,
         )
         assertEquals(1, RawConfigStore.toDomain(v.domainDoc).profiles.size)
     }

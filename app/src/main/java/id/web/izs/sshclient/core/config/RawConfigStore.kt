@@ -124,6 +124,7 @@ object RawConfigStore {
      * Parse a vault-blob config JSON object into a raw document (decrypt path).
      * Inverse of [toJson]; shared with the sync layer so tests exercise it.
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML/JSON maps: keys are strings by construction
     fun jsonToRaw(configJson: String): LinkedHashMap<String, Any?> {
         val el = kotlinx.serialization.json.Json.parseToJsonElement(configJson)
         val map = jsonElementToJava(el) as? Map<String, Any?> ?: emptyMap()
@@ -288,6 +289,7 @@ object RawConfigStore {
         return TabbyConfig(version, profiles, groups, ssh, configSync, vault, encrypted)
     }
 
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     private fun parseProfile(m: Map<String, Any?>): SshProfile? {
         // Desktop v4 parity (config.service.ts:390): id-less profiles get
         // `<type>:custom:<uuid>`, never dropped.
@@ -348,6 +350,7 @@ object RawConfigStore {
         )
     }
 
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     private fun parseAlgorithms(raw: Any?): Map<String, List<String>> {
         val m = raw as? Map<String, Any?> ?: return emptyMap()
         return SshAlgorithms.TYPES.mapNotNull { k ->
@@ -410,6 +413,7 @@ object RawConfigStore {
      * - When the remote is plaintext and parts[part]==false, the local part is kept.
      * - version defaults to 1 when missing.
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun mergeDownload(
         remoteRaw: LinkedHashMap<String, Any?>,
         localRaw: LinkedHashMap<String, Any?>,

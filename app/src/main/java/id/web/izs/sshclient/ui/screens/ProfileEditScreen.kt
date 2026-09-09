@@ -25,6 +25,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
@@ -32,7 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -342,7 +343,7 @@ fun ProfileEditScreen(
             onBack,
             Modifier.padding(top = 8.dp),
         )
-        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 16.dp) {
+        PrimaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 16.dp) {
             EDIT_TABS.forEachIndexed { i, title ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
             }
@@ -840,7 +841,7 @@ private fun ForwardCard(f: ForwardedPort, onUpdate: (ForwardedPort) -> Unit, onR
                     value = f.type, onValueChange = { },
                     readOnly = true, label = { Text("Type") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeOpen) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                 )
                 ExposedDropdownMenu(expanded = typeOpen, onDismissRequest = { typeOpen = false }) {
                     for (t in listOf("Local", "Remote", "Dynamic")) {
@@ -1065,7 +1066,7 @@ private fun ConnectionDropdown(selected: String, onSelect: (String) -> Unit) {
             value = titles[selected] ?: "Direct", onValueChange = { },
             readOnly = true, label = { Text("Connection") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for ((value, title) in titles) {
@@ -1096,7 +1097,7 @@ private fun GroupDropdown(
             value = label, onValueChange = { },
             readOnly = true, label = { Text("Group") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
@@ -1136,7 +1137,7 @@ private fun AuthDropdown(selected: String, onSelect: (String) -> Unit) {
             value = choices.toMap()[selected] ?: selected, onValueChange = { },
             readOnly = true, label = { Text("Auth method") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for ((value, label) in choices) {

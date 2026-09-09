@@ -1,6 +1,7 @@
 package id.web.izs.sshclient.ui.screens
 
 import android.app.Activity
+import android.content.ClipData
 import android.graphics.Rect
 import android.util.Log
 import android.view.ViewTreeObserver
@@ -28,12 +29,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PowerOff
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -69,14 +70,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
@@ -130,7 +131,7 @@ fun TerminalScreen(
     onCloseTab: (String) -> Unit = {},
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
@@ -480,7 +481,7 @@ fun TerminalScreen(
                 }
             } else {
                 IconButton(onClick = { onBack() }) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back (session stays alive)")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back (session stays alive)")
                 }
             }            // Status dot sits on the NAME row so user@host below gets the
             // full width (green = connected, amber = connecting, red =
@@ -821,7 +822,9 @@ fun TerminalScreen(
                             }
                         },
                         onCopySelection = { text ->
-                            clipboard.setText(AnnotatedString(text))
+                            scope.launch {
+                                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("terminal", text)))
+                            }
                             copiedMsg = "Selection copied"
                         },
                         onPasteSelection = { text ->
@@ -909,7 +912,7 @@ fun TerminalScreen(
                                 }
                             },
                             ) {
-                                Icon(Icons.Filled.Send, contentDescription = "Send")
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                             }
                         }
                     }
@@ -934,7 +937,7 @@ fun TerminalScreen(
                     if (added.contains(CR) || cur.length > 48) resetImeLine()
                     else kbText = next
                 },
-                keyboardOptions = KeyboardOptions(autoCorrect = false, imeAction = ImeAction.Done),
+                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { sendRaw(CR); resetImeLine() }),
                 modifier = Modifier.size(1.dp).focusRequester(focusRequester),
             )

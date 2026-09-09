@@ -25,8 +25,8 @@ import org.junit.Test
 class DesktopVaultInteropTest {
 
     private fun fixture(): JsonObject {
-        val text = javaClass.classLoader.getResourceAsStream("desktop-vault.json")!!
-            .bufferedReader().readText()
+        val loader = requireNotNull(javaClass.classLoader)
+        val text = loader.getResourceAsStream("desktop-vault.json")!!.bufferedReader().readText()
         return Json.parseToJsonElement(text) as JsonObject
     }
 

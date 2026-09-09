@@ -51,14 +51,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.unit.dp
+import android.content.ClipData
 import id.web.izs.sshclient.core.config.PROFILE_COLORS
 import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.core.term.KEYBOARD_PRESETS
@@ -90,6 +92,7 @@ import id.web.izs.sshclient.core.term.parseKeyLayout
 import id.web.izs.sshclient.core.term.saveKeyLayout
 import id.web.izs.sshclient.core.term.stepsDisplay
 import id.web.izs.sshclient.ui.AppState
+import kotlinx.coroutines.launch
 
 /** Editor position of the key dialog: index == row size means a new key. */
 private data class EditTarget(val row: Int, val index: Int)
@@ -109,7 +112,8 @@ fun KeyboardLayoutScreen(
     var edit by remember { mutableStateOf<EditTarget?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var pendingPreset by remember { mutableStateOf<KeyLayout?>(null) }
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
 
     /** Single write path: normalize in memory, store the canonical JSON. */
     fun commit(next: KeyLayout) {
@@ -209,7 +213,11 @@ fun KeyboardLayoutScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = {
-                                clipboard.setText(AnnotatedString(saveKeyLayout(layout)))
+                                scope.launch {
+                                    clipboard.setClipEntry(
+                                        ClipEntry(ClipData.newPlainText("extra-keys", saveKeyLayout(layout))),
+                                    )
+                                }
                                 notice = "Layout copied: ${layout.rows.size} rows."
                             },
                             modifier = Modifier.weight(1f),
@@ -219,17 +227,20 @@ fun KeyboardLayoutScreen(
                         }
                         OutlinedButton(
                             onClick = {
-                                val pasted = clipboard.getText()?.text
-                                val parsed = pasted?.let(::parseKeyLayout)
-                                if (parsed == null) {
-                                    notice = if (pasted.isNullOrBlank()) {
-                                        "Clipboard is empty."
+                                scope.launch {
+                                    val pasted = clipboard.getClipEntry()
+                                        ?.clipData?.getItemAt(0)?.text?.toString()
+                                    val parsed = pasted?.let(::parseKeyLayout)
+                                    if (parsed == null) {
+                                        notice = if (pasted.isNullOrBlank()) {
+                                            "Clipboard is empty."
+                                        } else {
+                                            "Not a valid layout — nothing imported."
+                                        }
                                     } else {
-                                        "Not a valid layout — nothing imported."
+                                        commit(parsed)
+                                        notice = "Imported ${parsed.rows.size} rows."
                                     }
-                                } else {
-                                    commit(parsed)
-                                    notice = "Imported ${parsed.rows.size} rows."
                                 }
                             },
                             modifier = Modifier.weight(1f),

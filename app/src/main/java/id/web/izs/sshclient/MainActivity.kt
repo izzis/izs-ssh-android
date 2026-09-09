@@ -142,6 +142,13 @@ class MainActivity : ComponentActivity() {
                                         if (BuildConfig.DEBUG) CrashLog.clear(this@MainActivity)
                                         rebootCounter++
                                     },
+                                    // Explicit exit from home: close every session
+                                    // (sockets tear down off-Main inside close()),
+                                    // then finish — onCleared covers anything left.
+                                    onExitApp = {
+                                        for (h in sshHolder.ordered()) sshHolder.close(h.sessionId)
+                                        finish()
+                                    },
                                 )
                         }
                     }
@@ -177,6 +184,7 @@ private fun AppNav(
     startRoute: String,
     crashTrace: String?,
     onCrashDismissed: () -> Unit,
+    onExitApp: () -> Unit,
 ) {
     val nav = rememberNavController()
     var limitError by remember { mutableStateOf<String?>(null) }
@@ -232,6 +240,9 @@ private fun AppNav(
             if (next != null) openSessionShallow(next.sessionId) else goHome()
         }
     }
+    // Explicit exit from home is wired at the call site (needs the
+    // Activity's finish()): see onExitApp above.
+    fun exitApp() = onExitApp()
     NavHost(navController = nav, startDestination = startRoute) {
         composable("crash") {
             CrashReportScreen(trace = crashTrace ?: "", onDismissed = onCrashDismissed)
@@ -245,6 +256,7 @@ private fun AppNav(
                 onEdit = { id -> nav.navigate("edit/$id") },
                 onAdd = { nav.navigate("edit/new") },
                 onSettings = { nav.navigate("settings") },
+                onExit = { exitApp() },
             )
             // Lazy-unlock parity: the non-dismissible dialog shows ONLY when the
             // listing itself is blocked (locked encrypted shell). A locked

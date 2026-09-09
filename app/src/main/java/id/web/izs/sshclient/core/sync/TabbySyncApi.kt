@@ -125,7 +125,8 @@ class TabbySyncApi(
             .header("Authorization", "Bearer $token")
             .build()
         client.newCall(req).execute().use { r ->
-            val text = r.body?.string() ?: ""
+            // OkHttp 5: body is non-null.
+            val text = r.body.string()
             if (!r.isSuccessful) throw IllegalStateException("$path failed: ${r.code} $text")
             return text
         }
@@ -138,7 +139,7 @@ class TabbySyncApi(
             .header("Authorization", "Bearer $token")
             .build()
         client.newCall(req).execute().use { r ->
-            return r.code to (r.body?.string() ?: "")
+            return r.code to r.body.string()
         }
     }
 
@@ -149,7 +150,7 @@ class TabbySyncApi(
             .header("Authorization", "Bearer $token")
             .build()
         client.newCall(req).execute().use { r ->
-            return r.code to (r.body?.string() ?: "")
+            return r.code to r.body.string()
         }
     }
 

@@ -47,7 +47,8 @@ app/src/main/java/id/web/izs/sshclient/
                                   Active/Recent never squeezes the profile viewport);
                                   Active always expanded with Close all, Recent
                                   collapsible with per-row History icons + Clear,
-                                  identity-colour stripe per profile row
+                                  identity-colour stripe per profile row,
+                                  exit-with-confirm top-bar button
       NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
                                   profiles, desktop-selector parity; half by
                                   default, draggable to full)
@@ -107,10 +108,12 @@ app/src/main/java/id/web/izs/sshclient/
   data/local/
     ConfigDisk.kt         EncryptedSharedPreferences: sync creds, RAW YAML cache,
                           known_hosts (TOFU), terminal prefs (font size),
-                          Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode (never synced to YAML)
+                          Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode (never synced to YAML).
+                          security-crypto 1.1.0 deprecated the API wholesale
+                          (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (21 files, 168 tests — §8)
+app/src/test/... (21 files, 169 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -304,7 +307,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 168 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 169 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -340,6 +343,19 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 - `./gradlew :app:assembleDebug` -> `app-debug.apk`; install with
   `adb install -r`, read logs with `adb logcat`, screenshot with
   `adb shell screencap -p`.
+- **Zero-warning policy:** `assembleDebug` + `compileDebugUnitTestKotlin`
+  must emit 0 `w:` lines. Fix the code first (AutoMirrored icons,
+  `PrimaryScrollableTabRow`, `menuAnchor(type)`, `LocalClipboard`,
+  lifecycle-compose owner, `autoCorrectEnabled`, smart-cast simplifications).
+  `@Suppress` is the LAST resort — never slap it on just to silence the
+  compiler. Each suppression must carry a comment stating WHY it is safe and
+  WHAT would remove it. Allowed today, and only these two: dynamic
+  YAML/JSON `Map<String, Any?>` casts (keys are strings by construction —
+  a per-entry re-check would only add copies, gone if the RAW layer ever
+  gets typed models) and whole-library deprecations with no drop-in
+  (security-crypto 1.1.0, revisit on DataStore+Tink). Verify with a clean
+  `--rerun-tasks` build: incremental builds do not re-emit warnings for
+  unchanged files.
 - `CrashLog` (debug builds only) persists the last crash trace; the next
   launch offers the Crash Report screen with copy.
 

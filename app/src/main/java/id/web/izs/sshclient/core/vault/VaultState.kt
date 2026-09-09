@@ -48,6 +48,7 @@ object VaultState {
      * @throws VaultCrypto.BadDecryptException on a wrong passphrase when
      * not forgiving (explicit unlock attempts surface Retry/Delete/Cancel).
      */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun resolve(
         raw: LinkedHashMap<String, Any?>,
         passphrase: String?,

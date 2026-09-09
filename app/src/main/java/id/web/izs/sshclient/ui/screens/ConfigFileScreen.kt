@@ -21,9 +21,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.unit.dp
+import android.content.ClipData
 import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.launch
@@ -42,7 +43,7 @@ fun ConfigFileScreen(
     state: AppState,
     onBack: () -> Unit,
 ) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val loaded = state.loaded
     val locked = loaded?.needsPassphrase == true
@@ -108,7 +109,9 @@ fun ConfigFileScreen(
             Button(
                 enabled = !yaml.isNullOrBlank(),
                 onClick = {
-                    clipboard.setText(AnnotatedString(yaml!!))
+                    scope.launch {
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("tabby-config", yaml!!)))
+                    }
                     copied = true
                 },
                 modifier = Modifier.weight(1f),

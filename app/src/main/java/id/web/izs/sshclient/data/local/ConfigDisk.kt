@@ -19,6 +19,11 @@ import androidx.security.crypto.MasterKey
 class ConfigDisk(context: Context) {
     private val appContext = context.applicationContext
 
+    // Google deprecated MasterKey/EncryptedSharedPreferences wholesale in
+    // security-crypto 1.1.0 with no drop-in replacement (the guidance is
+    // DataStore + hand-rolled Tink — a storage rewrite, out of scope while
+    // the format is stable). Suppressed until that migration.
+    @Suppress("DEPRECATION")
     private val secure: SharedPreferences by lazy {
         val masterKey = MasterKey.Builder(appContext)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)

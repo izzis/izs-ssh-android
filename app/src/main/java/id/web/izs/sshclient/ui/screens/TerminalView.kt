@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -43,7 +44,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.SpanStyle
@@ -63,6 +64,7 @@ import android.util.Log
 import id.web.izs.sshclient.BuildConfig
 import id.web.izs.sshclient.core.term.TerminalEmulator
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -176,10 +178,17 @@ fun TerminalView(
     val onTapState = rememberUpdatedState(onTap)
     val onCopyState = rememberUpdatedState(onCopySelection)
     val onPasteState = rememberUpdatedState(onPasteSelection)
-    val clipboardManager = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipScope = rememberCoroutineScope()
     // Clipboard snapshot for the Paste button, refreshed every time a
-    // selection starts (long-press or triple-tap).
+    // selection starts (long-press or triple-tap). The read is suspend, so
+    // it refreshes async — the button only needs a best-effort snapshot.
     var pasteText by remember { mutableStateOf("") }
+    fun refreshPasteSnapshot() {
+        clipScope.launch {
+            pasteText = clipboard.getClipEntry()?.clipData?.getItemAt(0)?.text?.toString() ?: ""
+        }
+    }
     // Triple-tap chain: three taps <400ms apart on the same absolute row
     // select the whole line. Taps still focus the keyboard immediately
     // (no tap-delay tradeoff), the third tap just adds the selection.
@@ -284,7 +293,7 @@ fun TerminalView(
             val (s, e) = emulator.expandWord(p.row, p.col)
             selAnchor = TerminalEmulator.SelPoint(p.row, s)
             selFocus = TerminalEmulator.SelPoint(p.row, e)
-            pasteText = clipboardManager.getText()?.text ?: ""
+            refreshPasteSnapshot()
             tapCount = 0
             // No scroll lock here: the finger may still be down (two-stage
             // hold), and only the extend/handle paths lock. Freezes follow
@@ -296,7 +305,7 @@ fun TerminalView(
             val r = row.coerceIn(0, (total - 1).coerceAtLeast(0))
             selAnchor = TerminalEmulator.SelPoint(r, 0)
             selFocus = TerminalEmulator.SelPoint(r, emulator.cols - 1)
-            pasteText = clipboardManager.getText()?.text ?: ""
+            refreshPasteSnapshot()
             tapCount = 0
             touching = true
         }
