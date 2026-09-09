@@ -61,7 +61,9 @@ app/src/main/java/id/web/izs/sshclient/
                                    options labeled, new profile + new group
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
                                    warn-on-close + host-key trust dialogs, ⋮ menu SFTP entry,
-                                   slim background-transfer indicator row (tap reopens the sheet)
+                                   slim background-transfer indicator row (tap reopens the sheet),
+                                   auth-failover `Password for user@host` dialog (remember checkbox,
+                                   unlock-routed deferred vault save)
       SftpSheet.kt                SFTP browser + transfers as a bottom sheet over the terminal
                                    (half by position via SheetState initial Partial, list
                                    fills sheet height so loads never balloon it, draggable
@@ -100,11 +102,14 @@ app/src/main/java/id/web/izs/sshclient/
     sync/
       TabbySyncApi.kt     OkHttp client for the Tabby Sync server endpoints
       SyncRepository.kt   Loaded{domain,secrets,needsPassphrase,store,unlockRequired},
-                          decrypt/update/delete with RAW preservation
+                          decrypt/update/delete with RAW preservation,
+                          savePassword/deletePassword (prompt-password remember /
+                          total-failure forget; vault secret or no-vault literal)
     ssh/
       SshConnector.kt     sshj sessions, exec + shell channels, desktop-format host-key
                            trust prompt, multi-key auth, PTY window-change, keepalive,
-                           login scripts
+                           login scripts, typed SshAuthFailed + friendly reason
+                           (never raw "Exhausted…") driving the password prompt
       SftpTransfer.kt     SFTP list/download/upload on an authenticated client: fresh
                            channel per transfer, 64 KB chunks + progress, cancel =
                            close-channel abort (surfaces CancellationException) +
@@ -136,7 +141,7 @@ app/src/main/java/id/web/izs/sshclient/
                           (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (27 files, 230 tests — §8)
+app/src/test/... (28 files, 234 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -336,7 +341,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 230 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 234 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -367,6 +372,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `ConfigImportTest` | raw YAML file/clipboard import validation (strict rejects) |
 | `SftpTransferTest` | download/upload/listDir against MINA SFTP, chunked 5 MB SHA-256, deterministic cancel |
 | `SftpTransferManagerTest` | DONE/FAILED/CANCELLED rows, per-item + cancelAll abort, once-only Save-as take, clearFinished cleanup |
+| `SshAuthTest` | typed SshAuthFailed + friendly reason (MINA rejects-all server), no-credentials case |
 
 ## 9. Build & diagnostics
 

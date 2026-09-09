@@ -38,6 +38,26 @@ import kotlin.concurrent.thread
  *   unknown/changed, known-first negotiation so phone and desktop pick the
  *   same server key). Trust lives in the YAML as the single source.
  */
+
+/**
+ * Authentication failure (wrong/missing password or key). Typed so the UI
+ * can offer the desktop `prompt-password` failover (password dialog) instead
+ * of a dead-end error card — never the raw sshj "Exhausted available
+ * authentication methods" text (see [friendlyAuthError]).
+ */
+class SshAuthFailed(message: String) : IllegalStateException(message)
+
+/**
+ * User-facing auth-failure reason: sshj's raw "Exhausted available
+ * authentication methods" means the server rejected everything we tried.
+ */
+fun friendlyAuthError(lastErr: String): String {
+    val e = lastErr.trim()
+    if (e.isEmpty()) return "server rejected the credentials"
+    if (e.contains("Exhausted", ignoreCase = true)) return "wrong password or key"
+    return e
+}
+
 class SshConnector {
 
     data class KeyInput(val pem: String, val passphrase: String? = null)
@@ -263,11 +283,11 @@ class SshConnector {
                 }
                 if (!client.isAuthenticated) {
                     if (password.isNullOrBlank() && keys.isEmpty()) {
-                        throw IllegalStateException(
-                            "Profile needs ${o.auth ?: "credentials"} but no password/key is available from the vault",
+                        throw SshAuthFailed(
+                            "No saved password or key for this profile",
                         )
                     }
-                    throw IllegalStateException("Auth failed: $lastErr")
+                    throw SshAuthFailed("Auth failed: ${friendlyAuthError(lastErr)}")
                 }
                 try {
                     val keepAlive = client.connection.keepAlive

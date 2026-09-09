@@ -436,6 +436,117 @@ class SyncRepository(
     }
 
     /**
+     * Desktop passwordStorage.savePassword parity (prompt-password modal with
+     * remember checked): persist the password that just connected. Vault
+     * configs upsert the `ssh:password` secret (re-encrypting the SAME config
+     * payload — profile YAML untouched); no-vault configs store the literal
+     * in `options.password` (desktop keytar equivalent on a platform without
+     * an OS keychain — plaintext configs already store it this way).
+     */
+    suspend fun savePassword(profile: SshProfile, password: String): Loaded = withContext(Dispatchers.IO) {
+        require(password.isNotEmpty()) { "Password is empty" }
+        val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+        val raw = RawConfigStore.loadRaw(yamlStr)
+        val vault = RawConfigStore.storedVault(raw)
+        val ou = profile.options
+        if (vault == null) {
+            val out = withPlaintextPassword(raw, profile, password)
+            disk.saveYaml(RawConfigStore.dumpRaw(out))
+            return@withContext decryptToLoaded(out)
+        }
+        val pass = rememberedPassphrase ?: throw IllegalStateException("Vault is locked")
+        val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
+        val secrets = SecretResolver.upsertPassword(
+            VaultState.parseSecretsJson(secretsJson), ou.user, ou.host, ou.port, password,
+        )
+        val out = withVaultSecrets(raw, configJson, secrets, pass)
+        disk.saveYaml(RawConfigStore.dumpRaw(out))
+        decryptToLoaded(out)
+    }
+
+    /**
+     * Desktop passwordStorage.deletePassword parity: the password that just
+     * failed authentication is forgotten (desktop drops it on total auth
+     * failure). Vault configs remove the `ssh:password` secret; no-vault
+     * configs drop the plaintext literal. The profile itself is untouched.
+     */
+    suspend fun deletePassword(profile: SshProfile): Loaded = withContext(Dispatchers.IO) {
+        val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+        val raw = RawConfigStore.loadRaw(yamlStr)
+        val vault = RawConfigStore.storedVault(raw)
+        val ou = profile.options
+        if (vault == null) {
+            val out = withPlaintextPassword(raw, profile, null)
+            disk.saveYaml(RawConfigStore.dumpRaw(out))
+            return@withContext decryptToLoaded(out)
+        }
+        val pass = rememberedPassphrase ?: throw IllegalStateException("Vault is locked")
+        val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
+        val secrets = SecretResolver.removePassword(
+            VaultState.parseSecretsJson(secretsJson), ou.user, ou.host, ou.port,
+        )
+        val out = withVaultSecrets(raw, configJson, secrets, pass)
+        disk.saveYaml(RawConfigStore.dumpRaw(out))
+        decryptToLoaded(out)
+    }
+
+    /**
+     * Set (or with null, remove) the plaintext `options.password` literal of
+     * one profile. No-vault configs only — the vault path never keeps a
+     * literal (desktop convention).
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    private fun withPlaintextPassword(
+        raw: LinkedHashMap<String, Any?>,
+        profile: SshProfile,
+        password: String?,
+    ): LinkedHashMap<String, Any?> {
+        val out = LinkedHashMap(raw)
+        val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+        val o = profile.options
+        val idx = RawConfigStore.findProfileIndex(
+            profiles, profile.id, profile.name, profile.type, o.host, o.user,
+        )
+        if (idx < 0) throw IllegalStateException("Profile not found")
+        val list = profiles.toMutableList()
+        val cur = list[idx] as? Map<String, Any?> ?: emptyMap()
+        val upd = LinkedHashMap(cur)
+        val opts = LinkedHashMap((cur["options"] as? Map<String, Any?>) ?: emptyMap())
+        if (password.isNullOrEmpty()) opts.remove("password") else opts["password"] = password
+        upd["options"] = opts
+        list[idx] = upd
+        out[RawConfigStore.KEY_PROFILES] = list
+        return out
+    }
+
+    /**
+     * Rewrite the vault blob with a new secret list, preserving the disk
+     * shape of both modes (encrypted shell vs plaintext-with-blob, incl.
+     * local configSync on the encrypted path).
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    private fun withVaultSecrets(
+        raw: LinkedHashMap<String, Any?>,
+        configJson: String,
+        secrets: List<id.web.izs.sshclient.core.config.VaultSecret>,
+        pass: String,
+    ): LinkedHashMap<String, Any?> {
+        val stored = VaultCrypto.encrypt(configJson, VaultState.secretsToJson(secrets), pass)
+        return if (RawConfigStore.isEncrypted(raw)) {
+            linkedMapOf<String, Any?>(
+                RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
+                RawConfigStore.KEY_ENCRYPTED to true,
+            ).also { m ->
+                (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+                    m[RawConfigStore.KEY_CONFIG_SYNC] = it
+                }
+            }
+        } else {
+            LinkedHashMap(raw).also { it[RawConfigStore.KEY_VAULT] = RawConfigStore.storedVaultMap(stored) }
+        }
+    }
+
+    /**
      * Parity with the desktop "Encrypt config file" toggle
      * (vaultSettingsTab.toggleConfigEncrypted + maybeEncryptConfig).
      *

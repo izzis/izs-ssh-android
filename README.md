@@ -19,7 +19,8 @@ technical design.
   survives rotation via ViewModel; RAM-only, never written to disk.
 - **Profiles**: home list (search, groups, add button, identity-colour
   stripe), tabbed editor — General (connection-mode dropdown, Auto auth,
-  new/existing groups, colour picker), Ports, Advanced, Ciphers, Colours
+  password with eye + Forget, private keys: paste-new with auto label or
+  pick a vault-saved key, new/existing groups, colour picker), Ports, Advanced, Ciphers, Colours
   (terminal color scheme override: Use-global + scheme search), Login
   scripts; New profiles get desktop-shape ids (`ssh:custom:<slug>:<uuid>`), fields at
   desktop defaults are omitted from YAML, options that do nothing on
@@ -29,7 +30,9 @@ technical design.
   **text selection (long-press word, drag handles, floating Copy)**,
   window-change on resize, host-key trust prompt (unknown/changed keys,
   desktop `ssh.knownHosts` format, known-first negotiation),
-  password + multi-key auth. Connect honors login scripts
+  password + multi-key auth, auth-failover prompt (`Password for user@host`
+  with remember → stored on success, wrong stored password forgotten).
+  Connect honors login scripts
   (expect/regex/optional), keepalive interval, and custom ciphers;
   warn-on-close follows Settings > SSH (per-profile override preserved).
 - **Settings > Terminal**: font size + scrollback buffer
@@ -98,7 +101,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 230 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance, config import, sftp transfers)
+./gradlew :app:testDebugUnitTest   # 234 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance, config import, sftp transfers, auth failover)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -115,7 +118,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 230/230 green)
+## Parity guarantees (tested, 234/234 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

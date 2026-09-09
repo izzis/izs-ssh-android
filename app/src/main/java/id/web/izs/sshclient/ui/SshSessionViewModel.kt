@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import id.web.izs.sshclient.core.config.KnownHostEntry
 import id.web.izs.sshclient.core.config.SshProfile
 import id.web.izs.sshclient.core.ssh.SshConnector
+import id.web.izs.sshclient.core.ssh.SshAuthFailed
 import id.web.izs.sshclient.core.ssh.SftpTransferManager
 import id.web.izs.sshclient.core.ssh.UnknownHostKeyException
 import id.web.izs.sshclient.core.ssh.transportKeyOf
@@ -39,6 +40,18 @@ import java.util.UUID
  * sessions. Cap defaults to 5, hard max 8 ([ConfigDisk.MAX_SESSIONS_HARD_MAX]).
  */
 class SessionLimitReached(val max: Int) : IllegalStateException("Session limit reached ($max)")
+
+/**
+ * Desktop `prompt-password` state: auth failed (wrong or missing password)
+ * and the user is offered `Password for user@host`. Prefill is the stored
+ * password when one exists (desktop pre-fills too).
+ */
+data class AuthPrompt(
+    val user: String,
+    val host: String,
+    val error: String,
+    val prefill: String?,
+)
 
 class SshSessionHandle(
     val sessionId: String,
@@ -78,6 +91,17 @@ class SshSessionHandle(
     private val _hostKeyPrompt = MutableStateFlow<UnknownHostKeyException?>(null)
     val hostKeyPrompt: StateFlow<UnknownHostKeyException?> = _hostKeyPrompt.asStateFlow()
 
+    private val _authPrompt = MutableStateFlow<AuthPrompt?>(null)
+    val authPrompt: StateFlow<AuthPrompt?> = _authPrompt.asStateFlow()
+
+    /**
+     * A typed password that connected but is not stored yet: the vault was
+     * locked at save time. TerminalScreen routes it through the unlock
+     * dialog, then calls [savePendingPassword].
+     */
+    private val _passwordSavePending = MutableStateFlow<String?>(null)
+    val passwordSavePending: StateFlow<String?> = _passwordSavePending.asStateFlow()
+
     private val _version = MutableStateFlow(0L)
     val version: StateFlow<Long> = _version.asStateFlow()
 
@@ -95,6 +119,8 @@ class SshSessionHandle(
     fun setStage(v: String) { _stage.value = v }
     fun setFailed(v: String?) { _failed.value = v }
     fun setPrompt(v: UnknownHostKeyException?) { _hostKeyPrompt.value = v }
+    fun setAuthPrompt(v: AuthPrompt?) { _authPrompt.value = v }
+    fun setPasswordSavePending(v: String?) { _passwordSavePending.value = v }
     fun bumpVersion() { _version.value = emulator.version }
     fun setActivity(v: Boolean) { _activity.value = v }
 
@@ -211,6 +237,75 @@ class SshSessionViewModel : ViewModel() {
         h.setFailed(msg)
         h.setStatus("disconnected")
     }
+    /** One-shot typed password from the auth-failover prompt (+remember flag). */
+    private data class PasswordAttempt(val password: String, val remember: Boolean)
+    private val oneShots = mutableMapOf<String, PasswordAttempt>()
+
+    /**
+     * Desktop prompt-password parity: retry this session once with a typed
+     * password. Success + remember stores it (vault, or the profile literal
+     * without one); a failed retry is total failure — the wrong stored
+     * password is forgotten and the session lands on the error card (never
+     * an automatic re-prompt loop).
+     */
+    fun connectWithPassword(
+        sessionId: String,
+        appState: AppState,
+        cacheDir: File,
+        password: String,
+        remember: Boolean,
+    ) {
+        val h = _sessions[sessionId] ?: return
+        h.setAuthPrompt(null)
+        h.setFailed(null)
+        synchronized(poolGuard) { oneShots[sessionId] = PasswordAttempt(password, remember) }
+        connect(sessionId, appState, cacheDir)
+    }
+
+    /** Prompt cancelled: same total-failure path as a failed retry. */
+    fun cancelAuthPrompt(sessionId: String, appState: AppState) {
+        val h = _sessions[sessionId] ?: return
+        val prompt = h.authPrompt.value ?: return
+        h.setAuthPrompt(null)
+        h.setStatus("disconnected")
+        viewModelScope.launch {
+            val profile = appState.displayProfiles().find { it.id == h.profileId }
+                ?: h.profileSnapshot
+            finalizeAuthFailure(profile, appState)
+            h.setFailed(prompt.error)
+        }
+    }
+
+    /**
+     * Desktop total-failure parity (ssh.ts: passwordStorage.deletePassword +
+     * throw 'Authentication rejected'): the stored password just proved wrong
+     * and is forgotten. Best-effort — a locked vault cannot be rewritten, so
+     * its secret stays (it was never readable for this attempt anyway), and
+     * the profile YAML itself is never touched here.
+     */
+    private suspend fun finalizeAuthFailure(profile: SshProfile, appState: AppState) {
+        try {
+            val loaded = withContext(Dispatchers.IO) { appState.repo.deletePassword(profile) }
+            appState.adopt(loaded)
+        } catch (_: Exception) { }
+    }
+
+    /** Post-unlock retry of a deferred vault save (TerminalScreen unlock flow). */
+    fun savePendingPassword(sessionId: String, appState: AppState) {
+        val h = _sessions[sessionId] ?: return
+        val pending = h.passwordSavePending.value ?: return
+        h.setPasswordSavePending(null)
+        viewModelScope.launch {
+            try {
+                val profile = appState.displayProfiles().find { it.id == h.profileId }
+                    ?: h.profileSnapshot
+                val loaded = withContext(Dispatchers.IO) {
+                    appState.repo.savePassword(profile, pending)
+                }
+                appState.adopt(loaded)
+            } catch (_: Exception) { }
+        }
+    }
 
     /**
      * Open (or re-open) the shell for [sessionId]. Safe to call from
@@ -226,10 +321,15 @@ class SshSessionViewModel : ViewModel() {
         h.connectJob = viewModelScope.launch {
             h.setFailed(null)
             h.setStatus("connecting…")
+            val profile = appState.displayProfiles().find { it.id == h.profileId }
+                ?: h.profileSnapshot
+            h.profileSnapshot = profile
+            val attempt = synchronized(poolGuard) { oneShots.remove(sessionId) }
+            // Only a fresh transport authenticates: an adopted (already
+            // authenticated) one never tries the typed password, so a typed
+            // password must never be stored for it.
+            var authenticatedFresh = false
             try {
-                val profile = appState.displayProfiles().find { it.id == h.profileId }
-                    ?: h.profileSnapshot
-                h.profileSnapshot = profile
                 // Live scrollback pref per emulator.
                 h.emulator.maxHistory = appState.disk.terminalScrollback
                 // NOTE: no setPalette here — TerminalScreen owns the single
@@ -280,7 +380,7 @@ class SshSessionViewModel : ViewModel() {
                     val t = withContext(Dispatchers.IO) {
                         conn.connectTransport(
                             profile = profile,
-                            password = appState.passwordFor(profile),
+                            password = attempt?.password ?: appState.passwordFor(profile),
                             keys = appState.keysFor(profile).map {
                                 SshConnector.KeyInput(pem = it.first, passphrase = it.second)
                             },
@@ -324,6 +424,7 @@ class SshSessionViewModel : ViewModel() {
                     }
                     sess.trustUpgrade = t.trustUpgrade
                     sess.trustUpgradeLine = t.trustUpgradeLine
+                    authenticatedFresh = true
                     sess.trustUpgrade?.let { entry ->
                         viewModelScope.launch {
                             try {
@@ -344,6 +445,21 @@ class SshSessionViewModel : ViewModel() {
                 sess.onDied = { onTransportDeath(sessionId, sess, sess.client) }
                 h.shell = sess
                 h.setStatus("connected")
+                if (attempt != null && attempt.remember && authenticatedFresh) {
+                    // Desktop savedPassword parity: the typed password that
+                    // worked is stored. A locked vault defers to the unlock
+                    // dialog (TerminalScreen watches passwordSavePending).
+                    try {
+                        val loaded = withContext(Dispatchers.IO) {
+                            appState.repo.savePassword(profile, attempt.password)
+                        }
+                        appState.adopt(loaded)
+                    } catch (e: IllegalStateException) {
+                        if ((e.message ?: "").contains("locked", ignoreCase = true)) {
+                            h.setPasswordSavePending(attempt.password)
+                        }
+                    } catch (_: Exception) { }
+                }
                 h.collectJob?.cancel()
                 h.collectJob = viewModelScope.launch {
                     sess.output.collect { chunk ->
@@ -354,6 +470,24 @@ class SshSessionViewModel : ViewModel() {
                 }
             } catch (e: UnknownHostKeyException) {
                 h.setPrompt(e)
+                h.setStatus("disconnected")
+            } catch (e: SshAuthFailed) {
+                // Desktop prompt-password parity: a first failure offers the
+                // password dialog; a failed RETRY is total failure — forget
+                // the wrong stored password, land on the error card.
+                if (attempt == null) {
+                    h.setAuthPrompt(
+                        AuthPrompt(
+                            user = profile.options.user.ifBlank { "root" },
+                            host = profile.options.host,
+                            error = e.message ?: "Auth failed",
+                            prefill = appState.passwordFor(profile),
+                        ),
+                    )
+                } else {
+                    finalizeAuthFailure(profile, appState)
+                    h.setFailed(e.message ?: "Auth failed")
+                }
                 h.setStatus("disconnected")
             } catch (e: CancellationException) {
                 h.setStatus("disconnected")

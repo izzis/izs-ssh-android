@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -64,6 +65,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import id.web.izs.sshclient.ui.AuthPrompt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -158,6 +161,10 @@ fun TerminalScreen(
     val stage by handle.stage.collectAsState()
     val failed by handle.failed.collectAsState()
     val hostKeyPrompt by handle.hostKeyPrompt.collectAsState()
+    // Desktop prompt-password parity: auth failure (wrong or missing
+    // password) offers `Password for user@host` instead of a dead-end card.
+    val authPrompt by handle.authPrompt.collectAsState()
+    val pwSavePending by handle.passwordSavePending.collectAsState()
     val emuVersion by handle.version.collectAsState()
     // Shell presence as OBSERVABLE state: branching on the plain
     // `handle.shell` field subscribes to nothing, so the branch group can
@@ -313,6 +320,20 @@ fun TerminalScreen(
     var copiedMsg by remember { mutableStateOf<String?>(null) }
     var showUnlock by remember { mutableStateOf(false) }
     var showCloseConfirm by remember { mutableStateOf(false) }
+    // Deferred vault save of a typed password that connected while locked.
+    var pendingPasswordSave by remember { mutableStateOf(false) }
+    // The VM raises passwordSavePending only when the save hit a locked
+    // vault: route through unlock; otherwise store straight away.
+    LaunchedEffect(pwSavePending) {
+        if (pwSavePending != null && !pendingPasswordSave) {
+            if (state.loaded?.needsPassphrase == true) {
+                pendingPasswordSave = true
+                showUnlock = true
+            } else {
+                sessionViewModel.savePendingPassword(sessionId, state)
+            }
+        }
+    }
     // SFTP sheet visibility only — the transfers themselves are owned by
     // the session's SftpTransferManager, so hiding this sheet (back,
     // dismiss, tab switch) never touches a running transfer.
@@ -343,6 +364,10 @@ fun TerminalScreen(
 
     fun doConnect() {
         sessionViewModel.connect(sessionId, state, context.cacheDir)
+    }
+
+    fun doConnectWithPassword(password: String, remember: Boolean) {
+        sessionViewModel.connectWithPassword(sessionId, state, context.cacheDir, password, remember)
     }
 
     fun sendRaw(text: String) {
@@ -1224,7 +1249,10 @@ fun TerminalScreen(
             state = state,
             onUnlocked = {
                 showUnlock = false
-                if (pendingConnect) {
+                if (pendingPasswordSave) {
+                    pendingPasswordSave = false
+                    sessionViewModel.savePendingPassword(sessionId, state)
+                } else if (pendingConnect) {
                     pendingConnect = false
                     doConnect()
                 }
@@ -1232,18 +1260,97 @@ fun TerminalScreen(
             onNoConfig = {
                 showUnlock = false
                 pendingConnect = false
-                sessionViewModel.close(sessionId)
-                onBack()
+                if (pendingPasswordSave) {
+                    // Save unlock dismissed: the session is already
+                    // connected — the typed password just stays session-only.
+                    pendingPasswordSave = false
+                    sessionViewModel.savePendingPassword(sessionId, state)
+                } else {
+                    sessionViewModel.close(sessionId)
+                    onBack()
+                }
             },
             onDismiss = {
                 showUnlock = false
                 pendingConnect = false
-                sessionViewModel.close(sessionId)
-                onBack()
+                if (pendingPasswordSave) {
+                    pendingPasswordSave = false
+                    sessionViewModel.savePendingPassword(sessionId, state)
+                } else {
+                    sessionViewModel.close(sessionId)
+                    onBack()
+                }
             },
             dismissible = true,
         )
     }
+
+    // Desktop prompt-password modal parity (`Password for user@host`).
+    authPrompt?.let { prompt ->
+        PasswordPromptDialog(
+            prompt = prompt,
+            vaultPresent = state.loaded?.domain?.vault != null,
+            locked = state.loaded?.needsPassphrase == true,
+            onConnect = { pw, remember -> doConnectWithPassword(pw, remember) },
+            onCancel = { sessionViewModel.cancelAuthPrompt(sessionId, state) },
+        )
+    }
+}
+
+/**
+ * Desktop prompt-password modal parity: `Password for user@host` with the
+ * stored password pre-filled and a remember checkbox. Connect retries once
+ * with the typed password; success + remember stores it (vault, or the
+ * profile literal without one), a failed retry forgets the wrong stored
+ * password (desktop total-failure parity). Cancel lands on the error card.
+ */
+@Composable
+private fun PasswordPromptDialog(
+    prompt: AuthPrompt,
+    vaultPresent: Boolean,
+    locked: Boolean,
+    onConnect: (password: String, remember: Boolean) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var password by remember(prompt) { mutableStateOf(prompt.prefill ?: "") }
+    var remember by remember(prompt) { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Password for ${prompt.user}@${prompt.host}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(prompt.error, color = MaterialTheme.colorScheme.error)
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = remember, onCheckedChange = { remember = it })
+                    Text("Remember password", modifier = Modifier.weight(1f))
+                }
+                Text(
+                    when {
+                        !vaultPresent -> "Stored in the profile on success."
+                        locked -> "Vault is locked — you'll unlock after connecting to save."
+                        else -> "Saved to the vault on success."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = password.isNotEmpty(),
+                onClick = { onConnect(password, remember) },
+            ) { Text("Connect") }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
 }
 
 // ASCII-safe escape constants (never raw control bytes in source).
