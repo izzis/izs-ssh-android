@@ -212,7 +212,13 @@ private fun AppNav(
             appState.disk.recentProfileIds = id.web.izs.sshclient.data.local.recordRecent(
                 appState.disk.recentProfileIds, profileId, maxRecent,
             )
-            nav.navigate("ssh/$sid")
+            // Shallow: sheet picks from ssh/A must land on ssh/B without
+            // stacking ssh/A -> ssh/B (Back = home, tab switching via
+            // strip/drawer/Active list). From home this is a no-op pop.
+            nav.navigate("ssh/$sid") {
+                popUpTo("profiles")
+                launchSingleTop = true
+            }
         } catch (e: SessionLimitReached) {
             limitError = "Session limit reached (${e.max}). Close one first."
         }
@@ -240,18 +246,6 @@ private fun AppNav(
                 onAdd = { nav.navigate("edit/new") },
                 onSettings = { nav.navigate("settings") },
             )
-            if (limitError != null) {
-                androidx.compose.material3.AlertDialog(
-                    onDismissRequest = { limitError = null },
-                    title = { Text("Too many sessions") },
-                    text = { Text(limitError!!) },
-                    confirmButton = {
-                        androidx.compose.material3.TextButton(onClick = { limitError = null }) {
-                            Text("OK")
-                        }
-                    },
-                )
-            }
             // Lazy-unlock parity: the non-dismissible dialog shows ONLY when the
             // listing itself is blocked (locked encrypted shell). A locked
             // plaintext-with-blob config lists fine; the passphrase is asked
@@ -278,6 +272,8 @@ private fun AppNav(
                 onBack = { goHome() },
                 onOpenSession = { openSessionShallow(it) },
                 onNewTab = { goHome() },
+                onOpenProfile = { pid -> openProfile(pid) },
+                onSettings = { nav.navigate("settings") },
                 onCloseTab = { closeTab(it, sid) },
             )
         }
@@ -333,5 +329,19 @@ private fun AppNav(
         composable("settings/window") {
             WindowSettingsScreen(appState) { nav.popBackStack() }
         }
+    }
+    // Global: cap-blocked taps from home AND the terminal quick-pick sheet
+    // surface here (previously home-only, silent from the sheet).
+    if (limitError != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { limitError = null },
+            title = { Text("Too many sessions") },
+            text = { Text(limitError!!) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { limitError = null }) {
+                    Text("OK")
+                }
+            },
+        )
     }
 }

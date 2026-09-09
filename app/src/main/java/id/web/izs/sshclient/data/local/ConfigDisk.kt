@@ -188,6 +188,20 @@ class ConfigDisk(context: Context) {
         get() = prefs().getString(KEY_TAB_LOCATION, "") ?: ""
         set(v) = prefs().edit().putString(KEY_TAB_LOCATION, v).apply()
 
+    /**
+     * What the terminal "+" (new tab) button opens. Local-only UX pref,
+     * never synced (tabSource parity): "list" navigates back to the full
+     * profile list (legacy), "sheet" opens a quick-pick bottom sheet over
+     * the terminal (search + recent + profiles).
+     */
+    var newTabMode: String
+        get() = prefs().getString(KEY_NEW_TAB_MODE, MODE_NEW_TAB_LIST)
+            ?.takeIf { it == MODE_NEW_TAB_SHEET } ?: MODE_NEW_TAB_LIST
+        set(v) = prefs().edit().putString(
+            KEY_NEW_TAB_MODE,
+            if (v == MODE_NEW_TAB_SHEET) MODE_NEW_TAB_SHEET else MODE_NEW_TAB_LIST,
+        ).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -208,6 +222,9 @@ class ConfigDisk(context: Context) {
         const val KEY_RECENT_PROFILES = "home.recentProfiles"
         const val KEY_TAB_SOURCE = "window.tabSource"
         const val KEY_TAB_LOCATION = "window.tabLocation"
+        const val KEY_NEW_TAB_MODE = "window.newTabMode"
+        const val MODE_NEW_TAB_LIST = "list"
+        const val MODE_NEW_TAB_SHEET = "sheet"
         /** Hard ceiling for [maxSessions]: 8 sockets + histories is the most a phone should hold. */
         const val MAX_SESSIONS_HARD_MAX = 8
     }

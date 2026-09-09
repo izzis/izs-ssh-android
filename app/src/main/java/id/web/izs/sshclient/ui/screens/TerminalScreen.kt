@@ -125,6 +125,8 @@ fun TerminalScreen(
     onBack: () -> Unit,
     onOpenSession: (String) -> Unit = {},
     onNewTab: () -> Unit = {},
+    onOpenProfile: (String) -> Unit = {},
+    onSettings: () -> Unit = {},
     onCloseTab: (String) -> Unit = {},
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -171,6 +173,18 @@ fun TerminalScreen(
     fun tabTitleOf(h: id.web.izs.sshclient.ui.SshSessionHandle): String =
         liveProfiles.find { it.id == h.profileId }?.name ?: h.profileSnapshot.name
     var closeTarget by remember { mutableStateOf<String?>(null) }
+    // New-tab mode (Settings > Window, device-only): "sheet" opens the
+    // quick-pick bottom sheet over this session, "list" goes home.
+    var showNewTabSheet by remember { mutableStateOf(false) }
+    fun handleNewTab() {
+        if (state.disk.newTabMode ==
+            id.web.izs.sshclient.data.local.ConfigDisk.MODE_NEW_TAB_SHEET
+        ) {
+            showNewTabSheet = true
+        } else {
+            onNewTab()
+        }
+    }
     // Custom side drawer (not M3): a plain boolean, no direction hacks.
     // Strip scroll is hoisted to the VM (see tabStripScrollPx): each tab is
     // its own destination, so a strip-local state would reset left on switch.
@@ -435,7 +449,15 @@ fun TerminalScreen(
                 onCloseRequest = ::requestTabClose,
                 onNew = {
                     drawerOpen = false
-                    onNewTab()
+                    handleNewTab()
+                },
+                onHome = {
+                    drawerOpen = false
+                    onBack()
+                },
+                onSettings = {
+                    drawerOpen = false
+                    onSettings()
                 },
             )
         },
@@ -550,7 +572,7 @@ fun TerminalScreen(
                 titleOf = ::tabTitleOf,
                 onSelect = { if (it != sessionId) onOpenSession(it) },
                 onCloseRequest = ::requestTabClose,
-                onNew = onNewTab,
+                onNew = ::handleNewTab,
                 scroll = stripScroll,
             )
         }
@@ -687,17 +709,19 @@ fun TerminalScreen(
                 .background(Color.Black)
                 .padding(bottom = with(dockDensity) { dockPx.toDp() })
                 .pointerInput(tabLoc, drawerOpen) {
-                    // Middle-band fling opens the side drawer. NEVER consumes:
+                    // Edge-band fling opens the side drawer. NEVER consumes:
                     // taps, scrollback scrolls and selection drags keep
-                    // working untouched. Only the middle 25%..75% counts, so
-                    // edge swipes stay the system's (Back). A fast horizontal
-                    // fling (not a slow scroll) in the drawer's opening
-                    // direction triggers it: rightward for LEFT, leftward
-                    // for RIGHT.
+                    // working untouched. Only the system Back edge (~32dp on
+                    // each side) is reserved — the old 25%..75% middle band
+                    // forced opens from the middle of the screen. A fast
+                    // horizontal fling (not a slow scroll) in the drawer's
+                    // opening direction triggers it: rightward for LEFT,
+                    // leftward for RIGHT.
                     if (!tabLoc.isDrawer || drawerOpen) return@pointerInput
                     val rightward = tabLoc == TabLocation.LEFT
-                    val minX = size.width * 0.25f
-                    val maxX = size.width * 0.75f
+                    val edgePx = with(density) { 32.dp.toPx() }
+                    val minX = edgePx
+                    val maxX = size.width - edgePx
                     val vMin = with(density) { 500.dp.toPx() }
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -833,7 +857,7 @@ fun TerminalScreen(
                         titleOf = ::tabTitleOf,
                         onSelect = { if (it != sessionId) onOpenSession(it) },
                         onCloseRequest = ::requestTabClose,
-                        onNew = onNewTab,
+                        onNew = ::handleNewTab,
                         scroll = stripScroll,
                     )
                 }
@@ -1034,6 +1058,17 @@ fun TerminalScreen(
             dismissButton = {
                 TextButton(onClick = { closeTarget = null }) { Text("Cancel") }
             },
+        )
+    }
+
+    if (showNewTabSheet) {
+        NewTabSheet(
+            state = state,
+            onPick = { pid ->
+                showNewTabSheet = false
+                onOpenProfile(pid)
+            },
+            onDismiss = { showNewTabSheet = false },
         )
     }
 

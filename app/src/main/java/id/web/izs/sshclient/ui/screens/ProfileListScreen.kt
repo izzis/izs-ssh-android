@@ -1,10 +1,12 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,13 +26,13 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +62,7 @@ import id.web.izs.sshclient.ui.SshSessionViewModel
  * searching switches to a flat filtered list.
  * Data comes from the Domain view (transient defaults); RAW stays lossless.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ProfileListScreen(
     state: AppState,
@@ -70,6 +74,11 @@ fun ProfileListScreen(
     onSettings: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    // Recent section is the only collapsible one (Active stays expanded).
+    var recentCollapsed by rememberSaveable { mutableStateOf(false) }
+    // ConfigDisk prefs are not observable: bump to refresh the recent list
+    // after a manual clear (launch-prunes already recompose via navigation).
+    var recentVersion by remember { mutableStateOf(0) }
     // One migration pass per loaded store: profiles + groups stay consistent.
     val (profiles, groups) = remember(state.loaded) {
         state.displayProfiles() to state.displayGroups()
@@ -94,119 +103,154 @@ fun ProfileListScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Filled.Terminal,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                "izs SSH",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
-            )
-            Text(
-                "${profiles.size}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            IconButton(onClick = onAdd) {
-                Icon(Icons.Filled.Add, contentDescription = "New profile")
+    // Recent profiles (desktop start-page parity): N most-recently launched,
+    // N = terminal.showRecentProfiles (0 hides). Ids resolve against the
+    // live list, so deleted profiles prune themselves out.
+    val maxRecent = remember(state.loaded) {
+        RawConfigStore.showRecentProfiles(state.loaded?.store ?: emptyMap())
+    }
+    val byId = remember(profiles) { profiles.associateBy { it.id } }
+    // Prefs read per composition (cheap): returning from a session
+    // must show the just-launched profile without a reload.
+    val recentIds = remember(profiles, recentVersion) {
+        if (maxRecent > 0) state.disk.recentProfileIds.take(maxRecent) else emptyList()
+    }
+    val recent = remember(recentIds, byId) { recentIds.mapNotNull { byId[it] } }
+    if (maxRecent > 0 && recentIds.size != recent.size) {
+        // Prune ONLY against a fully loaded list: on a locked
+        // encrypted store (or while loading) profiles are empty, and
+        // pruning then would wipe recents before unlock. Desktop never
+        // faces this (its store is always readable).
+        if (!state.loading && state.loaded?.unlockRequired != true) {
+            LaunchedEffect(recentIds, state.loaded) {
+                state.disk.recentProfileIds = recent.map { it.id }
             }
-            IconButton(onClick = onSettings) {
-                Icon(Icons.Filled.Settings, contentDescription = "Settings")
-            }
         }
-        val liveSessions = sessionViewModel.ordered()
-        if (liveSessions.isNotEmpty()) {
-            ActiveSessionsSection(
-                sessions = liveSessions,
-                maxSessions = state.disk.maxSessions,
-                onOpenSession = onOpenSession,
-                onCloseSession = { sessionViewModel.close(it) },
-            )
-        }
-        // Recent profiles (desktop start-page parity): N most-recently launched,
-        // N = terminal.showRecentProfiles (0 hides). Ids resolve against the
-        // live list, so deleted profiles prune themselves out.
-        val maxRecent = remember(state.loaded) {
-            RawConfigStore.showRecentProfiles(state.loaded?.store ?: emptyMap())
-        }
-        if (maxRecent > 0) {
-            val byId = remember(profiles) { profiles.associateBy { it.id } }
-            // Prefs read per composition (cheap): returning from a session
-            // must show the just-launched profile without a reload.
-            val recentIds = state.disk.recentProfileIds.take(maxRecent)
-            val recent = remember(recentIds, byId) { recentIds.mapNotNull { byId[it] } }
-            if (recentIds.size != recent.size) {
-                // Prune ONLY against a fully loaded list: on a locked
-                // encrypted store (or while loading) profiles are empty, and
-                // pruning then would wipe recents before unlock. Desktop never
-                // faces this (its store is always readable).
-                if (!state.loading && state.loaded?.unlockRequired != true) {
-                    LaunchedEffect(recentIds, state.loaded) {
-                        state.disk.recentProfileIds = recent.map { it.id }
-                    }
+    }
+    val liveSessions = sessionViewModel.ordered()
+    // Hide Recent while searching (desktop start-page parity).
+    val showRecent = maxRecent > 0 && query.isBlank() && recent.isNotEmpty()
+
+    // Single scroll: header + Active + Recent + search + profiles share one
+    // LazyColumn so a long Active/Recent list never squeezes the profile
+    // viewport into a narrow strip.
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "header") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Terminal,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "izs SSH",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp),
+                )
+                Text(
+                    "${profiles.size}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                IconButton(onClick = onAdd) {
+                    Icon(Icons.Filled.Add, contentDescription = "New profile")
+                }
+                IconButton(onClick = onSettings) {
+                    Icon(Icons.Filled.Settings, contentDescription = "Settings")
                 }
             }
-            if (recent.isNotEmpty()) {
-                RecentSection(recent = recent, onOpen = onOpen)
+        }
+        if (liveSessions.isNotEmpty()) {
+            item(key = "active") {
+                ActiveSessionsSection(
+                    sessions = liveSessions,
+                    maxSessions = state.disk.maxSessions,
+                    onOpenSession = onOpenSession,
+                    onCloseSession = { sessionViewModel.close(it) },
+                    onCloseAll = {
+                        for (h in sessionViewModel.ordered()) sessionViewModel.close(h.sessionId)
+                    },
+                )
             }
         }
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            label = { Text("Search name / host / user") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        if (state.loading) CircularProgressIndicator()
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (!state.loading && profiles.isEmpty()) {
-            Text(
-                "No SSH profiles yet. Tap + to create one, or open Settings > Config Sync to download a cloud config.",
-                style = MaterialTheme.typography.bodyMedium,
+        if (showRecent) {
+            item(key = "recent") {
+                RecentSection(
+                    recent = recent,
+                    collapsed = recentCollapsed,
+                    onToggle = { recentCollapsed = !recentCollapsed },
+                    onClear = {
+                        state.disk.recentProfileIds = emptyList()
+                        recentVersion++
+                    },
+                    onOpen = onOpen,
+                )
+            }
+        }
+        stickyHeader(key = "search") {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Search name / host / user") },
+                modifier = Modifier.fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.background),
+                singleLine = true,
             )
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (query.isBlank()) {
-                items(rows, key = { it.key }) { row ->
-                    when (row) {
-                        is HomeRow.Folder -> {
-                            val id = row.node.group.id
-                            val isCollapsed = id !in expanded
-                            FolderRow(
-                                node = row.node,
-                                depth = row.depth,
-                                collapsed = isCollapsed,
-                                onToggle = {
-                                    expanded = if (isCollapsed) expanded + id else expanded - id
-                                    state.disk.expandedGroups = expanded
-                                },
-                            )
-                        }
-                        is HomeRow.Profile -> ProfileCard(
-                            state = state,
-                            profile = row.profile,
-                            groupName = state.groupName(groups, row.profile.group),
+        if (state.loading) {
+            item(key = "loading") { CircularProgressIndicator() }
+        }
+        state.error?.let {
+            item(key = "error") { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+        if (!state.loading && profiles.isEmpty()) {
+            item(key = "empty") {
+                Text(
+                    "No SSH profiles yet. Tap + to create one, or open Settings > Config Sync to download a cloud config.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        if (query.isBlank()) {
+            items(rows, key = { it.key }) { row ->
+                when (row) {
+                    is HomeRow.Folder -> {
+                        val id = row.node.group.id
+                        val isCollapsed = id !in expanded
+                        FolderRow(
+                            node = row.node,
                             depth = row.depth,
-                            onOpen = onOpen,
-                            onEdit = onEdit,
+                            collapsed = isCollapsed,
+                            onToggle = {
+                                expanded = if (isCollapsed) expanded + id else expanded - id
+                                state.disk.expandedGroups = expanded
+                            },
                         )
                     }
-                }
-            } else {
-                items(filtered, key = { it.id }) { p ->
-                    ProfileCard(
+                    is HomeRow.Profile -> ProfileCard(
                         state = state,
-                        profile = p,
-                        groupName = state.groupName(groups, p.group),
-                        depth = 0,
+                        profile = row.profile,
+                        groupName = state.groupName(groups, row.profile.group),
+                        depth = row.depth,
                         onOpen = onOpen,
                         onEdit = onEdit,
                     )
                 }
+            }
+        } else {
+            items(filtered, key = { it.id }) { p ->
+                ProfileCard(
+                    state = state,
+                    profile = p,
+                    groupName = state.groupName(groups, p.group),
+                    depth = 0,
+                    onOpen = onOpen,
+                    onEdit = onEdit,
+                )
             }
         }
     }
@@ -277,13 +321,24 @@ private fun ActiveSessionsSection(
     maxSessions: Int,
     onOpenSession: (String) -> Unit,
     onCloseSession: (String) -> Unit,
+    onCloseAll: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                "Active sessions (${sessions.size}/$maxSessions)",
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "Active sessions (${sessions.size}/$maxSessions)",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onCloseAll) {
+                    Text("Close all")
+                }
+            }
             for (h in sessions) {
                 val status by h.status.collectAsState()
                 val dot = when (status) {
@@ -321,38 +376,55 @@ private fun ActiveSessionsSection(
 @Composable
 private fun RecentSection(
     recent: List<SshProfile>,
+    collapsed: Boolean,
+    onToggle: () -> Unit,
+    onClear: () -> Unit,
     onOpen: (String) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-        ),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().clickable { onToggle() },
             ) {
-                Icon(
-                    Icons.Filled.History,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
                 Text(
-                    "Recent",
+                    "Recent (${recent.size})",
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onClear) {
+                    Text("Clear")
+                }
+                Icon(
+                    if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                    contentDescription = if (collapsed) "Expand" else "Collapse",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (!collapsed) {
             for (p in recent) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth().clickable { onOpen(p.id) },
                 ) {
+                    // Desktop parity (profiles.service.ts): recent entries
+                    // carry a history icon per row (fa-history).
+                    Icon(
+                        Icons.Filled.History,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(p.name, style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            p.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                         if (p.type == "ssh") {
                             Text(
                                 SshDefaults.quickName(p.options.user, p.options.host, p.options.port),
@@ -362,6 +434,7 @@ private fun RecentSection(
                         }
                     }
                 }
+            }
             }
         }
     }

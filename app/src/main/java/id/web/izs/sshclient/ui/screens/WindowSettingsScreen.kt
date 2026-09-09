@@ -58,6 +58,7 @@ fun WindowSettingsScreen(
     var localLoc by remember {
         mutableStateOf(resolveTabLocation(state.disk.localTabLocation.ifBlank { null }))
     }
+    var newTabMode by remember { mutableStateOf(state.disk.newTabMode) }
 
     // Read live each composition so the line below never lies.
     val effective = effectiveTabLocation(source, localLoc, blind, store)
@@ -163,6 +164,30 @@ fun WindowSettingsScreen(
             "Cloud sync: whether the synced value uploads is controlled by " +
                 "Settings > Config Sync > Synced parts > appearance (off = " +
                 "desktop and phone keep their own values).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("New tab (+) opens", style = MaterialTheme.typography.titleMedium)
+        RadioRow(
+            selected = newTabMode != id.web.izs.sshclient.data.local.ConfigDisk.MODE_NEW_TAB_SHEET,
+            enabled = true,
+            label = "Profile list (navigate back to home)",
+            onClick = {
+                newTabMode = id.web.izs.sshclient.data.local.ConfigDisk.MODE_NEW_TAB_LIST
+                state.disk.newTabMode = newTabMode
+            },
+        )
+        RadioRow(
+            selected = newTabMode == id.web.izs.sshclient.data.local.ConfigDisk.MODE_NEW_TAB_SHEET,
+            enabled = true,
+            label = "Quick pick sheet (search over the terminal)",
+            onClick = {
+                newTabMode = id.web.izs.sshclient.data.local.ConfigDisk.MODE_NEW_TAB_SHEET
+                state.disk.newTabMode = newTabMode
+            },
+        )
+        Text(
+            "Device-only setting, never synced to tabby.yaml.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

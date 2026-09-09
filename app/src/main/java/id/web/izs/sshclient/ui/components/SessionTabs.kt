@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +31,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,17 +73,6 @@ fun statusDotColor(status: String): Color = when (status) {
 }
 
 @Composable
-private fun Dots(status: String, activity: Boolean, showActivity: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(Modifier.size(10.dp).background(statusDotColor(status), CircleShape))
-        // Desktop parity: the activity indicator hides on the active tab.
-        if (activity && showActivity) {
-            Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape))
-        }
-    }
-}
-
-@Composable
 private fun CloseBtn(sessionId: String, onCloseRequest: (String) -> Unit) {
     IconButton(
         onClick = { onCloseRequest(sessionId) },
@@ -90,9 +83,10 @@ private fun CloseBtn(sessionId: String, onCloseRequest: (String) -> Unit) {
 }
 
 /**
- * One tab: [dots] + [title] + close. Shared by strip (fixed max width,
- * ellipsis) and drawer (full width). Selected state is a container tint —
- * the same secondaryContainer language as the Recent card.
+ * One tab: status dot + title + close, with a desktop-style activity
+ * underline. Shared by strip (fixed max width, ellipsis) and drawer (full
+ * width). Selected state is a container tint; background output on a
+ * background tab draws a primary line under the tab (cleared on select).
  */
 @Composable
 fun SessionTabItem(
@@ -106,30 +100,48 @@ fun SessionTabItem(
 ) {
     val status by handle.status.collectAsState()
     val activity by handle.activity.collectAsState()
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Column(
         modifier = modifier
-            .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (selected) MaterialTheme.colorScheme.secondaryContainer
-                else Color.Transparent,
-            )
-            .clickable { onSelect(handle.sessionId) }
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier),
     ) {
-        Dots(status, activity, showActivity = !selected)
-        Text(
-            title,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
-            else MaterialTheme.colorScheme.onSurface,
-            modifier = if (fillMaxWidth) Modifier.weight(1f) else Modifier.widthIn(max = 140.dp),
-        )
-        CloseBtn(handle.sessionId, onCloseRequest)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    if (selected) MaterialTheme.colorScheme.secondaryContainer
+                    else Color.Transparent,
+                )
+                .clickable { onSelect(handle.sessionId) }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Box(Modifier.size(10.dp).background(statusDotColor(status), CircleShape))
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurface,
+                modifier = if (fillMaxWidth) Modifier.weight(1f) else Modifier.widthIn(max = 140.dp),
+            )
+            CloseBtn(handle.sessionId, onCloseRequest)
+        }
+        // Desktop-style activity marker: a primary underline, hidden on the
+        // selected tab (select() already clears the flag). Primary, not
+        // tertiary: the theme leaves tertiary at the M3 baseline pinkish
+        // default, which reads as an error red next to the status dots.
+        if (activity && !selected) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 10.dp, end = 10.dp, top = 2.dp)
+                    .height(2.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
     }
 }
 
@@ -190,40 +202,73 @@ fun SessionTabDrawerContent(
     onSelect: (String) -> Unit,
     onCloseRequest: (String) -> Unit,
     onNew: () -> Unit,
+    onHome: () -> Unit = {},
+    onSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp),
+        modifier = modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(
-            "Tabs (${sessions.size})",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-        )
-        for (h in sessions) {
-            key(h.sessionId) {
-                SessionTabItem(
-                    handle = h,
-                    title = titleOf(h),
-                    selected = h.sessionId == selectedId,
-                    onSelect = onSelect,
-                    onCloseRequest = onCloseRequest,
-                    fillMaxWidth = true,
-                )
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "Tabs (${sessions.size})",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+            for (h in sessions) {
+                key(h.sessionId) {
+                    SessionTabItem(
+                        handle = h,
+                        title = titleOf(h),
+                        selected = h.sessionId == selectedId,
+                        onSelect = onSelect,
+                        onCloseRequest = onCloseRequest,
+                        fillMaxWidth = true,
+                    )
+                }
             }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onNew() }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("New connection…", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        // Pinned footer: drawer mode replaces the header back arrow with a
+        // hamburger, and sheet new-tab mode no longer navigates home — so
+        // the drawer is the only visible way back to the profile list.
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onHome() }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            Icon(Icons.Filled.List, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text("Profile list", style = MaterialTheme.typography.bodyMedium)
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { onNew() }
+                .clickable { onSettings() }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
-            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("New connection…", style = MaterialTheme.typography.bodyMedium)
+            Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text("Settings", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

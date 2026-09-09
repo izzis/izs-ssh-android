@@ -29,18 +29,28 @@ Tabby Desktop `config.service.ts` / `vault.service.ts`
 
 ```
 app/src/main/java/id/web/izs/sshclient/
-  MainActivity.kt                 Boot sequence, NavHost, owns AppViewModel
+  MainActivity.kt                 Boot sequence, NavHost, owns AppViewModel;
+                                  shallow openProfile (sheet picks land without
+                                  stacking), global session-limit dialog
   ui/
     AppViewModel.kt               Rotation-safe holder of AppState (passphrase survives rotate)
     SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8,
-                                  selected tab + hasActivity dots + observable hasShell (never branch UI on the plain shell field)
+                                  selected tab + hasActivity flag + observable hasShell (never branch UI on the plain shell field)
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
-    Theme.kt                      IzsDarkColors (dark-only Material3 theme)
+    Theme.kt                      IzsDarkColors (dark-only Material3 theme; tertiary left at
+                                  baseline — activity accents use primary, tertiary reads red)
     screens/
       ScreenHeader.kt           Shared sub-screen top bar (back arrow + title)
       ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only)
-      ProfileListScreen.kt        Home: logo + name header, count, add button, groups + search,
+      ProfileListScreen.kt        Home: single LazyColumn (header + Active + Recent +
+                                  sticky search + profiles share one scroll, so long
+                                  Active/Recent never squeezes the profile viewport);
+                                  Active always expanded with Close all, Recent
+                                  collapsible with per-row History icons + Clear,
                                   identity-colour stripe per profile row
+      NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
+                                  profiles, desktop-selector parity; half by
+                                  default, draggable to full)
       ProfileEditScreen.kt        Tabbed editor (General + colour picker / Ports / Advanced /
                                   Ciphers / Colours-scheme-placeholder / Login), desktop-only
                                   options labeled, new profile + new group
@@ -48,8 +58,10 @@ app/src/main/java/id/web/izs/sshclient/
                                   warn-on-close + host-key trust dialogs
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
       TerminalSettingsScreen.kt   Font size + scrollback buffer (applies live)
-      WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right
-      SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll) + side drawer frame (left/right, no RTL mirror) + activity dots
+      WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right;
+                                  New-tab mode (profile list vs quick-pick sheet, device-only pref)
+      SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll) + side drawer frame (left/right, no RTL mirror) +
+                                  single status dot + primary activity underline (cleared on select) + pinned Profile-list/Settings footer
       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`)
       VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
       SetVaultPassphraseDialog.kt Set/change vault passphrase
@@ -95,7 +107,7 @@ app/src/main/java/id/web/izs/sshclient/
   data/local/
     ConfigDisk.kt         EncryptedSharedPreferences: sync creds, RAW YAML cache,
                           known_hosts (TOFU), terminal prefs (font size),
-                          Android-only home.recentProfiles + window.tabSource/tabLocation (never synced to YAML)
+                          Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode (never synced to YAML)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
 app/src/test/... (21 files, 168 tests — §8)
@@ -249,11 +261,15 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   asks before disconnecting (it is a 32dp invisible tap target — an instant
   silent kill reads exactly like a dropped session); the power button honors
   `warnOnClose` like desktop — and full-width `user@host:port` below.
-- Home Recent card (desktop `recentProfiles` parity, History icon) sized by
-  `terminal.showRecentProfiles` (0 = off); Settings > Window edits the
+- Home Recent card (desktop `recentProfiles` parity, per-row History icons
+  like the desktop selector, default card colour): collapsible header with
+  Clear, sized by `terminal.showRecentProfiles` (0 = off, hidden while
+  searching); Active card above it is always expanded with Close all.
+  Settings > Window edits the
   desktop `appearance.tabsLocation` (Off removes the key; encrypted configs
   stay writable but Android ignores the value) or picks This-device-only
-  (local pref, YAML ignored for display — the painless encrypted path).
+  (local pref, YAML ignored for display — the painless encrypted path);
+  New-tab mode (list vs sheet) is a second device-only pref.
 - Profile identity color: dot selector beside Name in the General tab
   (presets + Default; custom desktop hex shows as an extra swatch), stripe
   on list rows (absent without a stored color). Terminal scheme stays in
@@ -311,7 +327,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `SshSessionRegistryTest` | new tab per tap, cap + slot reclaim, multiplexer key format |
 | `SshMultiplexTest` | shared-close releases pool ref without channel-close (MINA) |
 | `TabLocationTest` | tabsLocation resolver + FOLLOW_YAML/LOCAL priority + encrypted-OFF rules |
-| `SessionActivityTest` | background-output activity dot, select clears, close clears selection |
+| `SessionActivityTest` | background-output activity flag, select clears, close clears selection |
 | `RecentProfilesTest` | recordRecent dedup/cap/disable parity |
 
 ## 9. Build & diagnostics
@@ -344,12 +360,31 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
    scrollable). Reader-pump death marks tabs failed (red + Retry): single
    `exit` fails only its tab, a dead transport fails all riders.
 - **Tab chrome (done — v1):** strip for `top`/`bottom` (status dot + profile
-  name + activity dot + × + `+`; scroll hoisted to the VM because every tab
+  name + primary activity underline + × + `+`; scroll hoisted to the VM because every tab
   is its own destination), custom side drawer for `left`/`right` (M3 drawer
   is start-side only — whole-screen RTL mirroring is rejected; hamburger
-  replaces Back, middle-fling opens it, scrim/Back closes), Back always goes
-  home via synchronous popBackStack. Socket teardown runs off-Main (a stalled
-  VPN must never freeze the terminal mid-tap).
+  replaces Back, edge-fling (32dp system-Back reserve) opens it, pinned
+  Profile-list/Settings footer, scrim/Back closes), Back always goes
+home via synchronous popBackStack. Socket teardown runs off-Main (a stalled
+VPN must never freeze the terminal mid-tap).
+- **Tab UX polish (done — v1.5):** home shares one LazyColumn (Active always
+  expanded with Close all in the header row, Recent collapsible with
+  per-row History icons + Clear, sticky search); `NewTabSheet.kt` quick-pick
+  (search + recent + group sections, desktop-selector parity; half by
+  default via partial anchor, draggable to full); `window.newTabMode`
+  device-only pref + Settings > Window radio; primary activity underline
+  (tertiary reads red on this theme); drawer footer Profile list + Settings;
+  drawer open fling reserves only the 32dp system-Back edge; sheet picks reuse
+  shallow `openProfile`; session-limit dialog moved global (visible from the
+  sheet, not just home).
+- **Appearance (planned):** Settings > Appearance is a `PlaceholderSettingScreen`
+  ("Next update"). Target: desktop `appearance.*` parity where mobile-meaningful
+  (theme selection incl. follow-system, spaciness/density); desktop-only keys
+  (vibrancy, custom CSS, window frame) stay desktop-managed, RAW-lossless.
+- **Color scheme (planned):** Settings > Color scheme is a `PlaceholderSettingScreen`
+  ("Next update"). Target: preset xterm palettes applied to the emulator grid
+  render (`TerminalView`) + selection chrome; sync-vs-local TBD. Profile
+  identity colors already work end-to-end (editor picker, list stripe, sheet dot).
 - **Compose staleness lesson (phantom-Disconnected):** never branch UI on the
   plain `shell` field — the branch group can keep evaluating a stale null
   forever (green dot + Disconnected + dead Reconnect on a live session;

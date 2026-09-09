@@ -39,17 +39,24 @@ technical design.
 - **Multi-session tabs**: every profile tap opens a new tab (desktop
   parity); `reuseSession` shares one TCP transport per tab group. Tab chrome
   follows the desktop `appearance.tabsLocation` key — `top`/`bottom` strip
-  (status dot + profile name + activity dot + ×), `left`/`right` side drawer
-  (hamburger replaces Back, middle-fling opens it), absent key = no tabs
-  (profile-list UX). `+` opens a new connection, × honors `warnOnClose`,
-  Back always goes home, navigation stays shallow (no stack growth).
+  (status dot + profile name + primary activity underline + ×),
+  `left`/`right` side drawer (hamburger replaces Back, edge-fling opens it,
+  pinned Profile-list + Settings footer), absent key = no tabs (profile-list UX). `+`
+  opens a new connection (list or quick-pick sheet, Settings > Window),
+  × honors `warnOnClose`, Back always goes home, navigation stays shallow
+  (no stack growth).
 - **Settings > Window**: tab-location source priority — *Synced config*
   (the desktop YAML value wins; on encrypted configs Android ignores it but
   still writes it for desktop) or *This device only* (a local pref, never
-  synced — desktop-top/phone-bottom splits without touching sync parts).
+  synced — desktop-top/phone-bottom splits without touching sync parts);
+  plus *New tab (+) opens* — profile list or quick-pick bottom sheet
+  (search + recent + grouped profiles, half by default, draggable to full),
+  device-only, never synced.
 - **Termux-like input**: docked extra-keys bar
 - **Recent profiles**: home quick-connect card (desktop `recentProfiles`
-  parity) sized by the desktop `terminal.showRecentProfiles` key (0 = off).
+  parity, per-row History icon like the desktop selector) sized by the
+  desktop `terminal.showRecentProfiles` key (0 = off); collapsible header
+  with Clear. Active-sessions card above it has Close all.
   (`ESC / - HOME ↑ END PGUP` / `TAB CTRL ALT ← ↓ → PGDN`),
   sticky CTRL/ALT, direct typing with raw keystrokes (Backspace=DEL,
   Enter=CR), command-box mode, adjustable font (8–24sp).
@@ -108,13 +115,29 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - **Multi-session (done — v1, incl. tab chrome)**: session registry in `SshSessionViewModel`
   (PTYs survive nav + rotation — also fixes rotation-PTY), new tab per tap
   with `reuseSession` transport sharing (desktop multiplex parity),
-  Active-sessions list on home replacing disconnect-on-back (Back keeps the
-  session alive), per-session warn-on-close, cap on concurrent sessions
-  (default 5, max 8). Tab strip (top/bottom) + side drawer (left/right) +
-  background-output activity dot driven by the desktop `appearance.tabsLocation`
-  key; shell presence is an observable `hasShell` flow (branching composition
-  on the plain `shell` field renders stale nulls — green dot + dead
-  Disconnected on a live session). Reorder/rename/pin stay v2.
+   Active-sessions list on home replacing disconnect-on-back (Back keeps the
+   session alive), per-session warn-on-close, cap on concurrent sessions
+   (default 5, max 8). Tab strip (top/bottom) + side drawer (left/right) +
+   background-output activity underline (primary) driven by the desktop `appearance.tabsLocation`
+   key; shell presence is an observable `hasShell` flow (branching composition
+   on the plain `shell` field renders stale nulls — green dot + dead
+   Disconnected on a live session). Reorder/rename/pin stay v2.
+- **Tab UX polish (done — v1.5)**: home is one shared scroll (Active always
+  expanded with Close all, Recent collapsible with per-row History icons +
+  Clear, sticky search); quick-pick bottom sheet for `+` (Settings > Window >
+  New tab, device-only) with recent + grouped profiles, half by default and
+  draggable to full; primary activity underline on tabs; drawer footer with
+  Profile list + Settings; drawer edge-fling with a 32dp system-Back reserve;
+  shallow sheet navigation + global session-limit dialog.
+- **Appearance (planned)**: Settings > Appearance today is a placeholder —
+  target is desktop `appearance.*` parity where it makes sense on mobile
+  (app theme selection incl. follow-system, display density/spaciness),
+  desktop-only keys (vibrancy, CSS, frame) stay desktop-managed.
+- **Color scheme (planned)**: Settings > Color scheme today is a
+  placeholder — target is terminal palette selection (preset xterm schemes
+  applied to the emulator grid + selection/selection handles), synced or
+  device-local TBD; profile identity colors already work (list stripe,
+  sheet dot, editor picker).
 - **Port forwarding**: open Local/Remote/Dynamic at connect (saved today).
 - **Connect**: `connectionMode` (proxyCommand/jumpHost/SOCKS/HTTP) stays
   direct-only (saved for desktop); terminal type + colour schemes stay
