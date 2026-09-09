@@ -90,7 +90,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 189 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes)
+./gradlew :app:testDebugUnitTest   # 205 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -107,7 +107,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 189/189 green)
+## Parity guarantees (tested, 205/205 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
@@ -140,16 +140,22 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
   draggable to full; primary activity underline on tabs; drawer footer with
   Profile list + Settings; drawer edge-fling with a 32dp system-Back reserve;
   shallow sheet navigation + global session-limit dialog.
-- **Appearance (planned)**: Settings > Appearance today is a placeholder —
-  target is desktop `appearance.*` parity where it makes sense on mobile
-  (app theme selection incl. follow-system, display density/spaciness),
-  desktop-only keys (vibrancy, CSS, frame) stay desktop-managed.
+- **Appearance (done)**: Settings > Appearance — app theme (System/Dark/
+  Light, device-only) + app color palettes (Izs/Ocean/Forest/Sunset/Grape,
+  device-only, terminal untouched), terminal font (system monospace or
+  bundled Source Code Pro like desktop's fallback, writes `terminal.font`),
+  font size (device-only, moved here from Terminal), cursor style + blink
+  (`terminal.cursor`/`cursorBlink`, live on open sessions), live preview
+  (font + size + cursor in the active scheme colors). No scheme set + light app theme = light terminal default
+  (explicit schemes always win). Desktop-only keys (vibrancy, CSS, frame)
+  stay desktop-managed.
 - **Color scheme (done)**: Settings > Color scheme mirrors desktop
   (Current header + Edit/Delete, full `ls` preview per row, Custom badges,
   Save = global + customs upsert by name, 4×5 family grid + 9-step + hex
   picker).
-  89 built-ins (Izs Default + Tabby Default + 87 curated community picks,
-  readability-gated). Global `terminal.colorScheme` + `terminal.customColorSchemes`
+  102 built-ins (Izs Default + Tabby Default + 100 curated community picks,
+  readability-gated: black/bright-black must differ clearly and both stay
+  visible on the background). Global `terminal.colorScheme` + `terminal.customColorSchemes`
   + per-profile `terminalColorScheme` in synced YAML, desktop object shape
   (sibling keys like `lightColorScheme` never touched); absent global = Izs
   Default (zero visual change). Source toggle (tabSource parity): synced YAML

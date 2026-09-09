@@ -844,8 +844,8 @@ class SyncRepository(
     }
 
     /**
-     * Applies a `terminal`-section mutation (color scheme, custom schemes —
-     * Settings > Color scheme). Plaintext configs edit the outer document
+     * Applies a `terminal`-section mutation (color scheme, custom schemes,
+     * font, cursor — Settings > Color scheme / Appearance). Plaintext configs edit the outer document
      * (updateLocalRaw parity); encrypted shells edit the vault blob and
      * re-encrypt (createGroup parity) — so scheme changes work with the
      * vault unlocked, instead of the old desktop-only read-only rule.

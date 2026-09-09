@@ -37,9 +37,11 @@ import id.web.izs.sshclient.data.local.ConfigDisk
 import id.web.izs.sshclient.data.local.CrashLog
 import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.AppViewModel
-import id.web.izs.sshclient.ui.IzsDarkColors
+import id.web.izs.sshclient.ui.resolveAppPalette
+import id.web.izs.sshclient.ui.rememberAppDarkTheme
 import id.web.izs.sshclient.ui.SessionLimitReached
 import id.web.izs.sshclient.ui.SshSessionViewModel
+import id.web.izs.sshclient.ui.screens.AppearanceSettingsScreen
 import id.web.izs.sshclient.ui.screens.ConfigFileScreen
 import id.web.izs.sshclient.ui.screens.ConfigSyncScreen
 import id.web.izs.sshclient.ui.screens.ColorSchemeEditorScreen
@@ -50,7 +52,6 @@ import id.web.izs.sshclient.core.config.SchemeSource
 import id.web.izs.sshclient.core.config.parseSchemeJson
 import id.web.izs.sshclient.core.config.parseSchemeSource
 import id.web.izs.sshclient.core.config.toJsonString
-import id.web.izs.sshclient.ui.screens.PlaceholderSettingScreen
 import id.web.izs.sshclient.ui.screens.CrashReportScreen
 import id.web.izs.sshclient.ui.screens.ProfileEditScreen
 import id.web.izs.sshclient.ui.screens.ProfileListScreen
@@ -94,14 +95,25 @@ class MainActivity : ComponentActivity() {
         // Debug-only tooling: the last-crash recorder must never run in release builds.
         if (BuildConfig.DEBUG)         CrashLog.install(this)
         setContent {
-            MaterialTheme(colorScheme = IzsDarkColors) {
-                val appState = remember {
-                    appHolder.state ?: run {
-                        val disk = ConfigDisk(this@MainActivity)
-                        AppState(disk, SyncRepository(disk, TabbySyncApi()), appHolder.viewModelScope)
-                            .also { appHolder.state = it }
-                    }
+            val appState = remember {
+                appHolder.state ?: run {
+                    val disk = ConfigDisk(this@MainActivity)
+                    AppState(disk, SyncRepository(disk, TabbySyncApi()), appHolder.viewModelScope)
+                        .also {
+                            appHolder.state = it
+                            it.themeMode = disk.appTheme
+                            it.paletteName = disk.appPalette
+                        }
                 }
+            }
+            // App-chrome theme (Settings > Appearance, device-only): read
+            // as state so a change re-themes live. Dark preserves the
+            // previous always-dark look.
+            val darkTheme = rememberAppDarkTheme(appState.themeMode)
+            val palette = resolveAppPalette(appState.paletteName)
+            MaterialTheme(
+                colorScheme = if (darkTheme) palette.dark else palette.light,
+            ) {
                 var boot by remember { mutableStateOf<Boot>(Boot.Loading) }
                 var rebootCounter by remember { mutableStateOf(0) }
 
@@ -340,7 +352,7 @@ private fun AppNav(
             KeyboardLayoutScreen(appState) { nav.popBackStack() }
         }
         composable("settings/appearance") {
-            PlaceholderSettingScreen("Appearance") { nav.popBackStack() }
+            AppearanceSettingsScreen(appState) { nav.popBackStack() }
         }
         composable("settings/colors") {
             ColorSchemeSettingsScreen(

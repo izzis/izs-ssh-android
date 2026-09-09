@@ -26,6 +26,19 @@ class AppState(
 ) {
     var loaded by mutableStateOf<SyncRepository.Loaded?>(null)
         private set
+    /**
+     * App-chrome theme mode (Settings > Appearance): mirrors
+     * [ConfigDisk.appTheme] as observable state so a change re-themes
+     * live without an Activity restart. Initialized from disk at
+     * composition start (MainActivity).
+     */
+    var themeMode by mutableStateOf(ConfigDisk.THEME_DARK)
+    /**
+     * App-chrome palette id ([ConfigDisk.appPalette] mirror): observable
+     * so a palette change re-themes live. Initialized from disk in
+     * MainActivity alongside [themeMode].
+     */
+    var paletteName by mutableStateOf(ConfigDisk.PALETTE_IZS)
     var loading by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)

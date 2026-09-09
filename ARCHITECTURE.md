@@ -37,8 +37,9 @@ app/src/main/java/id/web/izs/sshclient/
     SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8,
                                   selected tab + hasActivity flag + observable hasShell (never branch UI on the plain shell field)
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
-    Theme.kt                      IzsDarkColors (dark-only Material3 theme; tertiary left at
-                                  baseline — activity accents use primary, tertiary reads red)
+    Theme.kt                      AppPalettes (Izs/Ocean/Forest/Sunset/Grape dark+light;
+                                  shared Izs surfaces) + resolveAppPalette; terminal
+                                  stage + key bar excluded by design)
     screens/
       ScreenHeader.kt           Shared sub-screen top bar (back arrow + title)
       ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only)
@@ -59,7 +60,8 @@ app/src/main/java/id/web/izs/sshclient/
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
                                   warn-on-close + host-key trust dialogs
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
-      TerminalSettingsScreen.kt   Font size + scrollback buffer (applies live)
+      TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance)
+      AppearanceSettingsScreen.kt App theme (device-only) + terminal font/cursor (YAML) + font size + live preview
       WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right;
                                   New-tab mode (profile list vs quick-pick sheet, device-only pref)
       SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll) + side drawer frame (left/right, no RTL mirror) +
@@ -72,7 +74,6 @@ app/src/main/java/id/web/izs/sshclient/
                                   (desktop Settings > SSH parity; live-save, plaintext only)
       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
       CrashReportScreen.kt        Shows last crash trace with copy button
-      PlaceholderSettingScreen.kt "Scheduled" stubs (proxy connect, etc.)
   core/
     config/
       TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options, SshGlobals
@@ -114,7 +115,7 @@ app/src/main/java/id/web/izs/sshclient/
                           (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (22 files, 189 tests — §8)
+app/src/test/... (24 files, 205 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -287,7 +288,8 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   desktop-only note in the editor instead of failing silently.
 - Extra-keys rows: `ESC / - HOME UP END PGUP` and
   `TAB CTRL ALT LEFT DOWN RIGHT PGDN`; special keys bypass stickies via
-  `sendSpecial`. Font size pref `terminal.fontSp` (8–24sp, default 14).
+  `sendSpecial`. Font size pref `terminal.fontSp` (8–24sp, default 14,
+  Settings > Appearance, device-only).
 - Terminal header extras: copy (puts `plainText()` on clipboard) +
   box-mode toggle + `⋮` menu (font ±, extra keys on/off).
 - Connecting row: live stage text from the connector (crypto / connect /
@@ -313,7 +315,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 189 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 205 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -339,6 +341,8 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `SessionActivityTest` | background-output activity flag, select clears, close clears selection |
 | `RecentProfilesTest` | recordRecent dedup/cap/disable parity |
 | `ColorSchemeTest` | scheme parse/normalize/round-trip, readability gates, resolution order, YAML compat, emulator palette + remap, upsert/delete, JSON, shades |
+| `TerminalAppearanceTest` | font/cursor parse + fallback, YAML set/remove round-trip |
+| `AppPaletteTest` | palette resolve fallback, dark/light distinctness |
 
 ## 9. Build & diagnostics
 
@@ -400,16 +404,26 @@ VPN must never freeze the terminal mid-tap).
   drawer open fling reserves only the 32dp system-Back edge; sheet picks reuse
   shallow `openProfile`; session-limit dialog moved global (visible from the
   sheet, not just home).
-- **Appearance (planned):** Settings > Appearance is a `PlaceholderSettingScreen`
-  ("Next update"). Target: desktop `appearance.*` parity where mobile-meaningful
-  (theme selection incl. follow-system, spaciness/density); desktop-only keys
-  (vibrancy, custom CSS, window frame) stay desktop-managed, RAW-lossless.
+- **Appearance (done):** `AppearanceSettingsScreen` — app theme
+  (System/Dark/Light, device-only `ConfigDisk appearance.appTheme`) +
+  app color palettes (`ui/Theme.kt AppPalettes`: Izs/Ocean/Forest/Sunset/
+  Grape, device-only `appearance.appPalette`, terminal untouched),
+  terminal font (system monospace or bundled Source Code Pro,
+  `terminal.font` YAML), font size (device-only, moved from Terminal),
+  cursor style + blink (`terminal.cursor`/`cursorBlink` YAML, live on
+  open sessions via a blink-gated cursor overlay), live preview (font +
+  size + cursor in the active scheme colors, same resolution as
+  TerminalScreen). No scheme set anywhere +
+  light app theme = light Izs terminal default (explicit schemes always
+  win). Desktop-only keys (vibrancy,
+  custom CSS, window frame) stay desktop-managed, RAW-lossless.
 - **Color scheme (done):** `core/config/ColorScheme.kt` (desktop
   `theme.ts` shape; parse/normalize/toRawMap/readability gates/contrast;
   JSON ser via kotlinx.serialization for the device pref; `SchemeSource` +
   `resolveActiveScheme` (profile > device-local | synced-global > Izs);
   `upsertCustom`/`deleteCustomByName` saveScheme parity; pure JVM) +
-  `assets/color_schemes.json` (89 built-ins, curated from 191 XResources).
+  `assets/color_schemes.json` (102 built-ins, curated from 191 XResources;
+  light schemes gated on black/bright-black contrast + background visibility).
   Global `terminal.colorScheme` + `terminal.customColorSchemes` +
   per-profile `terminalColorScheme` (null = follow global) in synced YAML
   via `RawConfigStore` readers/writers + `updateProfileMap` (null removes

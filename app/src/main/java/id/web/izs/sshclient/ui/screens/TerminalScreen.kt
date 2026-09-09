@@ -86,13 +86,17 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import id.web.izs.sshclient.core.config.TabLocation
+import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.effectiveTabLocation
 import id.web.izs.sshclient.core.config.ignoreEncryptedValue
 import id.web.izs.sshclient.core.config.parseSchemeSource
 import id.web.izs.sshclient.core.config.parseSchemeJson
 import id.web.izs.sshclient.core.config.parseTabSource
 import id.web.izs.sshclient.core.config.resolveActiveScheme
+import id.web.izs.sshclient.core.config.isFallbackScheme
+import id.web.izs.sshclient.core.config.IZS_DEFAULT_LIGHT_SCHEME
 import id.web.izs.sshclient.core.config.resolveTabLocation
+import id.web.izs.sshclient.core.config.resolveTerminalFont
 import id.web.izs.sshclient.core.config.schemeColorArgb
 import id.web.izs.sshclient.core.ssh.SshConnector
 import id.web.izs.sshclient.core.term.TerminalInput
@@ -101,6 +105,7 @@ import id.web.izs.sshclient.core.term.loadKeyLayout
 import id.web.izs.sshclient.core.term.stepBytes
 import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.SshSessionViewModel
+import id.web.izs.sshclient.ui.rememberAppDarkTheme
 import id.web.izs.sshclient.ui.components.SessionTabDrawerContent
 import id.web.izs.sshclient.ui.components.SessionTabStrip
 import id.web.izs.sshclient.ui.components.TabDrawerFrame
@@ -227,13 +232,42 @@ fun TerminalScreen(
         schemeSource,
         deviceScheme,
     )
-    LaunchedEffect(resolvedScheme) { emulator.setPalette(resolvedScheme) }
+    // Light-mode default: when NO scheme is set anywhere (system
+    // default), the live terminal follows the app theme like the
+    // Appearance preview does — light bg in light mode. Any explicit
+    // scheme (profile/global/device) wins untouched.
+    val displayScheme =
+        if (
+            !rememberAppDarkTheme(state.themeMode) && isFallbackScheme(
+                profile.terminalColorScheme,
+                state.loaded?.domain?.terminalColorScheme,
+                schemeSource,
+                deviceScheme,
+            )
+        ) {
+            IZS_DEFAULT_LIGHT_SCHEME
+        } else {
+            resolvedScheme
+        }
+    LaunchedEffect(displayScheme) { emulator.setPalette(displayScheme) }
     // Stage follows the scheme background full-bleed (was pure black):
     // with few rows the grid no longer seams against a black page above
     // and the app surface below. The top bar keeps the themed surface.
-    val stageBg = remember(resolvedScheme) {
-        schemeColorArgb(resolvedScheme.background)?.let { Color(it) } ?: Color.Black
+    val stageBg = remember(displayScheme) {
+        schemeColorArgb(displayScheme.background)?.let { Color(it) } ?: Color.Black
     }
+    // Terminal font (`terminal.font` YAML, Settings > Appearance): resolved
+    // live so returning from Settings applies instantly. SYSTEM renders
+    // the system monospace; SOURCE_CODE_PRO the bundled file. The cell
+    // metrics and the canvas share this family, so switching re-measures.
+    val termFont = resolveTerminalFont(
+        RawConfigStore.terminalFontName(state.loaded?.store ?: emptyMap()),
+    )
+    val fontFamily = rememberTerminalFontFamily(termFont)
+    // Cursor shape + blink (`terminal.cursor`/`cursorBlink` YAML, Settings >
+    // Appearance): read live so returning from Settings applies instantly.
+    val termCursor = RawConfigStore.terminalCursor(state.loaded?.store ?: emptyMap())
+    val termBlink = RawConfigStore.terminalCursorBlink(state.loaded?.store ?: emptyMap())
     // First fit per session is instant; later ones are settle-debounced
     // (see the refit below) so the keyboard animation never reflows.
     var sizedOnce by remember(sessionId) { mutableStateOf(false) }
@@ -786,7 +820,7 @@ fun TerminalScreen(
             // is what invalidates this scope (belt & suspenders next to key()).
             val tick = emuVersion
             val density = LocalDensity.current
-            val (charW, lineH) = rememberTerminalCell(fontSp)
+            val (charW, lineH) = rememberTerminalCell(fontSp, fontFamily)
             val availW = with(density) { maxWidth.toPx() }
             val availH = with(density) { maxHeight.toPx() }
             // Screen-protector edges: keep the outer columns visible.
@@ -845,6 +879,9 @@ fun TerminalScreen(
                         version = tick,
                         fontSp = fontSp,
                         cell = charW to lineH,
+                        fontFamily = fontFamily,
+                        cursor = termCursor,
+                        cursorBlink = termBlink,
                         onTap = {
                             if (!boxMode && handle.shell != null) {
                                 focusRequester.requestFocus()

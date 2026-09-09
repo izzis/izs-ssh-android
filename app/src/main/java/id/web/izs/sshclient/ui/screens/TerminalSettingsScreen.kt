@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -40,10 +39,11 @@ import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.launch
 
 /**
- * Settings > Terminal: font size (same pref as the A-/A+ menu), the
- * scrollback buffer (stepper + free numeric input, lines), the macro step
- * delay, and a shortcut into the extra-keys layout editor. All persist
- * immediately — no Save button.
+ * Settings > Terminal: the scrollback buffer (stepper + free numeric
+ * input, lines), the macro step delay, max sessions, recent-profiles
+ * count, and a shortcut into the extra-keys layout editor. Font size
+ * moved to Settings > Appearance (same device-only pref as the A-/A+
+ * menu). All persist immediately — no Save button.
  */
 const val SCROLLBACK_STEP = 1000
 const val SCROLLBACK_MAX = 100_000
@@ -55,7 +55,6 @@ fun TerminalSettingsScreen(
     onEditKeys: () -> Unit,
     onBack: () -> Unit,
 ) {
-    var fontSp by remember { mutableFloatStateOf(state.disk.terminalFontSp) }
     var scrollback by remember { mutableIntStateOf(state.disk.terminalScrollback) }
     var boxText by remember { mutableStateOf(scrollback.toString()) }
     var stepDelayMs by remember { mutableLongStateOf(state.disk.macroStepDelayMs) }
@@ -131,26 +130,6 @@ fun TerminalSettingsScreen(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
-        }
-        Text("Font size", style = MaterialTheme.typography.titleMedium)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(
-                onClick = {
-                    fontSp = (fontSp - 1f).coerceIn(8f, 24f)
-                    state.disk.terminalFontSp = fontSp
-                },
-            ) { Icon(Icons.Filled.Remove, contentDescription = "Smaller") }
-            Text(
-                "${fontSp.toInt()}sp",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
-            IconButton(
-                onClick = {
-                    fontSp = (fontSp + 1f).coerceIn(8f, 24f)
-                    state.disk.terminalFontSp = fontSp
-                },
-            ) { Icon(Icons.Filled.Add, contentDescription = "Bigger") }
         }
         Text("Scrollback buffer", style = MaterialTheme.typography.titleMedium)
         Text(

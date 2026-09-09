@@ -107,7 +107,9 @@ class ConfigDisk(context: Context) {
 
     /**
      * Terminal font size in sp (Termux-like readable default, user-tunable
-     * via A-/A+; persisted like the folder expansion above).
+     * via A-/A+ and Settings > Appearance; persisted like the folder
+     * expansion above). Device-only: screens differ, syncing would resize
+     * the desktop on every phone pinch.
      */
     var terminalFontSp: Float
         get() = prefs().getFloat(KEY_TERMINAL_FONT_SP, 14f)
@@ -172,6 +174,33 @@ class ConfigDisk(context: Context) {
             KEY_RECENT_PROFILES,
             org.json.JSONArray(v).toString(),
         ).apply()
+
+    /**
+     * App-chrome theme (Settings > Appearance). Device-only: the desktop
+     * `appearance.*` keys describe a desktop window manager (frame,
+     * vibrancy, dock) with no phone equivalent, so this never syncs.
+     * "dark" (default) preserves the previous always-dark behavior.
+     */
+    var appTheme: String
+        get() = prefs().getString(KEY_APP_THEME, THEME_DARK)
+            ?.takeIf { it == THEME_SYSTEM || it == THEME_LIGHT } ?: THEME_DARK
+        set(v) = prefs().edit().putString(
+            KEY_APP_THEME,
+            when (v) {
+                THEME_SYSTEM -> THEME_SYSTEM
+                THEME_LIGHT -> THEME_LIGHT
+                else -> THEME_DARK
+            },
+        ).apply()
+
+    /**
+     * App-chrome color palette id (Settings > Appearance > App colors).
+     * Device-only like [appTheme] (no desktop equivalent); unknown values
+     * resolve to Izs, never fatal.
+     */
+    var appPalette: String
+        get() = prefs().getString(KEY_APP_PALETTE, PALETTE_IZS) ?: PALETTE_IZS
+        set(v) = prefs().edit().putString(KEY_APP_PALETTE, v).apply()
 
     /**
      * Tab-location source priority (Settings > Window). "follow" (default) =
@@ -258,6 +287,12 @@ class ConfigDisk(context: Context) {
         const val KEY_LOCAL_SCHEME = "terminal.localScheme"
         const val SOURCE_SYNCED = "synced"
         const val SOURCE_LOCAL = "local"
+        const val KEY_APP_THEME = "appearance.appTheme"
+        const val THEME_SYSTEM = "system"
+        const val THEME_DARK = "dark"
+        const val THEME_LIGHT = "light"
+        const val KEY_APP_PALETTE = "appearance.appPalette"
+        const val PALETTE_IZS = "izs"
         /** Hard ceiling for [maxSessions]: 8 sockets + histories is the most a phone should hold. */
         const val MAX_SESSIONS_HARD_MAX = 8
     }

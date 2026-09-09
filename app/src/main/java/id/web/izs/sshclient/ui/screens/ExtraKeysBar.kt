@@ -63,10 +63,14 @@ fun ExtraKeysBar(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RectangleShape,
-        color = Color.Black,
+        // Theme-following (not hardcoded black): surfaceContainerLow is
+        // near-black in the dark theme (current look preserved) and light
+        // in the light theme. Buttons are already theme-adaptive, and the
+        // terminal stage above keeps its own scheme background.
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column {
-            HorizontalDivider(thickness = 1.dp, color = Color.White.copy(alpha = 0.1f))
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
             Column(
                 Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),

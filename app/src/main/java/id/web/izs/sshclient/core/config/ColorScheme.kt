@@ -51,6 +51,26 @@ val IZS_DEFAULT_SCHEME = TerminalColorScheme(
     ),
 )
 
+/**
+ * Light companion of [IZS_DEFAULT_SCHEME]: same 16 ANSI colors, light
+ * background + dark foreground/cursor. Used ONLY when no scheme is set
+ * anywhere (see [isFallbackScheme]) and the app theme is light — so the
+ * live terminal matches the light preview. Any explicit scheme
+ * (profile/global/device) always wins untouched.
+ */
+val IZS_DEFAULT_LIGHT_SCHEME = TerminalColorScheme(
+    name = "Izs Default Light",
+    foreground = "#1d1e23",
+    background = "#ffffff",
+    cursor = "#1d1e23",
+    colors = listOf(
+        "#000000", "#cd0000", "#00cd00", "#cdcd00",
+        "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
+        "#7f7f7f", "#ff0000", "#00ff00", "#ffff00",
+        "#5c5cff", "#ff00ff", "#00ffff", "#ffffff",
+    ),
+)
+
 data class TerminalColorScheme(
     val name: String,
     val foreground: String,
@@ -221,6 +241,20 @@ fun resolveActiveScheme(
 ): TerminalColorScheme = profile
     ?: if (source == SchemeSource.LOCAL) (local ?: IZS_DEFAULT_SCHEME)
     else (global ?: IZS_DEFAULT_SCHEME)
+
+/**
+ * True when [resolveActiveScheme] would return the Izs fallback — i.e.
+ * nothing is set anywhere in the chain (no profile override, no global
+ * in synced mode, no device scheme in local mode). Only then may the
+ * caller substitute the theme-aware default; explicit schemes always win.
+ */
+fun isFallbackScheme(
+    profile: TerminalColorScheme?,
+    global: TerminalColorScheme?,
+    source: SchemeSource,
+    local: TerminalColorScheme?,
+): Boolean = profile == null &&
+    (if (source == SchemeSource.LOCAL) local == null else global == null)
 
 /**
  * Device-pref serialization (ConfigDisk holds strings; YAML keeps desktop

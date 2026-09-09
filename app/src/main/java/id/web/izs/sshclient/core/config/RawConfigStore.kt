@@ -136,6 +136,66 @@ object RawConfigStore {
     }
 
     /**
+     * `terminal.font` read (desktop parity). Null when absent/non-string —
+     * absent means the desktop default; resolve with [resolveTerminalFont].
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun terminalFontName(doc: Map<String, Any?>): String? =
+        (doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("font") as? String
+
+    /**
+     * Explicit user set (Appearance > Font). Null REMOVES the key — and the
+     * `terminal` map itself when left empty — restoring absent = default.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun setTerminalFont(doc: MutableMap<String, Any?>, name: String?) {
+        val term = LinkedHashMap(
+            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+        )
+        if (name == null) term.remove("font") else term["font"] = name
+        if (term.isEmpty()) doc.remove(KEY_TERMINAL) else doc[KEY_TERMINAL] = term
+    }
+
+    /**
+     * `terminal.cursor` read with desktop-default fallback (block).
+     * Unknown garbage resolves to BLOCK via [parseTerminalCursor].
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun terminalCursor(doc: Map<String, Any?>): TerminalCursor =
+        parseTerminalCursor((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("cursor") as? String)
+
+    /**
+     * Explicit user set (Appearance > Cursor): persisted even when it
+     * equals the default (showRecentProfiles parity).
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun setTerminalCursor(doc: MutableMap<String, Any?>, cursor: TerminalCursor) {
+        val term = LinkedHashMap(
+            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+        )
+        term["cursor"] = terminalCursorYamlName(cursor)
+        doc[KEY_TERMINAL] = term
+    }
+
+    /**
+     * `terminal.cursorBlink` read with desktop-default fallback (true).
+     * Non-boolean garbage falls back to the default, never fatal.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun terminalCursorBlink(doc: Map<String, Any?>): Boolean =
+        (doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("cursorBlink") as? Boolean ?: true
+
+    /** Explicit user set (Appearance > Cursor blink). */
+    @Suppress("UNCHECKED_CAST")
+    fun setTerminalCursorBlink(doc: MutableMap<String, Any?>, blink: Boolean) {
+        val term = LinkedHashMap(
+            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+        )
+        term["cursorBlink"] = blink
+        doc[KEY_TERMINAL] = term
+    }
+
+    /**
      * `appearance.tabsLocation` read WITHOUT desktop-default fallback.
      * Desktop resolves absent → `top` (configDefaults.yaml); on the phone
      * absent means OFF (the current list-based UX, no tab chrome) — a

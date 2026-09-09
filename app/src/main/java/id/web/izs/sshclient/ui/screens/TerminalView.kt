@@ -53,6 +53,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font
+import id.web.izs.sshclient.R
+import id.web.izs.sshclient.core.config.TerminalCursor
+import id.web.izs.sshclient.core.config.TerminalFont
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
@@ -76,15 +80,15 @@ import kotlinx.coroutines.withTimeoutOrNull
  * fonts load, and the cached zero collapsed the whole grid to 0x0.
  */
 @Composable
-fun rememberTerminalCell(fontSp: Float): Pair<Float, Float> {
+fun rememberTerminalCell(fontSp: Float, fontFamily: FontFamily): Pair<Float, Float> {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
-    return remember(density, fontSp) {
+    return remember(density, fontSp, fontFamily) {
         // Like xterm, columns are exactly one advance wide: measure the real
         // monospace advance (averaged over 40 glyphs) instead of assuming
         // 0.6em, so laid-out rows land pixel-perfect on the grid. The Canvas
         // text style must stay identical to this one.
-        val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSp.sp)
+        val style = terminalTextStyle(fontFamily, fontSp)
         val w = measurer.measure("0123456789".repeat(4), style).size.width / 40f
         val h = with(density) { (fontSp * 1.25f).sp.toPx() }
         w to h
@@ -92,8 +96,31 @@ fun rememberTerminalCell(fontSp: Float): Pair<Float, Float> {
 }
 
 /**
+ * Single text-style source for terminal rendering AND the Appearance
+ * preview: same family + size in both places, so the preview matches the
+ * live grid by construction (WYSIWYG).
+ */
+fun terminalTextStyle(fontFamily: FontFamily, fontSp: Float): TextStyle =
+    TextStyle(fontFamily = fontFamily, fontSize = fontSp.sp)
+
+/**
+ * Resolves a [TerminalFont] choice to a Compose family: the bundled
+ * Source Code Pro (desktop fallback-file parity) or system monospace.
+ */
+@Composable
+fun rememberTerminalFontFamily(font: TerminalFont): FontFamily =
+    remember(font) {
+        if (font == TerminalFont.SOURCE_CODE_PRO) {
+            FontFamily(Font(R.font.source_code_pro))
+        } else {
+            FontFamily.Monospace
+        }
+    }
+
+/**
  * Termux-like terminal grid: user-chosen monospace font, Canvas cells with
- * per-cell fg/bg/bold + block cursor. The grid scrolls on both axes and
+ * per-cell fg/bg/bold + block/beam/underline cursor overlay. The grid
+ * scrolls on both axes and
  * auto-scrolls just enough to keep the cursor visible — so an open soft
  * keyboard can never cover what is being typed.
  *
@@ -130,6 +157,12 @@ fun TerminalView(
     cell: Pair<Float, Float>,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Rendering font (Settings > Appearance). Measure + draw share it. */
+    fontFamily: FontFamily = FontFamily.Monospace,
+    /** Cursor shape (`terminal.cursor` YAML, Settings > Appearance). */
+    cursor: TerminalCursor = TerminalCursor.BLOCK,
+    /** Cursor blink (`terminal.cursorBlink` YAML). */
+    cursorBlink: Boolean = true,
     /**
      * Pixels at the viewport bottom covered by docked bars below the grid.
      * Layout bars shrink the viewport itself, so this is normally 0 — the
@@ -175,6 +208,19 @@ fun TerminalView(
     var selAnchor by remember { mutableStateOf<TerminalEmulator.SelPoint?>(null) }
     var selFocus by remember { mutableStateOf<TerminalEmulator.SelPoint?>(null) }
     val selecting = selAnchor != null && selFocus != null
+    // Cursor blink clock (xterm-like): steady while typing — the timer
+    // restarts on every grid change — then ~530ms on/off. Only the
+    // cursor overlay reads this, so blinking never redraws the grid.
+    var blinkOn by remember(cursorBlink) { mutableStateOf(true) }
+    LaunchedEffect(cursorBlink, emulator.showCursor, version) {
+        blinkOn = true
+        if (cursorBlink && emulator.showCursor) {
+            while (true) {
+                delay(530L)
+                blinkOn = !blinkOn
+            }
+        }
+    }
     val onTapState = rememberUpdatedState(onTap)
     val onCopyState = rememberUpdatedState(onCopySelection)
     val onPasteState = rememberUpdatedState(onPasteSelection)
@@ -690,7 +736,27 @@ fun TerminalView(
                 rows = emulator.rows,
                 gridW = gridWDp,
                 gridH = gridHDp,
+                fontFamily = fontFamily,
             )
+            // Cursor overlay rides the same scrolled content (pan-locked
+            // like the selection highlight). All shapes live here — the
+            // grid below renders cursor cells normally — so blink costs
+            // one tiny rect, never a full redraw.
+            if (emulator.showCursor && blinkOn) {
+                CursorOverlay(
+                    tick = drawTick,
+                    emulator = emuRef.value,
+                    historyRows = historySize,
+                    cursor = cursor,
+                    fontSp = fontSp,
+                    fontFamily = fontFamily,
+                    charW = charW,
+                    lineH = lineH,
+                    sidePadPx = sidePadPx,
+                    gridW = gridWDp,
+                    gridH = gridHDp,
+                )
+            }
             // Selection overlay rides the same scrolled content, so the
             // highlight and handles pan pixel-locked with the text.
             val norm = selNorm
@@ -790,15 +856,72 @@ private fun TerminalCanvas(
     rows: Int,
     gridW: Dp,
     gridH: Dp,
+    fontFamily: FontFamily,
 ) {
     val measurer = rememberTextMeasurer()
-    val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSp.sp)
+    val style = terminalTextStyle(fontFamily, fontSp)
     // The grid mutates in place (same emulator reference), so the Canvas
     // node is keyed by tick: a new node per gated redraw guarantees the
     // frame is never served stale, regardless of lambda caching.
     key(tick) {
         Canvas(modifier = Modifier.size(gridW, gridH)) {
             drawTerminal(emuRef.value, historyRows, firstRow, rowCount, measurer, style, charW, lineH, sidePadPx)
+        }
+    }
+}
+
+/**
+ * Cursor overlay: block/beam/underline at the live cursor cell, drawn over
+ * the normally-rendered grid (same content size, so it pans pixel-locked).
+ * Keyed by tick like the grid canvas: cursor moves always accompany a
+ * version bump, and blink toggles recompose only this node.
+ */
+@Composable
+private fun CursorOverlay(
+    tick: Long,
+    emulator: TerminalEmulator,
+    historyRows: Int,
+    cursor: TerminalCursor,
+    fontSp: Float,
+    fontFamily: FontFamily,
+    charW: Float,
+    lineH: Float,
+    sidePadPx: Float,
+    gridW: Dp,
+    gridH: Dp,
+) {
+    val measurer = rememberTextMeasurer()
+    val style = terminalTextStyle(fontFamily, fontSp)
+    key(tick) {
+        Canvas(modifier = Modifier.size(gridW, gridH)) {
+            val cx = emulator.cursorX.coerceIn(0, (emulator.cols - 1).coerceAtLeast(0))
+            val cy = (historyRows + emulator.cursorY).coerceAtLeast(0)
+            val cell = emulator.cellAt(cx, emulator.cursorY)
+            val fg = Color(cell?.fg ?: emulator.paletteFg)
+            val x0 = sidePadPx + cx * charW
+            val y0 = cy * lineH
+            when (cursor) {
+                TerminalCursor.BEAM -> {
+                    val w = 2.dp.toPx().coerceAtLeast(2f)
+                    drawRect(fg, topLeft = Offset(x0, y0), size = Size(w, lineH))
+                }
+                TerminalCursor.UNDERLINE -> {
+                    val h = (lineH * 0.12f).coerceAtLeast(2f)
+                    drawRect(fg, topLeft = Offset(x0, y0 + lineH - h), size = Size(charW, h))
+                }
+                TerminalCursor.BLOCK -> {
+                    drawRect(fg, topLeft = Offset(x0, y0), size = Size(charW, lineH))
+                    val ch = cell?.ch ?: ' '
+                    if (ch != ' ') {
+                        drawText(
+                            textMeasurer = measurer,
+                            text = ch.toString(),
+                            topLeft = Offset(x0, y0),
+                            style = style.copy(color = Color(cell?.bg ?: emulator.paletteBg)),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -967,8 +1090,7 @@ private fun DrawScope.drawTerminal(
             var spanOpen = false
             for (x in 0 until cols) {
                 val cell = if (inHistory) emulator.historyCell(i, x) else emulator.cellAt(x, gy)
-                val isCursor = !inHistory && emulator.showCursor && x == emulator.cursorX && gy == emulator.cursorY
-                val bg = if (isCursor) cell?.fg ?: emulator.paletteFg else cell?.bg ?: emulator.paletteBg
+                val bg = cell?.bg ?: emulator.paletteBg
                 if (runStart < 0 || bg != runBg) {
                     flushRun(x)
                     runStart = x
@@ -976,7 +1098,7 @@ private fun DrawScope.drawTerminal(
                 }
                 val ch = cell?.ch ?: ' '
                 if (ch != ' ') allSpace = false
-                val fgc = if (isCursor) cell?.bg ?: emulator.paletteBg else cell?.fg ?: emulator.paletteFg
+                val fgc = cell?.fg ?: emulator.paletteFg
                 val bld = cell?.bold == true
                 if (!spanOpen || fgc != spanFg || bld != spanBold) {
                     pushStyle(
