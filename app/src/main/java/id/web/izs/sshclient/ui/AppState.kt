@@ -37,6 +37,18 @@ class AppState(
         }
     }
 
+    /**
+     * Adopt a freshly-written [SyncRepository.Loaded] (repo write fns return
+     * it) instead of [refresh] re-loading from disk. Saves a full reload
+     * cycle — on encrypted stores that is another PBKDF2 decrypt + YAML
+     * parse of the whole blob, seconds on slow phones for zero new
+     * information (the write fn already resolved from the written doc).
+     */
+    fun adopt(loaded: SyncRepository.Loaded, onDone: (() -> Unit)? = null) {
+        this.loaded = loaded
+        onDone?.invoke()
+    }
+
     /** Suspend boot load used by MainActivity before the NavHost is composed. */
     suspend fun bootLoad(): Boolean {
         loading = true

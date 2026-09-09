@@ -88,8 +88,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import id.web.izs.sshclient.core.config.TabLocation
 import id.web.izs.sshclient.core.config.effectiveTabLocation
 import id.web.izs.sshclient.core.config.ignoreEncryptedValue
+import id.web.izs.sshclient.core.config.parseSchemeSource
+import id.web.izs.sshclient.core.config.parseSchemeJson
 import id.web.izs.sshclient.core.config.parseTabSource
+import id.web.izs.sshclient.core.config.resolveActiveScheme
 import id.web.izs.sshclient.core.config.resolveTabLocation
+import id.web.izs.sshclient.core.config.schemeColorArgb
 import id.web.izs.sshclient.core.ssh.SshConnector
 import id.web.izs.sshclient.core.term.TerminalInput
 import id.web.izs.sshclient.core.term.KeyStep
@@ -204,6 +208,32 @@ fun TerminalScreen(
     // composition — deliberately impure, the setter only trims and never
     // triggers recomposition, so there is no loop risk.
     emulator.maxHistory = state.disk.terminalScrollback
+    // Color scheme (Settings > Color scheme, profile Colours tab): source
+    // priority (synced YAML vs this device) + per-profile override. Applied
+    // in an effect (not bare composition like maxHistory above): setPalette
+    // also resets the pen, and a bare call would race multi-chunk escape
+    // sequences on every version-bump recomposition. Restarting only on
+    // scheme change (data-class equals) makes returning from Settings
+    // repaint the LIVE session — no reconnect needed (setPalette remaps old
+    // cells too, so the whole screen follows the switch, not just new
+    // output). The device JSON parses only when its string changes.
+    val schemeSource = parseSchemeSource(state.disk.colorSchemeSource)
+    val deviceScheme = remember(state.disk.localColorSchemeJson) {
+        parseSchemeJson(state.disk.localColorSchemeJson)
+    }
+    val resolvedScheme = resolveActiveScheme(
+        profile.terminalColorScheme,
+        state.loaded?.domain?.terminalColorScheme,
+        schemeSource,
+        deviceScheme,
+    )
+    LaunchedEffect(resolvedScheme) { emulator.setPalette(resolvedScheme) }
+    // Stage follows the scheme background full-bleed (was pure black):
+    // with few rows the grid no longer seams against a black page above
+    // and the app surface below. The top bar keeps the themed surface.
+    val stageBg = remember(resolvedScheme) {
+        schemeColorArgb(resolvedScheme.background)?.let { Color(it) } ?: Color.Black
+    }
     // First fit per session is instant; later ones are settle-debounced
     // (see the refit below) so the keyboard animation never reflows.
     var sizedOnce by remember(sessionId) { mutableStateOf(false) }
@@ -463,10 +493,10 @@ fun TerminalScreen(
             )
         },
     ) {
-    // Stage stays full-bleed black, but the top bar now matches every other
+    // Stage stays full-bleed scheme background, but the top bar now matches every other
     // page (themed surface, back arrow + title) — the slate strip is gone.
     // Back keeps the session alive; the status dot disconnects.
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
+    Column(Modifier.fillMaxSize().background(stageBg)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -707,7 +737,7 @@ fun TerminalScreen(
         }
         BoxWithConstraints(
             modifier = Modifier.weight(1f).fillMaxWidth()
-                .background(Color.Black)
+                .background(stageBg)
                 .padding(bottom = with(dockDensity) { dockPx.toDp() })
                 .pointerInput(tabLoc, drawerOpen) {
                     // Edge-band fling opens the side drawer. NEVER consumes:

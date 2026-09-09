@@ -207,6 +207,30 @@ class ConfigDisk(context: Context) {
             if (v == MODE_NEW_TAB_SHEET) MODE_NEW_TAB_SHEET else MODE_NEW_TAB_LIST,
         ).apply()
 
+    /**
+     * Color-scheme source priority (Settings > Color scheme, tabSource
+     * parity). "synced" (default) = the synced `terminal.colorScheme` YAML
+     * wins; "local" = this device's own [localColorSchemeJson] wins and the
+     * synced global is ignored for display. Local data, never synced to
+     * YAML. Local mode is instant (plain pref write, no vault decrypt) and
+     * works fully offline/locked.
+     */
+    var colorSchemeSource: String
+        get() = prefs().getString(KEY_SCHEME_SOURCE, SOURCE_SYNCED)
+            ?.takeIf { it == SOURCE_LOCAL } ?: SOURCE_SYNCED
+        set(v) = prefs().edit().putString(
+            KEY_SCHEME_SOURCE,
+            if (v == SOURCE_LOCAL) SOURCE_LOCAL else SOURCE_SYNCED,
+        ).apply()
+
+    /**
+     * This device's own color scheme (compact JSON, "" = unset = Izs
+     * Default). Only read when [colorSchemeSource] is "local".
+     */
+    var localColorSchemeJson: String
+        get() = prefs().getString(KEY_LOCAL_SCHEME, "") ?: ""
+        set(v) = prefs().edit().putString(KEY_LOCAL_SCHEME, v).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -230,6 +254,10 @@ class ConfigDisk(context: Context) {
         const val KEY_NEW_TAB_MODE = "window.newTabMode"
         const val MODE_NEW_TAB_LIST = "list"
         const val MODE_NEW_TAB_SHEET = "sheet"
+        const val KEY_SCHEME_SOURCE = "terminal.schemeSource"
+        const val KEY_LOCAL_SCHEME = "terminal.localScheme"
+        const val SOURCE_SYNCED = "synced"
+        const val SOURCE_LOCAL = "local"
         /** Hard ceiling for [maxSessions]: 8 sockets + histories is the most a phone should hold. */
         const val MAX_SESSIONS_HARD_MAX = 8
     }

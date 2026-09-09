@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -34,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -56,6 +58,7 @@ import id.web.izs.sshclient.core.config.LoginScript
 import id.web.izs.sshclient.core.config.PROFILE_COLORS
 import id.web.izs.sshclient.core.config.SshAlgorithms
 import id.web.izs.sshclient.core.config.SshProfile
+import id.web.izs.sshclient.core.config.TerminalColorScheme
 import id.web.izs.sshclient.core.config.normalizeProfileColor
 import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.core.sync.SyncRepository
@@ -137,6 +140,11 @@ fun ProfileEditScreen(
     var removedRefs by remember(original) { mutableStateOf(setOf<String>()) }
     var addedKeys by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var showAddKey by remember { mutableStateOf(false) }
+
+    // ---- Colours ----
+    // Per-profile terminal scheme override (desktop sshProfileSettings
+    // parity). Null = follow the global `terminal.colorScheme`.
+    var scheme by remember(original) { mutableStateOf(original?.terminalColorScheme) }
 
     // ---- Ports / Ciphers / Login ----
     var forwards by remember(original) { mutableStateOf(o?.forwardedPorts ?: emptyList()) }
@@ -245,6 +253,7 @@ fun ProfileEditScreen(
                             id = "",
                             name = name.ifBlank { "New profile" },
                             color = color.ifBlank { null },
+                            terminalColorScheme = scheme,
                             options = buildOptions(),
                         ),
                         groupId = groupId.ifBlank { null },
@@ -258,6 +267,7 @@ fun ProfileEditScreen(
                         name = name.ifBlank { orig.name },
                         group = groupId.ifBlank { null },
                         color = color.ifBlank { null },
+                        terminalColorScheme = scheme,
                         options = buildOptions().copy(
                             port = port,
                             user = user.trim().ifBlank { orig.options.user },
@@ -407,7 +417,12 @@ fun ProfileEditScreen(
                     onReadyTimeout = { readyTimeoutText = it.filter { c -> c.isDigit() }.take(7) },
                 )
                 3 -> CiphersTab(checked = ciphers, onChange = { ciphers = it })
-                4 -> ColoursTab()
+                4 -> ColoursTab(
+                    global = state.loaded?.domain?.terminalColorScheme,
+                    customs = state.loaded?.domain?.customColorSchemes ?: emptyList(),
+                    selected = scheme,
+                    onSelect = { scheme = it },
+                )
                 else -> ScriptsTab(scriptsList = scripts, onChange = { scripts = it })
             }
         }
@@ -982,13 +997,48 @@ private fun CiphersTab(checked: Map<String, List<String>>, onChange: (Map<String
 }
 
 @Composable
-private fun ColoursTab() {
+private fun ColoursTab(
+    global: TerminalColorScheme?,
+    customs: List<TerminalColorScheme>,
+    selected: TerminalColorScheme?,
+    onSelect: (TerminalColorScheme?) -> Unit,
+) {
+    val builtins = rememberBuiltinSchemes()
+    // Picker identity is by VALUE: a scheme picked earlier from either list
+    // matches here without name lookups (desktop binds objects too).
+    // Customs first, like desktop (custom.concat(stock)).
+    val all = remember(builtins, customs) { customs + builtins }
     Text("Colours", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Color schemes are managed on desktop for now — the stored value is " +
-            "preserved untouched when you save. Mobile scheme editing is planned.",
-        style = MaterialTheme.typography.bodyMedium,
+        "Terminal colors for this profile only. The list and app chrome " +
+            "are unaffected.",
+        style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    SchemePickerList(
+        schemes = all,
+        selected = selected,
+        onSelect = onSelect,
+        badgeFor = { if (it in customs) "Custom" else null },
+        globalRow = {
+            Card(modifier = Modifier.fillMaxWidth().clickable { onSelect(null) }) {
+                Row(
+                    Modifier.padding(12.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    RadioButton(selected = selected == null, onClick = null)
+                    Column(Modifier.weight(1f)) {
+                        Text("Use global default", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            global?.name ?: "System default (Izs)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
     )
 }
 

@@ -921,10 +921,11 @@ private fun DrawScope.drawTerminal(
     val total = historyRows + emulator.rows
     val endRow = minOf(firstRow + rowCount, total).coerceAtLeast(firstRow)
     // Backdrop covers the drawn window only (parent page is already black,
-    // so undrawn rows show black through the transparent canvas).
+    // so undrawn rows show black through the transparent canvas). Uses the
+    // session palette so non-black scheme backgrounds blend, not seam.
     if (endRow > firstRow) {
         drawRect(
-            Color(TerminalEmulator.BG),
+            Color(emulator.paletteBg),
             topLeft = Offset(0f, firstRow * lineH),
             size = Size(size.width, (endRow - firstRow) * lineH),
         )
@@ -942,7 +943,7 @@ private fun DrawScope.drawTerminal(
         var runStart = -1
         var runBg = 0
         fun flushRun(end: Int) {
-            if (runStart >= 0 && runBg != TerminalEmulator.BG) {
+            if (runStart >= 0 && runBg != emulator.paletteBg) {
                 drawRect(
                     color = Color(runBg),
                     topLeft = Offset(sidePadPx + runStart * charW, top),
@@ -967,7 +968,7 @@ private fun DrawScope.drawTerminal(
             for (x in 0 until cols) {
                 val cell = if (inHistory) emulator.historyCell(i, x) else emulator.cellAt(x, gy)
                 val isCursor = !inHistory && emulator.showCursor && x == emulator.cursorX && gy == emulator.cursorY
-                val bg = if (isCursor) cell?.fg ?: TerminalEmulator.FG else cell?.bg ?: TerminalEmulator.BG
+                val bg = if (isCursor) cell?.fg ?: emulator.paletteFg else cell?.bg ?: emulator.paletteBg
                 if (runStart < 0 || bg != runBg) {
                     flushRun(x)
                     runStart = x
@@ -975,7 +976,7 @@ private fun DrawScope.drawTerminal(
                 }
                 val ch = cell?.ch ?: ' '
                 if (ch != ' ') allSpace = false
-                val fgc = if (isCursor) cell?.bg ?: TerminalEmulator.BG else cell?.fg ?: TerminalEmulator.FG
+                val fgc = if (isCursor) cell?.bg ?: emulator.paletteBg else cell?.fg ?: emulator.paletteFg
                 val bld = cell?.bold == true
                 if (!spanOpen || fgc != spanFg || bld != spanBold) {
                     pushStyle(

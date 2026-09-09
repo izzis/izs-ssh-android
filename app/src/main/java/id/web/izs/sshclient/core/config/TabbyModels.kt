@@ -23,6 +23,14 @@ data class TabbyConfig(
     val configSync: ConfigSync = ConfigSync(),
     val vault: StoredVault? = null,
     val encrypted: Boolean = false,
+    /**
+     * Global terminal color scheme (`terminal.colorScheme`, desktop
+     * TerminalConfigProvider parity). Null = key absent = [IZS_DEFAULT_SCHEME]
+     * at render time (pre-schemes look, zero visual change on update).
+     */
+    val terminalColorScheme: TerminalColorScheme? = null,
+    /** User schemes (`terminal.customColorSchemes`, desktop parity). */
+    val customColorSchemes: List<TerminalColorScheme> = emptyList(),
     /** All other root keys (hotkeys, appearance, terminal, ...) kept raw. */
     val unknown: Map<String, JsonObject?> = emptyMap(),
 )
@@ -36,6 +44,11 @@ data class SshProfile(
     val icon: String? = null,
     val color: String? = null,
     val disableDynamicTitle: Boolean? = null,
+    /**
+     * Per-profile terminal scheme override (desktop BaseTerminalProfile
+     * `terminalColorScheme` parity). Null = follow the global scheme.
+     */
+    val terminalColorScheme: TerminalColorScheme? = null,
     val options: SshOptions,
     /** Extra unmodeled raw options — preserved for the future. */
     val unknownOptions: Map<String, JsonObject?> = emptyMap(),

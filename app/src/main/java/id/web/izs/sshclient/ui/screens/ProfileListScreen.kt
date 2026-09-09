@@ -412,60 +412,72 @@ private fun RecentSection(
     onClear: () -> Unit,
     onOpen: (String) -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth().clickable { onToggle() },
-            ) {
-                Text(
-                    "Recent (${recent.size})",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onClear) {
-                    Text("Clear")
-                }
-                Icon(
-                    if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
-                    contentDescription = if (collapsed) "Expand" else "Collapse",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    // Section header lives OUTSIDE the card (a wide empty card around a
+    // single header row looks broken); the card wraps rows only.
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().clickable { onToggle() },
+        ) {
+            Text(
+                "Recent (${recent.size})",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClear) {
+                Text("Clear")
             }
-            if (!collapsed) {
-            for (p in recent) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth().clickable { onOpen(p.id) },
+            Icon(
+                if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                contentDescription = if (collapsed) "Expand" else "Collapse",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (!collapsed) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    // Desktop parity (profiles.service.ts): recent entries
-                    // carry a history icon per row (fa-history).
-                    Icon(
-                        Icons.Filled.History,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            p.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        if (p.type == "ssh") {
-                            Text(
-                                SshDefaults.quickName(p.options.user, p.options.host, p.options.port),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    for (p in recent) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().clickable { onOpen(p.id) },
+                        ) {
+                            // Desktop parity (profiles.service.ts): recent entries
+                            // carry a history icon per row (fa-history).
+                            Icon(
+                                Icons.Filled.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            Column(
+                                Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    p.name,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                if (p.type == "ssh") {
+                                    Text(
+                                        SshDefaults.quickName(
+                                            p.options.user,
+                                            p.options.host,
+                                            p.options.port,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-            }
             }
         }
     }

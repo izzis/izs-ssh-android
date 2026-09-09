@@ -93,6 +93,49 @@ object RawConfigStore {
     }
 
     /**
+     * Global `terminal.colorScheme` read (desktop TerminalConfigProvider
+     * parity). Null when absent/unparseable — render falls back to
+     * [IZS_DEFAULT_SCHEME]. `lightColorScheme` is ignored (dark-only app).
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    fun terminalColorSchemeRaw(doc: Map<String, Any?>): TerminalColorScheme? =
+        parseTerminalColorScheme((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("colorScheme"))
+
+    /**
+     * Explicit user set: writes the full scheme object (desktop stores
+     * objects inline, never name refs). Null REMOVES the key — and the
+     * `terminal` map itself when left empty — restoring absent = default.
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    fun setTerminalColorScheme(doc: MutableMap<String, Any?>, scheme: TerminalColorScheme?) {
+        val term = LinkedHashMap(
+            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+        )
+        if (scheme == null) term.remove("colorScheme") else term["colorScheme"] = scheme.toRawMap()
+        if (term.isEmpty()) doc.remove(KEY_TERMINAL) else doc[KEY_TERMINAL] = term
+    }
+
+    /**
+     * `terminal.customColorSchemes` read (desktop parity). Unparseable
+     * entries are skipped, never fatal.
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    fun customColorSchemesRaw(doc: Map<String, Any?>): List<TerminalColorScheme> =
+        (((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("customColorSchemes") as? List<*>)
+            ?: emptyList<Any>()).mapNotNull { parseTerminalColorScheme(it) }
+
+    /** Explicit user set (custom scheme editor). Empty list removes the key. */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    fun setCustomColorSchemes(doc: MutableMap<String, Any?>, schemes: List<TerminalColorScheme>) {
+        val term = LinkedHashMap(
+            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+        )
+        if (schemes.isEmpty()) term.remove("customColorSchemes")
+        else term["customColorSchemes"] = schemes.map { it.toRawMap() }
+        if (term.isEmpty()) doc.remove(KEY_TERMINAL) else doc[KEY_TERMINAL] = term
+    }
+
+    /**
      * `appearance.tabsLocation` read WITHOUT desktop-default fallback.
      * Desktop resolves absent → `top` (configDefaults.yaml); on the phone
      * absent means OFF (the current list-based UX, no tab chrome) — a
@@ -286,7 +329,11 @@ object RawConfigStore {
             partsAppearance = parts?.get("appearance") as? Boolean ?: true,
             partsVault = parts?.get("vault") as? Boolean ?: true,
         )
-        return TabbyConfig(version, profiles, groups, ssh, configSync, vault, encrypted)
+        return TabbyConfig(
+            version, profiles, groups, ssh, configSync, vault, encrypted,
+            terminalColorScheme = terminalColorSchemeRaw(doc),
+            customColorSchemes = customColorSchemesRaw(doc),
+        )
     }
 
     @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
@@ -309,6 +356,7 @@ object RawConfigStore {
                 icon = m["icon"]?.toString(),
                 color = m["color"]?.toString(),
                 disableDynamicTitle = m["disableDynamicTitle"] as? Boolean,
+                terminalColorScheme = parseTerminalColorScheme(m["terminalColorScheme"]),
                 options = SshOptions(),
             )
         }
@@ -322,6 +370,7 @@ object RawConfigStore {
             icon = m["icon"]?.toString(),
             color = m["color"]?.toString(),
             disableDynamicTitle = m["disableDynamicTitle"] as? Boolean,
+            terminalColorScheme = parseTerminalColorScheme(m["terminalColorScheme"]),
             options = SshOptions(
                 host = o["host"]?.toString() ?: "",
                 port = (o["port"] as? Number)?.toInt() ?: 22,
@@ -475,6 +524,12 @@ object RawConfigStore {
         val color = normalizeProfileColor(p.color)
         if (color != null) out["color"] = color else out.remove("color")
         if (p.icon != null) out["icon"] = p.icon
+        // Per-profile scheme override (desktop parity): a selected scheme is
+        // written as a full inline object; "use global" (null) removes the
+        // key. Unlike identity `color` above there is no normalization —
+        // the picker only produces valid objects.
+        if (p.terminalColorScheme != null) out["terminalColorScheme"] = p.terminalColorScheme.toRawMap()
+        else out.remove("terminalColorScheme")
         val o = p.options
         val opts = LinkedHashMap<String, Any?>((existing["options"] as? Map<String, Any?>) ?: emptyMap())
         opts["host"] = o.host

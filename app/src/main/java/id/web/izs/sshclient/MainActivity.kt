@@ -42,7 +42,14 @@ import id.web.izs.sshclient.ui.SessionLimitReached
 import id.web.izs.sshclient.ui.SshSessionViewModel
 import id.web.izs.sshclient.ui.screens.ConfigFileScreen
 import id.web.izs.sshclient.ui.screens.ConfigSyncScreen
+import id.web.izs.sshclient.ui.screens.ColorSchemeEditorScreen
+import id.web.izs.sshclient.ui.screens.ColorSchemeSettingsScreen
 import id.web.izs.sshclient.ui.screens.KeyboardLayoutScreen
+import id.web.izs.sshclient.core.config.IZS_DEFAULT_SCHEME
+import id.web.izs.sshclient.core.config.SchemeSource
+import id.web.izs.sshclient.core.config.parseSchemeJson
+import id.web.izs.sshclient.core.config.parseSchemeSource
+import id.web.izs.sshclient.core.config.toJsonString
 import id.web.izs.sshclient.ui.screens.PlaceholderSettingScreen
 import id.web.izs.sshclient.ui.screens.CrashReportScreen
 import id.web.izs.sshclient.ui.screens.ProfileEditScreen
@@ -336,7 +343,31 @@ private fun AppNav(
             PlaceholderSettingScreen("Appearance") { nav.popBackStack() }
         }
         composable("settings/colors") {
-            PlaceholderSettingScreen("Color scheme") { nav.popBackStack() }
+            ColorSchemeSettingsScreen(
+                appState,
+                onEditCurrent = { nav.navigate("settings/colors/edit") },
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable("settings/colors/edit") {
+            // Desktop model: edit the CURRENT scheme (rename + Save upserts
+            // a custom entry by name — no separate "new" flow). Device mode
+            // edits the local copy (instant pref, no YAML).
+            val isLocal = parseSchemeSource(appState.disk.colorSchemeSource) == SchemeSource.LOCAL
+            val deviceCurrent = parseSchemeJson(appState.disk.localColorSchemeJson)
+            val global = appState.loaded?.domain?.terminalColorScheme
+            val customs = appState.loaded?.domain?.customColorSchemes ?: emptyList()
+            ColorSchemeEditorScreen(
+                appState,
+                initial = if (isLocal) (deviceCurrent ?: IZS_DEFAULT_SCHEME)
+                else (global ?: IZS_DEFAULT_SCHEME),
+                showDelete = !isLocal && customs.any { it == global },
+                onBack = { nav.popBackStack() },
+                deviceMode = isLocal,
+                onDeviceSave = { s ->
+                    appState.disk.localColorSchemeJson = s.toJsonString()
+                },
+            )
         }
         composable("settings/window") {
             WindowSettingsScreen(appState) { nav.popBackStack() }

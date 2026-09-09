@@ -19,9 +19,9 @@ technical design.
   survives rotation via ViewModel; RAM-only, never written to disk.
 - **Profiles**: home list (search, groups, add button, identity-colour
   stripe), tabbed editor — General (connection-mode dropdown, Auto auth,
-  new/existing groups, colour picker), Ports, Advanced, Ciphers,
-  Login scripts; Colours stays desktop-managed (colour schemes). New
-  profiles get desktop-shape ids (`ssh:custom:<slug>:<uuid>`), fields at
+  new/existing groups, colour picker), Ports, Advanced, Ciphers, Colours
+  (terminal color scheme override: Use-global + scheme search), Login
+  scripts; New profiles get desktop-shape ids (`ssh:custom:<slug>:<uuid>`), fields at
   desktop defaults are omitted from YAML, options that do nothing on
   mobile are labeled desktop-only, live RAW `config.yaml` viewer.
 - **Terminal**: real PTY shell (sshj), VT100/xterm-subset emulator, colors,
@@ -53,15 +53,20 @@ technical design.
   (search + recent + grouped profiles, half by default, draggable to full),
   device-only, never synced.
 - **Termux-like input**: docked extra-keys bar
-- **Recent profiles**: home quick-connect card (desktop `recentProfiles`
-  parity, per-row History icon like the desktop selector) sized by the
-  desktop `terminal.showRecentProfiles` key (0 = off); collapsible header
-  with Clear. Active-sessions card above it has Close all.
   (`ESC / - HOME ↑ END PGUP` / `TAB CTRL ALT ← ↓ → PGDN`),
   sticky CTRL/ALT, direct typing with raw keystrokes (Backspace=DEL,
   Enter=CR), command-box mode, adjustable font (8–24sp).
+- **Recent profiles**: home quick-connect section (desktop `recentProfiles`
+  parity, per-row History icon like the desktop selector) sized by the
+  desktop `terminal.showRecentProfiles` key (0 = off); collapsible header
+  (outside the card) with Clear. Active-sessions card above it has Close all.
 - **Keyboard dock that jumps, not slides**: the layout moves once, discretely,
   on open/close — no tracking animation, no follow-up motion.
+- **Settings > Color scheme**: Current header + Edit/Delete, full `ls`
+  preview per row, Custom badges, Save = global + customs upsert by name;
+  22-dot editor (FG/BG/CU/CA/SB/SF + ANSI labels, long-press tooltips,
+  4×5 family grid + 9-step + hex picker); synced YAML + per-profile
+  overrides + this-device-only instant mode. Terminal content only.
 - **Crash diagnostics**: debug builds save the last crash trace; the next
   launch offers a Crash Report screen with copy.
 
@@ -85,7 +90,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 169 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents)
+./gradlew :app:testDebugUnitTest   # 189 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -102,7 +107,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 169/169 green)
+## Parity guarantees (tested, 189/189 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
@@ -118,7 +123,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 
 ## Roadmap (toward full `config.yaml` parity)
 
-- **Multi-session (done — v1, incl. tab chrome)**: session registry in `SshSessionViewModel`
+- **Multi-session (done, incl. tab chrome)**: session registry in `SshSessionViewModel`
   (PTYs survive nav + rotation — also fixes rotation-PTY), new tab per tap
   with `reuseSession` transport sharing (desktop multiplex parity),
    Active-sessions list on home replacing disconnect-on-back (Back keeps the
@@ -128,7 +133,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
    key; shell presence is an observable `hasShell` flow (branching composition
    on the plain `shell` field renders stale nulls — green dot + dead
    Disconnected on a live session). Reorder/rename/pin stay v2.
-- **Tab UX polish (done — v1.5)**: home is one shared scroll (Active always
+- **Tab UX polish (done)**: home is one shared scroll (Active always
   expanded with Close all, Recent collapsible with per-row History icons +
   Clear, sticky search); quick-pick bottom sheet for `+` (Settings > Window >
   New tab, device-only) with recent + grouped profiles, half by default and
@@ -139,16 +144,25 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
   target is desktop `appearance.*` parity where it makes sense on mobile
   (app theme selection incl. follow-system, display density/spaciness),
   desktop-only keys (vibrancy, CSS, frame) stay desktop-managed.
-- **Color scheme (planned)**: Settings > Color scheme today is a
-  placeholder — target is terminal palette selection (preset xterm schemes
-  applied to the emulator grid + selection/selection handles), synced or
-  device-local TBD; profile identity colors already work (list stripe,
-  sheet dot, editor picker).
+- **Color scheme (done)**: Settings > Color scheme mirrors desktop
+  (Current header + Edit/Delete, full `ls` preview per row, Custom badges,
+  Save = global + customs upsert by name, 4×5 family grid + 9-step + hex
+  picker).
+  89 built-ins (Izs Default + Tabby Default + 87 curated community picks,
+  readability-gated). Global `terminal.colorScheme` + `terminal.customColorSchemes`
+  + per-profile `terminalColorScheme` in synced YAML, desktop object shape
+  (sibling keys like `lightColorScheme` never touched); absent global = Izs
+  Default (zero visual change). Source toggle (tabSource parity): synced YAML
+  vs this-device-only instant pref (per-profile overrides apply in both).
+  Applies live incl. old cells (remap), terminal content only;
+  `selectionForeground`/`cursorAccent` stored but unused (inverse-video
+  cursor); `lightColorScheme`/`colorSchemeMode` ignored (dark-only app).
+  Profile identity colors already work (list stripe, sheet dot, editor picker).
 - **Port forwarding**: open Local/Remote/Dynamic at connect (saved today).
 - **Connect**: `connectionMode` (proxyCommand/jumpHost/SOCKS/HTTP) stays
-  direct-only (saved for desktop); terminal type + colour schemes stay
-  desktop-managed.
-- Text selection with start/end drag handles + Copy/Paste bar; search-in-buffer.
+  direct-only (saved for desktop); terminal type stays desktop-managed.
+- Text selection with start/end drag handles + Copy/Paste bar (done — see
+  Features above); search-in-buffer.
 
 ## Layout
 

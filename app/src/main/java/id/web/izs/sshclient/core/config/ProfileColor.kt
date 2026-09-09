@@ -2,8 +2,9 @@ package id.web.izs.sshclient.core.config
 
 /**
  * Profile identity color (`color` key, profile level — sibling of `name`,
- * NOT the terminal color scheme which lives in the Colours tab as
- * `terminalColorScheme` and stays desktop-managed).
+ * NOT the terminal color scheme, which lives beside it as
+ * `terminalColorScheme` and is edited in the Colours tab +
+ * Settings > Color scheme).
  *
  * Desktop uses the identity color for the profile-tree icon tint and the
  * tab colorbar (`tabHeader.component.pug`); mobile mirrors it with a

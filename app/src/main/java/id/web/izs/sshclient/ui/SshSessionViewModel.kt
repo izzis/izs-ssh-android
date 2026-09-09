@@ -226,6 +226,11 @@ class SshSessionViewModel : ViewModel() {
                 h.profileSnapshot = profile
                 // Live scrollback pref per emulator.
                 h.emulator.maxHistory = appState.disk.terminalScrollback
+                // NOTE: no setPalette here — TerminalScreen owns the single
+                // apply path (LaunchedEffect on the resolved scheme): it
+                // runs on mount (fresh sessions) and on every scheme change
+                // (live sessions), so a second call here would only double
+                // the remap work.
                 val legacy = withContext(Dispatchers.IO) { readLegacyKnown(appState) }
                 val conn = SshConnector()
                 val tkey = transportKeyOf(profile.options)
@@ -371,16 +376,23 @@ class SshSessionViewModel : ViewModel() {
             connect(sessionId, appState, cacheDir)
             return
         }
+        // Remember: connect FIRST with session-only trust, persist in the
+        // background. The old order (persist -> refresh -> connect) blocked
+        // the session on a vault rewrite + full reload (PBKDF2 + blob
+        // parse, seconds on encrypted stores) — the UI sat on Disconnected
+        // with Reconnect/Close before the terminal appeared. Verification
+        // for THIS session uses extraTrust either way; the persisted entry
+        // only matters for future sessions.
+        h.extraTrust = entry
+        connect(sessionId, appState, cacheDir)
         viewModelScope.launch {
             h.setFailed(null)
             try {
                 withContext(Dispatchers.IO) { appState.repo.appendKnownHost(entry) }
                 appState.refresh()
             } catch (_: Exception) {
-                // Locked vault: YAML skipped, session trust below still connects.
+                // Locked vault: YAML skipped, session trust above still connects.
             }
-            h.extraTrust = entry
-            connect(sessionId, appState, cacheDir)
         }
     }
 

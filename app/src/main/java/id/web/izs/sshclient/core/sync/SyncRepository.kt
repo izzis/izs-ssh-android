@@ -843,6 +843,61 @@ class SyncRepository(
         decryptToLoaded(out)
     }
 
+    /**
+     * Applies a `terminal`-section mutation (color scheme, custom schemes —
+     * Settings > Color scheme). Plaintext configs edit the outer document
+     * (updateLocalRaw parity); encrypted shells edit the vault blob and
+     * re-encrypt (createGroup parity) — so scheme changes work with the
+     * vault unlocked, instead of the old desktop-only read-only rule.
+     * Throws "Vault is locked" when the blob cannot be rewritten; callers
+     * surface the unlock dialog and retry (profile-editor pendingSave parity).
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    suspend fun updateTerminalSection(
+        transform: (LinkedHashMap<String, Any?>) -> Unit,
+    ): Loaded = withContext(Dispatchers.IO) {
+        val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+        val raw = RawConfigStore.loadRaw(yamlStr)
+        if (!RawConfigStore.isEncrypted(raw)) {
+            val out = LinkedHashMap(raw)
+            transform(out)
+            disk.saveYaml(RawConfigStore.dumpRaw(out))
+            return@withContext decryptToLoaded(out)
+        }
+        val pass = rememberedPassphrase ?: throw IllegalStateException("Vault is locked")
+        val vault = RawConfigStore.storedVault(raw)
+            ?: throw IllegalStateException("Vault is not configured")
+        val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
+        val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
+        transform(blobConfig)
+        val stored = VaultCrypto.encrypt(RawConfigStore.toJson(blobConfig), secretsJson, pass)
+        val out: LinkedHashMap<String, Any?> = linkedMapOf(
+            RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
+            RawConfigStore.KEY_ENCRYPTED to true,
+        )
+        (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            out[RawConfigStore.KEY_CONFIG_SYNC] = it
+        }
+        disk.saveYaml(RawConfigStore.dumpRaw(out))
+        // Direct Loaded (VaultState.resolve parity for the unlocked-shell
+        // case): the blob was JUST decrypted above, so re-resolving `out`
+        // would PBKDF2-decrypt + re-parse the same bytes for nothing
+        // (measured ~2s of every scheme tap). The passphrase demonstrably
+        // works (decrypt above succeeded), so stalePassphrase is false.
+        val merged = LinkedHashMap<String, Any?>(blobConfig)
+        merged[RawConfigStore.KEY_VAULT] = RawConfigStore.storedVaultMap(stored)
+        merged[RawConfigStore.KEY_ENCRYPTED] = true
+        (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            merged[RawConfigStore.KEY_CONFIG_SYNC] = it
+        }
+        Loaded(
+            domain = RawConfigStore.toDomain(merged),
+            secrets = VaultState.parseSecretsJson(secretsJson),
+            needsPassphrase = false,
+            store = merged,
+        )
+    }
+
     private fun readParts(raw: Map<String, Any?>): Map<String, Boolean> {
         @Suppress("UNCHECKED_CAST")
         val cs = raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>

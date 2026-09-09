@@ -53,8 +53,9 @@ app/src/main/java/id/web/izs/sshclient/
                                   profiles, desktop-selector parity; half by
                                   default, draggable to full)
       ProfileEditScreen.kt        Tabbed editor (General + colour picker / Ports / Advanced /
-                                  Ciphers / Colours-scheme-placeholder / Login), desktop-only
-                                  options labeled, new profile + new group
+                                   Ciphers / Colours (terminal-scheme override: Use-global +
+                                   scheme search) / Login), desktop-only
+                                   options labeled, new profile + new group
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
                                   warn-on-close + host-key trust dialogs
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
@@ -71,7 +72,7 @@ app/src/main/java/id/web/izs/sshclient/
                                   (desktop Settings > SSH parity; live-save, plaintext only)
       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
       CrashReportScreen.kt        Shows last crash trace with copy button
-      PlaceholderSettingScreen.kt "Scheduled" stubs (colours, proxy connect, etc.)
+      PlaceholderSettingScreen.kt "Scheduled" stubs (proxy connect, etc.)
   core/
     config/
       TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options, SshGlobals
@@ -113,7 +114,7 @@ app/src/main/java/id/web/izs/sshclient/
                           (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (21 files, 169 tests — §8)
+app/src/test/... (22 files, 189 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -155,7 +156,10 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   (MITM warning + previous fingerprint on mismatch; Accept and remember /
   just this once / Disconnect). Remember writes the desktop-format entry
   locally (uploaded later via normal sync); `verifyHostKeys=false` trusts
-  silently. Negotiation is known-first, desktop order on defaults
+  silently. Accept-and-remember connects FIRST on session-only trust and
+  persists in the background — no Disconnected flash while an encrypted
+  store rewrites (the persisted entry only matters for future sessions).
+  Negotiation is known-first, desktop order on defaults
   (ecdsa before ed25519 — sshj's own default would pick otherwise, and the
   verifier list alone can't reorder: sshj's `Proposal` only uses it as a
   membership filter, so the per-connection config carries the order).
@@ -185,7 +189,7 @@ resize: measured grid -> settle-debounced (150ms) emulator.resize +
 - **Emulator** (`core/term`): pure Kotlin, fully unit-tested. Wrap is
   pending-wrap (consumed exactly once — regression-tested), grid keeps the
   top-left overlap on resize (stepwise shrinks are lossless vs one jump).
-- **Render** (`TerminalView`): pure-black full-bleed Canvas. Backgrounds are
+- **Render** (`TerminalView`): scheme-bg full-bleed Canvas. Backgrounds are
   merged per contiguous run (default BG skipped — the backdrop covers it);
   text is **one AnnotatedString layout per row** (~40 layouts/frame instead
   of ~1000 single-cell layouts), and only the **visible window + overscan**
@@ -257,17 +261,18 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 ## 7. UI conventions
 
 - English-only UI strings/comments; dark-only theme (`IzsDarkColors`,
-  terminal pure black, themed surfaces, black docked key bars).
+  terminal follows the active scheme background, themed surfaces, black docked key bars).
 - All sub-screens share `ScreenHeader` (back arrow + title); the terminal
   header matches it (themed surface) with a status dot on the name row —
   green = connected, amber = connecting, red = disconnected. The dot always
   asks before disconnecting (it is a 32dp invisible tap target — an instant
   silent kill reads exactly like a dropped session); the power button honors
   `warnOnClose` like desktop — and full-width `user@host:port` below.
-- Home Recent card (desktop `recentProfiles` parity, per-row History icons
-  like the desktop selector, default card colour): collapsible header with
-  Clear, sized by `terminal.showRecentProfiles` (0 = off, hidden while
-  searching); Active card above it is always expanded with Close all.
+- Home Recent section (desktop `recentProfiles` parity, per-row History icons
+  like the desktop selector, default card colour): header lives outside the
+  card (title + Clear + collapse), collapsible, sized by
+  `terminal.showRecentProfiles` (0 = off, hidden while searching); Active
+  card above it is always expanded with Close all.
   Settings > Window edits the
   desktop `appearance.tabsLocation` (Off removes the key; encrypted configs
   stay writable but Android ignores the value) or picks This-device-only
@@ -275,8 +280,9 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   New-tab mode (list vs sheet) is a second device-only pref.
 - Profile identity color: dot selector beside Name in the General tab
   (presets + Default; custom desktop hex shows as an extra swatch), stripe
-  on list rows (absent without a stored color). Terminal scheme stays in
-  the Colours tab as a desktop-managed placeholder. Options with no mobile
+  on list rows (absent without a stored color). Terminal scheme override
+  lives in the Colours tab (Use-global + scheme search) and Settings >
+  Color scheme. Options with no mobile
   effect (forwarding, x11/agent/banner/reuse, non-direct modes) carry a
   desktop-only note in the editor instead of failing silently.
 - Extra-keys rows: `ESC / - HOME UP END PGUP` and
@@ -307,7 +313,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 169 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 189 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -332,6 +338,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `TabLocationTest` | tabsLocation resolver + FOLLOW_YAML/LOCAL priority + encrypted-OFF rules |
 | `SessionActivityTest` | background-output activity flag, select clears, close clears selection |
 | `RecentProfilesTest` | recordRecent dedup/cap/disable parity |
+| `ColorSchemeTest` | scheme parse/normalize/round-trip, readability gates, resolution order, YAML compat, emulator palette + remap, upsert/delete, JSON, shades |
 
 ## 9. Build & diagnostics
 
@@ -361,7 +368,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 10. Roadmap (missing vs Tabby config.yaml)
 
-- **Multi-session (done — v1):** session registry in `SshSessionViewModel`
+- **Multi-session (done):** session registry in `SshSessionViewModel`
   (PTYs survive nav + rotation, which fixed the rotation-PTY drop); every
   profile tap opens a new tab while `reuseSession=true` (default) shares one
   TCP transport per `host:port:user:proxy…` key (desktop multiplexer parity —
@@ -375,7 +382,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
    sessions (default 5, hard max 8, tunable in Settings > Terminal, now
    scrollable). Reader-pump death marks tabs failed (red + Retry): single
    `exit` fails only its tab, a dead transport fails all riders.
-- **Tab chrome (done — v1):** strip for `top`/`bottom` (status dot + profile
+- **Tab chrome (done):** strip for `top`/`bottom` (status dot + profile
   name + primary activity underline + × + `+`; scroll hoisted to the VM because every tab
   is its own destination), custom side drawer for `left`/`right` (M3 drawer
   is start-side only — whole-screen RTL mirroring is rejected; hamburger
@@ -383,7 +390,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   Profile-list/Settings footer, scrim/Back closes), Back always goes
 home via synchronous popBackStack. Socket teardown runs off-Main (a stalled
 VPN must never freeze the terminal mid-tap).
-- **Tab UX polish (done — v1.5):** home shares one LazyColumn (Active always
+- **Tab UX polish (done):** home shares one LazyColumn (Active always
   expanded with Close all in the header row, Recent collapsible with
   per-row History icons + Clear, sticky search); `NewTabSheet.kt` quick-pick
   (search + recent + group sections, desktop-selector parity; half by
@@ -397,10 +404,33 @@ VPN must never freeze the terminal mid-tap).
   ("Next update"). Target: desktop `appearance.*` parity where mobile-meaningful
   (theme selection incl. follow-system, spaciness/density); desktop-only keys
   (vibrancy, custom CSS, window frame) stay desktop-managed, RAW-lossless.
-- **Color scheme (planned):** Settings > Color scheme is a `PlaceholderSettingScreen`
-  ("Next update"). Target: preset xterm palettes applied to the emulator grid
-  render (`TerminalView`) + selection chrome; sync-vs-local TBD. Profile
-  identity colors already work end-to-end (editor picker, list stripe, sheet dot).
+- **Color scheme (done):** `core/config/ColorScheme.kt` (desktop
+  `theme.ts` shape; parse/normalize/toRawMap/readability gates/contrast;
+  JSON ser via kotlinx.serialization for the device pref; `SchemeSource` +
+  `resolveActiveScheme` (profile > device-local | synced-global > Izs);
+  `upsertCustom`/`deleteCustomByName` saveScheme parity; pure JVM) +
+  `assets/color_schemes.json` (89 built-ins, curated from 191 XResources).
+  Global `terminal.colorScheme` + `terminal.customColorSchemes` +
+  per-profile `terminalColorScheme` (null = follow global) in synced YAML
+  via `RawConfigStore` readers/writers + `updateProfileMap` (null removes
+  the key); sibling keys (`lightColorScheme`, unknown) never touched
+  (desktop-compat test). `SyncRepository.updateTerminalSection` (plaintext
+  outer edit; encrypted shells rewrite the blob, direct Loaded without
+  re-decrypt); `AppState.adopt` skips the redundant refresh cycle.
+  `TerminalEmulator` palette is per-session instance state + `remapCells`
+  (whole screen follows a switch; 256/truecolor untouched). `drawTerminal`
+  backdrop + missing-cell fallbacks use the palette; TerminalScreen owns the
+  single apply path (`LaunchedEffect`, scheme-change only) + stage bg.
+  UI mirrors desktop: Current header + Edit/Delete, search + full-preview
+  rows with Custom badges (customs first), editor (22 dots with desktop
+  FG/BG/CU/CA/SB/SF + ANSI labels, long-press tooltips, 4×5 family grid +
+  9-step + hex picker, live preview, warnings never block), profile Colours
+  tab (Use-global + search). Source toggle (tabSource parity, ConfigDisk
+  `terminal.schemeSource`/`localScheme`): device picks apply instantly
+  (plain pref); device edits apply instantly and upsert the shared pool
+  (vault-aware). Terminal-content only;
+  `selectionForeground`/`cursorAccent` stored-but-unused;
+  `lightColorScheme`/`colorSchemeMode` ignored (dark-only app).
 - **Compose staleness lesson (phantom-Disconnected):** never branch UI on the
   plain `shell` field — the branch group can keep evaluating a stale null
   forever (green dot + Disconnected + dead Reconnect on a live session;

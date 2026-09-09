@@ -23,16 +23,29 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         const val BG = 0xFF000000.toInt()
         const val MAX_HISTORY = 2000
 
-        private val STD = intArrayOf(
+        /**
+         * Pre-schemes default palette (also [IZS_DEFAULT_SCHEME] in
+         * ColorScheme.kt — keep the two in sync). Instance palettes start
+         * as a copy of this; [setPalette] replaces them per session.
+         */
+        private val STD_DEFAULT = intArrayOf(
             0xFF000000.toInt(), 0xFFCD0000.toInt(), 0xFF00CD00.toInt(), 0xFFCDCD00.toInt(),
             0xFF0000EE.toInt(), 0xFFCD00CD.toInt(), 0xFF00CDCD.toInt(), 0xFFE5E5E5.toInt(),
             0xFF7F7F7F.toInt(), 0xFFFF0000.toInt(), 0xFF00FF00.toInt(), 0xFFFFFF00.toInt(),
             0xFF5C5CFF.toInt(), 0xFFFF00FF.toInt(), 0xFF00FFFF.toInt(), 0xFFFFFFFF.toInt(),
         )
 
-        fun color256(n: Int): Int = when {
-            n < 0 || n > 255 -> FG
-            n < 16 -> STD[n]
+        /** Default-palette lookup (pre-schemes behavior; unit tests use this). */
+        fun color256(n: Int): Int = paletteColor256(n, STD_DEFAULT, FG)
+
+        /**
+         * Algorithmic half of the 256-color lookup (16-255 cube + grayscale),
+         * shared by the default [color256] and the per-session instance
+         * lookup below.
+         */
+        private fun paletteColor256(n: Int, std: IntArray, fallback: Int): Int = when {
+            n < 0 || n > 255 -> fallback
+            n < 16 -> std[n]
             n < 232 -> {
                 val v = n - 16
                 val r = v / 36
@@ -48,7 +61,81 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         }
     }
 
-    private fun blank() = Cell()
+    /**
+     * Active palette (per-session color scheme). [setPalette] remaps every
+     * default-palette cell, so the whole screen follows a switch.
+     * The view reads [paletteBg] for the letterbox backdrop, so a
+     * non-black scheme background blends instead of seaming.
+     */
+    var paletteFg: Int = FG
+        private set
+    var paletteBg: Int = BG
+        private set
+    private var paletteStd: IntArray = STD_DEFAULT.copyOf()
+
+    /**
+     * Apply a color scheme (resolution: profile override > global >
+     * Izs Default — see effectiveTerminalScheme). Unparseable slots fall
+     * back to the pre-schemes defaults individually, never aborting.
+     *
+     * The whole screen follows the switch: cells store RESOLVED ARGB, so
+     * every default-palette cell (fg/bg/0-15 slots) is remapped old -> new
+     * across the live grid, the alt buffer, and scrollback. Explicit
+     * 256/truecolor cells are untouched (16-255 are algorithmic and
+     * palette-independent). Coincidence risk (a truecolor cell exactly
+     * equal to an old slot value remaps too) is visually harmless.
+     */
+    fun setPalette(scheme: id.web.izs.sshclient.core.config.TerminalColorScheme) {
+        val oldFg = paletteFg
+        val oldBg = paletteBg
+        val oldStd = paletteStd
+        paletteFg = id.web.izs.sshclient.core.config.schemeColorArgb(scheme.foreground) ?: FG
+        paletteBg = id.web.izs.sshclient.core.config.schemeColorArgb(scheme.background) ?: BG
+        val parsed = scheme.colors.map {
+            id.web.izs.sshclient.core.config.schemeColorArgb(it)
+        }
+        if (parsed.size == 16 && parsed.all { it != null }) {
+            paletteStd = parsed.filterNotNull().toIntArray()
+        }
+        remapCells(oldFg, oldBg, oldStd, paletteFg, paletteBg, paletteStd)
+        // New output picks the scheme up; the pen resets to it too.
+        fg = paletteFg
+        bg = paletteBg
+    }
+
+    /**
+     * Rewrite default-palette cells after a scheme switch. Rows are shared
+     * by reference between the live grid and scrollback (scrollUp moves the
+     * whole row array), so distinct row arrays are remapped once — a second
+     * pass would match NEW values against the OLD table and corrupt them.
+     */
+    private fun remapCells(
+        oldFg: Int, oldBg: Int, oldStd: IntArray,
+        newFg: Int, newBg: Int, newStd: IntArray,
+    ) {
+        fun mapColor(c: Int): Int {
+            if (c == oldFg) return newFg
+            if (c == oldBg) return newBg
+            for (i in oldStd.indices) if (oldStd[i] == c) return newStd[i]
+            return c
+        }
+        if (oldFg == newFg && oldBg == newBg && oldStd.contentEquals(newStd)) return
+        val rows = LinkedHashSet<Array<Cell>>()
+        for (r in primary) rows += r
+        for (r in alt) rows += r
+        for (r in history) rows += r
+        for (row in rows) {
+            for (cell in row) {
+                cell.fg = mapColor(cell.fg)
+                cell.bg = mapColor(cell.bg)
+            }
+        }
+    }
+
+    /** Per-session lookup: same algorithm, active palette table. */
+    private fun color256(n: Int): Int = paletteColor256(n, paletteStd, paletteFg)
+
+    private fun blank() = Cell(fg = paletteFg, bg = paletteBg)
     private fun newGrid(c: Int, r: Int) = Array(r) { Array(c) { blank() } }
 
     var cols: Int = cols
@@ -422,8 +509,8 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         while (i < codes.size) {
             when (val c = codes[i]) {
                 0 -> {
-                    fg = FG
-                    bg = BG
+                    fg = paletteFg
+                    bg = paletteBg
                     bold = false
                     inverse = false
                 }
@@ -431,12 +518,12 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                 22 -> bold = false
                 7 -> inverse = true
                 27 -> inverse = false
-                in 30..37 -> fg = STD[c - 30]
-                39 -> fg = FG
-                in 40..47 -> bg = STD[c - 40]
-                49 -> bg = BG
-                in 90..97 -> fg = STD[c - 90 + 8]
-                in 100..107 -> bg = STD[c - 100 + 8]
+                in 30..37 -> fg = paletteStd[c - 30]
+                39 -> fg = paletteFg
+                in 40..47 -> bg = paletteStd[c - 40]
+                49 -> bg = paletteBg
+                in 90..97 -> fg = paletteStd[c - 90 + 8]
+                in 100..107 -> bg = paletteStd[c - 100 + 8]
                 38, 48 -> {
                     val isFg = c == 38
                     val mode = codes.getOrElse(i + 1) { -1 }
@@ -553,8 +640,8 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     }
 
     private fun reset() {
-        fg = FG
-        bg = BG
+        fg = paletteFg
+        bg = paletteBg
         bold = false
         inverse = false
         wrapEnabled = true
