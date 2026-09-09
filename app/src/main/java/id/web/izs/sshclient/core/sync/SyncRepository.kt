@@ -266,6 +266,30 @@ class SyncRepository(
         decryptToLoaded(merged, forgiveStaleRemembered = true)
     }
 
+    /**
+     * Settings > Config file > Import: replace the local config with pasted
+     * full YAML. Validated strictly first ([RawConfigStore.parseImport]), so
+     * a bad paste never touches disk.
+     *
+     * Sync-target parity with [downloadIntoLocal] (data.configSync is always
+     * the local one): the local configSync section is kept, a pasted one is
+     * dropped — importing someone else's host/token must never hijack sync.
+     * A stale remembered passphrase is forgiven: the imported vault (if any)
+     * belongs to another passphrase until the user unlocks it.
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    suspend fun importRawYaml(text: String): Loaded = withContext(Dispatchers.IO) {
+        val doc = RawConfigStore.parseImport(text)
+        val localYaml = disk.loadYaml()
+        val localSync = if (localYaml.isNullOrBlank()) null
+        else (RawConfigStore.loadRaw(localYaml)[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)
+        if (localSync != null) doc[RawConfigStore.KEY_CONFIG_SYNC] = localSync
+        else doc.remove(RawConfigStore.KEY_CONFIG_SYNC)
+        if (!doc.containsKey(RawConfigStore.KEY_VERSION)) doc[RawConfigStore.KEY_VERSION] = 1
+        disk.saveYaml(RawConfigStore.dumpRaw(doc))
+        decryptToLoaded(doc, forgiveStaleRemembered = true)
+    }
+
     suspend fun deleteRemote(hostRaw: String, token: String, configId: Long) =
         withContext(Dispatchers.IO) {
             val host = RawConfigStore.normalizeHost(hostRaw)

@@ -63,7 +63,7 @@ val SETTING_SECTIONS = listOf(
         Icons.Filled.Lock,
     ),
     SettingSection(
-        "configfile", "Config file", "View the raw synced YAML",
+        "configfile", "Config file", "View, copy, or import the raw YAML",
         Icons.Filled.Description,
     ),
     SettingSection(

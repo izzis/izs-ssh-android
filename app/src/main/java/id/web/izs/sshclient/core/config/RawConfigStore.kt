@@ -66,6 +66,40 @@ object RawConfigStore {
     fun dumpRaw(doc: Map<String, Any?>): String = yaml().dump(doc)
 
     /**
+     * Strict parse for Settings > Config file > Import (pasted full YAML).
+     * Unlike [loadRaw] (forgiving, for disk), this REJECTS anything that is
+     * not a Tabby config so a bad paste never wipes the local config:
+     * blank text, YAML syntax errors, a non-mapping top level, a missing or
+     * non-list `profiles`. Encrypted shells (`encrypted: true` + vault blob)
+     * are accepted — the passphrase is asked lazily after import, same as a
+     * downloaded encrypted config.
+     *
+     * @throws IllegalArgumentException with a UI-ready message.
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    fun parseImport(text: String): LinkedHashMap<String, Any?> {
+        require(text.isNotBlank()) { "Paste a YAML config first" }
+        val loaded: Any? = try {
+            yaml().load<Any>(text)
+        } catch (e: Exception) {
+            val first = e.message?.lineSequence()?.firstOrNull()?.take(160)
+            throw IllegalArgumentException("Invalid YAML${if (first.isNullOrBlank()) "" else ": $first"}")
+        }
+        val doc: LinkedHashMap<String, Any?> = when (loaded) {
+            is LinkedHashMap<*, *> -> loaded as LinkedHashMap<String, Any?>
+            is Map<*, *> -> LinkedHashMap<String, Any?>().also { m ->
+                loaded.forEach { (k, v) -> m[k.toString()] = v }
+            }
+            else -> throw IllegalArgumentException("Not a Tabby config (top level must be a mapping)")
+        }
+        if (isEncrypted(doc) && storedVault(doc) != null) return doc
+        val profiles = doc[KEY_PROFILES]
+            ?: throw IllegalArgumentException("Not a Tabby config (missing 'profiles' list)")
+        require(profiles is List<*>) { "Not a Tabby config ('profiles' must be a list)" }
+        return doc
+    }
+
+    /**
      * `terminal.showRecentProfiles` read with desktop-default fallback.
      * Negative garbage coerces to 0 (disabled); non-numeric to the default.
      * Read from [SyncRepository.Loaded.store] (decrypted merged view when
