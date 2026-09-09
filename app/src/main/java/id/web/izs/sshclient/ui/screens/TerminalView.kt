@@ -897,7 +897,7 @@ private fun CursorOverlay(
             val cx = emulator.cursorX.coerceIn(0, (emulator.cols - 1).coerceAtLeast(0))
             val cy = (historyRows + emulator.cursorY).coerceAtLeast(0)
             val cell = emulator.cellAt(cx, emulator.cursorY)
-            val fg = Color(cell?.fg ?: emulator.paletteFg)
+            val fg = Color(cell.fg)
             val x0 = sidePadPx + cx * charW
             val y0 = cy * lineH
             when (cursor) {
@@ -911,13 +911,13 @@ private fun CursorOverlay(
                 }
                 TerminalCursor.BLOCK -> {
                     drawRect(fg, topLeft = Offset(x0, y0), size = Size(charW, lineH))
-                    val ch = cell?.ch ?: ' '
+                    val ch = cell.ch
                     if (ch != ' ') {
                         drawText(
                             textMeasurer = measurer,
                             text = ch.toString(),
                             topLeft = Offset(x0, y0),
-                            style = style.copy(color = Color(cell?.bg ?: emulator.paletteBg)),
+                            style = style.copy(color = Color(cell.bg)),
                         )
                     }
                 }

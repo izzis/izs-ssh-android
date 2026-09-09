@@ -35,7 +35,9 @@ app/src/main/java/id/web/izs/sshclient/
   ui/
     AppViewModel.kt               Rotation-safe holder of AppState (passphrase survives rotate)
     SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8,
-                                  selected tab + hasActivity flag + observable hasShell (never branch UI on the plain shell field)
+                                   selected tab + hasActivity flag + observable hasShell (never branch UI on the plain shell field);
+                                   per-session SftpTransferManager hosts (transfers survive back/dismiss/rotate,
+                                   die only on close(); Back never reaches close())
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
     Theme.kt                      AppPalettes (Izs/Ocean/Forest/Sunset/Grape dark+light;
                                   shared Izs surfaces) + resolveAppPalette; terminal
@@ -58,7 +60,15 @@ app/src/main/java/id/web/izs/sshclient/
                                    scheme search) / Login), desktop-only
                                    options labeled, new profile + new group
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
-                                  warn-on-close + host-key trust dialogs
+                                   warn-on-close + host-key trust dialogs, ⋮ menu SFTP entry,
+                                   slim background-transfer indicator row (tap reopens the sheet)
+      SftpSheet.kt                SFTP browser + transfers as a bottom sheet over the terminal
+                                   (half by position via SheetState initial Partial, list
+                                   fills sheet height so loads never balloon it, draggable
+                                   to full): SAF Save-as/Choose-file, DISPLAY_NAME lookup,
+                                   same-name Overwrite/Keep-both/Cancel dialog (dir frozen
+                                   at pick time), per-item Cancel, Clear finished.
+                                   UI-only: dismiss/back touches no transfer.
       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
       TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance)
       AppearanceSettingsScreen.kt App theme (device-only) + terminal font/cursor (YAML) + font size + live preview
@@ -93,8 +103,19 @@ app/src/main/java/id/web/izs/sshclient/
                           decrypt/update/delete with RAW preservation
     ssh/
       SshConnector.kt     sshj sessions, exec + shell channels, desktop-format host-key
-                          trust prompt, multi-key auth, PTY window-change, keepalive,
-                          login scripts
+                           trust prompt, multi-key auth, PTY window-change, keepalive,
+                           login scripts
+      SftpTransfer.kt     SFTP list/download/upload on an authenticated client: fresh
+                           channel per transfer, 64 KB chunks + progress, cancel =
+                           close-channel abort (surfaces CancellationException) +
+                           partial-delete, source never touched; other failures ->
+                           IllegalStateException
+      SftpTransferManager.kt Session-scoped transfer host: one Job per transfer on the
+                           owner's scope, StateFlow rows (RUNNING/DONE/FAILED/
+                           CANCELLED + progress), per-item cancel(), cancelAll()
+                           (wired to session close only), takeDownloadFile(id)
+                           (once-only Save-as handshake, survives sheet reopen),
+                           clearFinished() (drops rows + deletes untaken files)
       HostKeyTrust.kt     Trust decisions on desktop ssh.knownHosts (sha256 wire digest,
                           exact host/port/type match, known-first negotiation order,
                           legacy prefs self-healing upgrade — pure JVM)
@@ -115,7 +136,7 @@ app/src/main/java/id/web/izs/sshclient/
                           (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (24 files, 205 tests — §8)
+app/src/test/... (27 files, 230 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -315,7 +336,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 205 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 230 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -343,6 +364,9 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `ColorSchemeTest` | scheme parse/normalize/round-trip, readability gates, resolution order, YAML compat, emulator palette + remap, upsert/delete, JSON, shades |
 | `TerminalAppearanceTest` | font/cursor parse + fallback, YAML set/remove round-trip |
 | `AppPaletteTest` | palette resolve fallback, dark/light distinctness |
+| `ConfigImportTest` | raw YAML file/clipboard import validation (strict rejects) |
+| `SftpTransferTest` | download/upload/listDir against MINA SFTP, chunked 5 MB SHA-256, deterministic cancel |
+| `SftpTransferManagerTest` | DONE/FAILED/CANCELLED rows, per-item + cancelAll abort, once-only Save-as take, clearFinished cleanup |
 
 ## 9. Build & diagnostics
 

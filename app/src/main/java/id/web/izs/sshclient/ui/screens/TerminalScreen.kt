@@ -45,6 +45,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -98,6 +99,7 @@ import id.web.izs.sshclient.core.config.IZS_DEFAULT_LIGHT_SCHEME
 import id.web.izs.sshclient.core.config.resolveTabLocation
 import id.web.izs.sshclient.core.config.resolveTerminalFont
 import id.web.izs.sshclient.core.config.schemeColorArgb
+import id.web.izs.sshclient.core.ssh.SftpTransferManager
 import id.web.izs.sshclient.core.ssh.SshConnector
 import id.web.izs.sshclient.core.term.TerminalInput
 import id.web.izs.sshclient.core.term.KeyStep
@@ -163,6 +165,15 @@ fun TerminalScreen(
     // dead Reconnect on a perfectly live session). hasShell emits on every
     // assignment, forcing a fresh read.
     val hasShell by handle.hasShell.collectAsState()
+    // Background-transfer presence (the SFTP "dot"): observing the
+    // session's manager subscribes this screen, so the slim indicator
+    // below appears while transfers run — even with the sheet dismissed
+    // and even on a sibling tab's screen for its own transfers.
+    val sftpMgr = remember(sessionId) { sessionViewModel.sftpOf(sessionId) }
+    val sftpRows by sftpMgr.transfers.collectAsState()
+    val sftpRunning = remember(sftpRows) {
+        sftpRows.filter { it.status == SftpTransferManager.Status.RUNNING }
+    }
     // Tab chrome (desktop appearance.tabsLocation parity): absent key (or an
     // encrypted config, which Android ignores) = OFF = no tab UI at all —
     // unless Settings > Window says this device has its own setting, which
@@ -302,6 +313,10 @@ fun TerminalScreen(
     var copiedMsg by remember { mutableStateOf<String?>(null) }
     var showUnlock by remember { mutableStateOf(false) }
     var showCloseConfirm by remember { mutableStateOf(false) }
+    // SFTP sheet visibility only — the transfers themselves are owned by
+    // the session's SftpTransferManager, so hiding this sheet (back,
+    // dismiss, tab switch) never touches a running transfer.
+    var showSftp by remember { mutableStateOf(false) }
     var pendingConnect by remember { mutableStateOf(false) }
     // WebView-based terminals clear their hidden textarea on Enter,
     // so the web view resets composing and predictions start fresh each line.
@@ -606,6 +621,14 @@ fun TerminalScreen(
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
+                        text = { Text("SFTP") },
+                        enabled = hasShell,
+                        onClick = {
+                            showMenu = false
+                            showSftp = true
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Font - (now ${fontSp.toInt()}sp)") },
                         onClick = {
                             showMenu = false
@@ -647,6 +670,52 @@ fun TerminalScreen(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
             )
+        }
+        // Slim tappable transfer row: visible only while THIS session has
+        // running transfers. Tap reopens the sheet; it never stops anything.
+        if (sftpRunning.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .clickable { showSftp = true }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        Modifier.size(8.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    )
+                    val label = if (sftpRunning.size == 1) {
+                        val t = sftpRunning[0]
+                        val arrow = if (t.direction == SftpTransferManager.Direction.DOWNLOAD) "↓" else "↑"
+                        val pct = if (t.total > 0) " · ${(100 * t.done / t.total).toInt()}%" else ""
+                        "$arrow ${t.name}$pct"
+                    } else {
+                        "${sftpRunning.size} transfers running"
+                    }
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (sftpRunning.size == 1) {
+                    val t = sftpRunning[0]
+                    if (t.total > 0) {
+                        LinearProgressIndicator(
+                            progress = { t.done.toFloat() / t.total.toFloat() },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
         }
         // Copy confirmations clear themselves; the next copy re-arms.
         LaunchedEffect(copiedMsg) {
@@ -1009,6 +1078,14 @@ fun TerminalScreen(
                 modifier = Modifier.size(1.dp).focusRequester(focusRequester),
             )
         }
+    }
+
+    if (showSftp) {
+        SftpSheet(
+            sessionViewModel = sessionViewModel,
+            sessionId = sessionId,
+            onDismiss = { showSftp = false },
+        )
     }
 
     if (showCloseConfirm) {        AlertDialog(

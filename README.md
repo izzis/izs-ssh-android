@@ -45,6 +45,14 @@ technical design.
   opens a new connection (list or quick-pick sheet, Settings > Window),
   × honors `warnOnClose`, Back always goes home, navigation stays shallow
   (no stack growth).
+- **SFTP browser (terminal ⋮ > SFTP)**: file list + download/upload over the
+  session's own transport (fresh channel per transfer, shell keeps running),
+  as a bottom sheet (half by default, draggable to full). Transfers are
+  owned by the session, not the sheet — back/dismiss/tab-switch never stops
+  them (slim `↓ name · %` indicator under the tab strip reopens the sheet);
+  per-item Cancel aborts one transfer (partial deleted, source untouched),
+  only disconnect/close aborts them all. Same-name upload asks Overwrite /
+  Keep both (`name (1).ext`) / Cancel; partials live in app cache only.
 - **Settings > Window**: tab-location source priority — *Synced config*
   (the desktop YAML value wins; on encrypted configs Android ignores it but
   still writes it for desktop) or *This device only* (a local pref, never
@@ -90,7 +98,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 205 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance)
+./gradlew :app:testDebugUnitTest   # 230 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance, config import, sftp transfers)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -107,7 +115,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 205/205 green)
+## Parity guarantees (tested, 230/230 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

@@ -93,4 +93,7 @@ dependencies {
     // Test-only: local SSH server for the multiplex regression tests
     // (SshMultiplexTest). Never ships in the APK (testImplementation).
     testImplementation(libs.mina.sshd)
+    // Test-only: SFTP subsystem for the transfer tests (SftpTransferTest,
+    // SftpTransferManagerTest). Never ships in the APK (testImplementation).
+    testImplementation(libs.mina.sshd.sftp)
 }

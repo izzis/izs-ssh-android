@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import id.web.izs.sshclient.core.config.KnownHostEntry
 import id.web.izs.sshclient.core.config.SshProfile
 import id.web.izs.sshclient.core.ssh.SshConnector
+import id.web.izs.sshclient.core.ssh.SftpTransferManager
 import id.web.izs.sshclient.core.ssh.UnknownHostKeyException
 import id.web.izs.sshclient.core.ssh.transportKeyOf
 import id.web.izs.sshclient.core.term.TerminalEmulator
@@ -174,6 +175,11 @@ class SshSessionViewModel : ViewModel() {
     fun close(sessionId: String) {
         val h = _sessions.remove(sessionId) ?: return
         if (_selectedSessionId.value == sessionId) _selectedSessionId.value = null
+        // Disconnect aborts this session's SFTP transfers first (their
+        // channels die with the transport anyway — abort surfaces Cancelled
+        // with partial cleanup instead of a confusing channel error). Back /
+        // dismiss never reaches here, so background transfers survive those.
+        synchronized(poolGuard) { sftpManagers.remove(sessionId) }?.cancelAll()
         h.connectJob?.cancel()
         h.collectJob?.cancel()
         h.connectJob = null
@@ -455,7 +461,22 @@ class SshSessionViewModel : ViewModel() {
         }
     }
 
+    /**
+     * SFTP transfer host for [sessionId], created lazily. Lives in the
+     * ViewModel — NOT in any composable — so transfers survive back,
+     * dismiss, tab switches, and rotation; they die only on [close] (or
+     * process death, like the sessions themselves).
+     */
+    private val sftpManagers = mutableMapOf<String, SftpTransferManager>()
+
+    fun sftpOf(sessionId: String): SftpTransferManager = synchronized(poolGuard) {
+        sftpManagers.getOrPut(sessionId) { SftpTransferManager(viewModelScope) }
+    }
+
     override fun onCleared() {
+        synchronized(poolGuard) {
+            sftpManagers.values.toList().also { sftpManagers.clear() }
+        }.forEach { runCatching { it.cancelAll() } }
         for ((_, h) in _sessions) {
             try { h.connectJob?.cancel() } catch (_: Exception) { }
             try { h.collectJob?.cancel() } catch (_: Exception) { }
