@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher icon background: near-black terminal surface. -->
+    <color name="ic_launcher_background">#14161A</color>
+    <!-- Launcher glyph: terminal green prompt. -->
+    <color name="ic_launcher_glyph">#4CAF50</color>
+</resources>

@@ -10,6 +10,10 @@
 # exist only at compile time; safe to ignore on Android.
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn com.google.crypto.tink.**
+# SnakeYAML: TypeDescription.<clinit> calls TypeDescription.class.getPackage().getName().
+# R8 merges Yaml/LoaderOptions ctors into unrelated classes and breaks that lookup,
+# so release builds crash instantly at startup with NPE. Keep the whole library.
+-keep class org.yaml.snakeyaml.** { *; }
 # SnakeYAML introspects java.beans on desktop JVMs; on Android that path is
 # unused (we parse into plain Maps), so these warnings are safe to ignore.
 -dontwarn java.beans.**
