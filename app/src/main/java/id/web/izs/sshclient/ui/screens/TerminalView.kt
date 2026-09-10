@@ -55,6 +55,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.Font
 import id.web.izs.sshclient.R
+import id.web.izs.sshclient.core.term.isMonospaceSample
 import id.web.izs.sshclient.core.config.TerminalCursor
 import id.web.izs.sshclient.core.config.TerminalFont
 import androidx.compose.ui.text.font.FontWeight
@@ -106,16 +107,33 @@ fun terminalTextStyle(fontFamily: FontFamily, fontSp: Float): TextStyle =
 /**
  * Resolves a [TerminalFont] choice to a Compose family: the bundled
  * Source Code Pro (desktop fallback-file parity) or system monospace.
+ *
+ * The grid renderer draws whole rows at natural glyph advances, so a
+ * proportional face silently breaks the grid (rows end early, dead space on
+ * the right, correct server wrap). System "monospace" is not guaranteed
+ * monospace — OEM fonts can replace it — so the System choice is measured
+ * (narrow / wide / space vs digits); a proportional face falls back to the
+ * bundled font for both measuring and drawing (single source: every caller
+ * uses this function).
  */
 @Composable
-fun rememberTerminalFontFamily(font: TerminalFont): FontFamily =
-    remember(font) {
+fun rememberTerminalFontFamily(font: TerminalFont): FontFamily {
+    val measurer = rememberTextMeasurer()
+    return remember(font) {
         if (font == TerminalFont.SOURCE_CODE_PRO) {
             FontFamily(Font(R.font.source_code_pro))
         } else {
-            FontFamily.Monospace
+            val sys = FontFamily.Monospace
+            val probe = TextStyle(fontFamily = sys)
+            val ref = measurer.measure("0000", probe).size.width / 4f
+            val samples = listOf("iiii", "WWWW", "    ").map {
+                measurer.measure(it, probe).size.width / 4f
+            }
+            if (isMonospaceSample(ref, samples)) sys
+            else FontFamily(Font(R.font.source_code_pro))
         }
     }
+}
 
 /**
  * Termux-like terminal grid: user-chosen monospace font, Canvas cells with
