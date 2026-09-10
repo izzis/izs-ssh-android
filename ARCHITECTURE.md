@@ -55,15 +55,20 @@ app/src/main/java/id/web/izs/sshclient/
       NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
                                   profiles, desktop-selector parity; half by
                                   default, draggable to full)
-      ProfileEditScreen.kt        Tabbed editor (General + colour picker / Ports / Advanced /
-                                   Ciphers / Colours (terminal-scheme override: Use-global +
-                                   scheme search) / Login), desktop-only
-                                   options labeled, new profile + new group
+      ProfileEditScreen.kt        Tabbed editor (General + colour picker (FlowRow swatch
+                                   grid — fixed chunked rows clipped the rightmost
+                                   swatch into an oval on narrow phones) / Ports /
+                                   Advanced / Ciphers / Colours (terminal-scheme
+                                   override: Use-global + scheme search) / Login),
+                                   desktop-only options labeled, new profile + new group
       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
                                    warn-on-close + host-key trust dialogs, ⋮ menu SFTP entry,
                                    slim background-transfer indicator row (tap reopens the sheet),
                                    auth-failover `Password for user@host` dialog (remember checkbox,
-                                   unlock-routed deferred vault save)
+                                   unlock-routed deferred vault save),
+                                   hide-terminal-header mode (options to active-tab ⋮;
+                                   floating ⋮ when tabs are off — draggable to any
+                                   corner, anchor persisted in ConfigDisk)
       SftpSheet.kt                SFTP browser + transfers as a bottom sheet over the terminal
                                    (half by position via SheetState initial Partial, list
                                    fills sheet height so loads never balloon it, draggable
@@ -75,9 +80,16 @@ app/src/main/java/id/web/izs/sshclient/
       TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance)
       AppearanceSettingsScreen.kt App theme (device-only) + terminal font/cursor (YAML) + font size + live preview
       WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right;
-                                  New-tab mode (profile list vs quick-pick sheet, device-only pref)
-      SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll) + side drawer frame (left/right, no RTL mirror) +
-                                  single status dot + primary activity underline (cleared on select) + pinned Profile-list/Settings footer
+                                   New-tab mode (profile list vs quick-pick sheet, device-only pref);
+                                   Hide-terminal-header toggle (device-only pref, whole-row tap)
+      SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll, slim 32dp buttons,
+                                   tight ⋮/× cluster, desktop `.colorbar` profile-colour bar
+                                   sealed inside the rounded tab box; strip scrolls
+                                   horizontally = unbounded width, so items bind
+                                   `IntrinsicSize.Max` or fillMaxWidth underlines
+                                   collapse to 0) + side drawer frame (left/right, no RTL mirror) +
+                                   single status dot + primary activity underline (cleared on select) + pinned Profile-list/Settings footer
+                                   (drawer ⋮ menu hides its own Settings/Profile-list copies)
       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`)
       VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
       SetVaultPassphraseDialog.kt Set/change vault passphrase
@@ -135,13 +147,13 @@ app/src/main/java/id/web/izs/sshclient/
       TerminalInput.kt    Pure sticky CTRL/ALT mapping (c & 0x1F, ALT = ESC prefix)
   data/local/
     ConfigDisk.kt         EncryptedSharedPreferences: sync creds, RAW YAML cache,
-                          known_hosts (TOFU), terminal prefs (font size),
-                          Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode (never synced to YAML).
+                           known_hosts (TOFU), terminal prefs (font size),
+                           Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode/window.hideTerminalHeader/window.fabAtBottom/window.fabAtLeft (never synced to YAML).
                           security-crypto 1.1.0 deprecated the API wholesale
                           (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (28 files, 234 tests — §8)
+app/src/test/... (30 files, 242 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -200,10 +212,16 @@ sshj shell PTY (xterm-256color)
   -> TerminalScreen tick -> TerminalCanvas redraw (skipped otherwise)
   -> keepCursorVisible snap (output + viewport effects)
 
-typing: hidden 1px BasicTextField (autoCorrect OFF)
-  -> diff (backspace = DEL, Enter = CR) -> session.send (IO dispatcher);
-  Enter/buffer-cap calls resetImeLine() (clear + restartInput, keyboard
-  stays open) so predictions start fresh each line — WebView-clear parity.
+typing: event-driven pipe (SshInputPipe + PipeInput): the field owns a
+  scratch BaseInputConnection that is ALWAYS empty — commits send the fresh
+  text straight to the shell and clear, deletes send NxDEL, Done sends CR.
+  No mid-line buffer is ever modeled, so recall/prediction bugs are
+  structurally impossible (the old recall model + its tests are deleted).
+  Soft backspace arrives as key events via sendKeyEvent with the full Termux
+  KeyHandler map (DEL/FWD-DEL/ENTER/arrows/ESC/printable/CTRL); hardware keys
+  are fielded in onKeyEvent the same way. Extra keys bypass the pipe
+  (sendKeySteps -> staged raw chunks); special sequences bypass + consume
+  stickies via sendSpecial.
 extra keys: user-editable layout (ExtraKeyboard model: ordered send steps
   with preset/text kinds, modifiers, escape codec, legacy-send migration,
   normalize+fallback) rendered by one shared ExtraKeysBar composable in the
@@ -235,9 +253,10 @@ resize: measured grid -> settle-debounced (150ms) emulator.resize +
   whose params are all Compose-stable (`State` holder + `version` + scalars),
   so size-only recompositions skip the redraw entirely; every emulator
   mutation bumps `version`, so `(ref, version)` fully describes the view.
-  Programmatic scrolls never run while a finger is down (`touching` flag —
-  `isScrollInProgress` only covers post-slop drags). DEBUG builds log
-  `TvPerf` (draw/resize ms) and `TvScroll` (drag/follow/snap) telemetry.
+   Programmatic scrolls never run while a finger is down (`touching` flag —
+   `isScrollInProgress` only covers post-slop drags). No logcat telemetry:
+   the `TvPerf`/`TvScroll`/`ImeDock` debug logs were removed outright
+   (re-add a line when debugging, then delete it).
 - **Scroll:** `keepCursorVisible` (2-line / 8-column margin) snaps on new
   output and on viewport change. Single snap, no glide, no trailing motion.
 - **Scrollback:** full-screen scrolls push the top row into a history deque
@@ -261,29 +280,26 @@ resize: measured grid -> settle-debounced (150ms) emulator.resize +
 
 ## 6. Keyboard dock ("lompat", not slide)
 
-The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
-`adjustResize` on this stack), so the container reserves space itself:
+The activity window does **not** shrink on edge-to-edge devices
+(`adjustResize` no longer resizes the window), so the outer Column pads
+itself by `dockPx` — a whole-column dock, so the extra-keys bar (a layout
+sibling below the grid) rides up with the grid instead of sliding under
+the IME:
 
-- `WindowInsets.ime.getBottom()` is the source of truth (0 when the window
-  resizes instead — then the dock is a no-op; never double-counted).
-- Two height signals, imitating the `visualViewport` approach: the claimed `WindowInsets.ime` plus
-  the ACTUALLY-visible rect (`decorView.getWindowVisibleDisplayFrame`,
-  15% threshold filters the nav bar). When the visible rect is notably
-  smaller than the claim it is trusted with zero shave (the true keys);
-  otherwise `ime - imeShavePx` as before.
-- Skip redundant sets (`if (t != dockPx)`), small `delay(10)` in the hot path, and a 500ms re-assert safety net. Every apply logs `ImeDock ime= vis=
-  useVis= dock=` to logcat for on-device verification.
-  History: single `50` (jump) → `0` (tracked live) → `10` → `5` (open fast,
-  close looked animated) → direction-aware `5`+`150` → single `10` →
-  dual-signal tracking + 500ms net.
-- **Instant open:** the last settled keyboard height is remembered; the bar
-  jumps to it on the first open frame, the settle pass only corrects
-  mismatches (orientation changes reset the cache).
-- **Shave (`imeShavePx = 44.dp`, one constant):** SwiftKey claims ~35dp more
-  inset than its visible keys (hidden toolbar slot). The shave docks the bar
-  onto the visible keys. Condition: SwiftKey with toolbar OFF. If its toolbar
-  is ever shown (or a tighter keyboard like Gboard is used), lower the
-  constant — at most that strip of the bar bottom is covered.
+- Two height signals, imitating the `visualViewport` approach: the claimed
+  `WindowInsets.ime` plus the ACTUALLY-visible rect
+  (`decorView.getWindowVisibleDisplayFrame`, 15% threshold filters the nav
+  bar). When the visible rect is notably smaller than the claim (SwiftKey
+  over-claims when its window is only as tall as the keys) it is trusted
+  with zero shave; otherwise the IME claim is used. No fixed shave: one
+  constant can never fit both an over-claiming and an accurate keyboard.
+- Minus the nav bar: MainActivity's Scaffold already pads content by
+  safeDrawing (nav included), so a full-IME dock double-counts it and
+  leaves a black gap between the extra keys and the keyboard. Target =
+  (vis-or-ime) − navigationBars, floored at 0.
+- Skip redundant sets (`if (t != dockPx)`), small `delay(10)` in the hot
+  path (no fit-spam: refit hits the network via window-change), and a
+  500ms re-assert safety net. No logcat telemetry (removed outright).
 
 ## 7. UI conventions
 
@@ -295,6 +311,9 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   asks before disconnecting (it is a 32dp invisible tap target — an instant
   silent kill reads exactly like a dropped session); the power button honors
   `warnOnClose` like desktop — and full-width `user@host:port` below.
+  Settings > Window can hide the header (device-only): its options move to
+  the ⋮ on the active tab, or a floating ⋮ when tabs are off (draggable to
+  any corner, anchor in ConfigDisk).
 - Home Recent section (desktop `recentProfiles` parity, per-row History icons
   like the desktop selector, default card colour): header lives outside the
   card (title + Clear + collapse), collapsible, sized by
@@ -306,8 +325,11 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   (local pref, YAML ignored for display — the painless encrypted path);
   New-tab mode (list vs sheet) is a second device-only pref.
 - Profile identity color: dot selector beside Name in the General tab
-  (presets + Default; custom desktop hex shows as an extra swatch), stripe
-  on list rows (absent without a stored color). Terminal scheme override
+  (14 presets + Default + stored-custom-hex extra swatch, wrapping FlowRow
+  grid; custom desktop hex shows as an extra swatch), stripe
+  on list rows plus a desktop-`.colorbar` bar sealed inside the tab box
+  (absent without a stored color, live-resolved like the tab title so
+  late-set colors still show). Terminal scheme override
   lives in the Colours tab (Use-global + scheme search) and Settings >
   Color scheme. Options with no mobile
   effect (forwarding, x11/agent/banner/reuse, non-direct modes) carry a
@@ -341,7 +363,7 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 234 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 242 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -355,6 +377,8 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
 | `TerminalEmulatorTest` | VT100 ops + pending-wrap regression + scrollback cap/trim/alt |
 | `TextSelectionTest` | range extraction, order/clamp, scroll-stability, word expansion |
 | `TerminalInputTest` | sticky CTRL/ALT mapping |
+| `PipeInputTest` | event-driven pipe commit mapping (LF→CR submit flag) |
+| `MonoFontCheckTest` | proportional-system-monospace detection → bundled fallback |
 | `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers, color/icon round-trip, global warnOnClose |
 | `HostKeyTrustTest` | ssh-keygen digest vector, exact match/mismatch/port identity, legacy upgrade, negotiation order, knownHosts upsert |
 | `LoginScriptRunnerTest` | unconditional/expect/regex/optional/break/unescape parity |
@@ -422,8 +446,14 @@ The activity window does **not** shrink (`frame=[0,0][1080,2400]` with
   is start-side only — whole-screen RTL mirroring is rejected; hamburger
   replaces Back, edge-fling (32dp system-Back reserve) opens it, pinned
   Profile-list/Settings footer, scrim/Back closes), Back always goes
-home via synchronous popBackStack. Socket teardown runs off-Main (a stalled
-VPN must never freeze the terminal mid-tap).
+  home via synchronous popBackStack. Socket teardown runs off-Main (a stalled
+  VPN must never freeze the terminal mid-tap). Later polish: slim 32dp tab
+  buttons with a tight ⋮/× cluster, desktop-`.colorbar` profile-colour bar
+  inside the rounded tab box (live-resolved `colorOf`; `IntrinsicSize.Max`
+  binding because horizontal scroll collapses fillMaxWidth underlines to 0),
+  hide-terminal-header mode with the options on the active tab's ⋮ (+ a
+  corner-draggable floating ⋮ with persisted anchor when tabs are off;
+  drawer ⋮ hides its Settings/Profile-list copies).
 - **Tab UX polish (done):** home shares one LazyColumn (Active always
   expanded with Close all in the header row, Recent collapsible with
   per-row History icons + Clear, sticky search); `NewTabSheet.kt` quick-pick

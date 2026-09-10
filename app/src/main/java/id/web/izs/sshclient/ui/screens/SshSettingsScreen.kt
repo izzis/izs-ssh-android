@@ -1,5 +1,6 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -86,14 +87,20 @@ fun SshSettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Whole-row tap toggles (box onCheckedChange stays null so the
+        // row click is the single toggle source, same as Window settings).
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.clickable(enabled = !encrypted && !busy) {
+                val old = verify
+                verify = !verify
+                saveLive(verify, warn) { verify = old }
+            },
+        ) {
             Checkbox(
                 checked = verify,
-                onCheckedChange = { v ->
-                    val old = verify
-                    verify = v
-                    saveLive(v, warn) { verify = old }
-                },
+                onCheckedChange = null,
                 enabled = !encrypted && !busy,
             )
             Column {
@@ -106,14 +113,18 @@ fun SshSettingsScreen(
                 )
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.clickable(enabled = !encrypted && !busy) {
+                val old = warn
+                warn = !warn
+                saveLive(verify, warn) { warn = old }
+            },
+        ) {
             Checkbox(
                 checked = warn,
-                onCheckedChange = { w ->
-                    val old = warn
-                    warn = w
-                    saveLive(verify, w) { warn = old }
-                },
+                onCheckedChange = null,
                 enabled = !encrypted && !busy,
             )
             Column {

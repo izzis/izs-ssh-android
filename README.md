@@ -42,12 +42,15 @@ technical design.
 - **Multi-session tabs**: every profile tap opens a new tab (desktop
   parity); `reuseSession` shares one TCP transport per tab group. Tab chrome
   follows the desktop `appearance.tabsLocation` key — `top`/`bottom` strip
-  (status dot + profile name + primary activity underline + ×),
+  (status dot + profile name + primary activity underline + profile-colour
+  colorbar like the desktop `.colorbar` + ×, slim 32dp buttons),
   `left`/`right` side drawer (hamburger replaces Back, edge-fling opens it,
   pinned Profile-list + Settings footer), absent key = no tabs (profile-list UX). `+`
   opens a new connection (list or quick-pick sheet, Settings > Window),
   × honors `warnOnClose`, Back always goes home, navigation stays shallow
-  (no stack growth).
+  (no stack growth). Settings > Window can hide the terminal header
+  (device-only): session options move to the ⋮ on the active tab, or a
+  draggable floating ⋮ (any corner, position remembered) when tabs are off.
 - **SFTP browser (terminal ⋮ > SFTP)**: file list + download/upload over the
   session's own transport (fresh channel per transfer, shell keeps running),
   as a bottom sheet (half by default, draggable to full). Transfers are
@@ -60,10 +63,14 @@ technical design.
   (the desktop YAML value wins; on encrypted configs Android ignores it but
   still writes it for desktop) or *This device only* (a local pref, never
   synced — desktop-top/phone-bottom splits without touching sync parts);
-  plus *New tab (+) opens* — profile list or quick-pick bottom sheet
-  (search + recent + grouped profiles, half by default, draggable to full),
-  device-only, never synced.
-- **Termux-like input**: docked extra-keys bar
+   plus *New tab (+) opens* — profile list or quick-pick bottom sheet
+   (search + recent + grouped profiles, half by default, draggable to full),
+   device-only, never synced; plus *Hide terminal header* (session options
+   move to the active tab's ⋮, or a floating ⋮ when tabs are off).
+- **Termux-like input**: event-driven IME pipe (the field never holds
+  mid-line state, so predictions/recall bugs are structurally impossible),
+  full Termux key-event map (arrows/ESC/DEL/FWD-DEL/ENTER/printable/CTRL +
+  hardware keys), docked extra-keys bar
   (`ESC / - HOME ↑ END PGUP` / `TAB CTRL ALT ← ↓ → PGDN`),
   sticky CTRL/ALT, direct typing with raw keystrokes (Backspace=DEL,
   Enter=CR), command-box mode, adjustable font (8–24sp).
@@ -101,7 +108,7 @@ warning); prefer `https://` for anything public, matching Tabby Desktop.
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 234 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance, config import, sftp transfers, auth failover)
+./gradlew :app:testDebugUnitTest   # 242 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance, config import, sftp transfers, auth failover, pipe input, monospace check)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -118,7 +125,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 234/234 green)
+## Parity guarantees (tested, 242/242 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

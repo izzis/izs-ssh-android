@@ -13,11 +13,13 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,7 +34,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.config.TabLocation
+import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.ui.SshSessionHandle
 
 /**
@@ -72,11 +77,18 @@ fun statusDotColor(status: String): Color = when (status) {
     else -> Color(0xFFB00020)
 }
 
+/**
+ * Compact touch target for the tab buttons (× and ⋮): 32.dp keeps the
+ * strip slim on phones while staying tappable; neighboring targets keep
+ * an 8.dp row gap against mistaps.
+ */
+private val TabButtonSize = 32.dp
+
 @Composable
 private fun CloseBtn(sessionId: String, onCloseRequest: (String) -> Unit) {
     IconButton(
         onClick = { onCloseRequest(sessionId) },
-        modifier = Modifier.size(28.dp),
+        modifier = Modifier.size(TabButtonSize),
     ) {
         Icon(Icons.Filled.Close, contentDescription = "Close tab", modifier = Modifier.size(16.dp))
     }
@@ -87,6 +99,11 @@ private fun CloseBtn(sessionId: String, onCloseRequest: (String) -> Unit) {
  * underline. Shared by strip (fixed max width, ellipsis) and drawer (full
  * width). Selected state is a container tint; background output on a
  * background tab draws a primary line under the tab (cleared on select).
+ *
+ * [showOptions]: true renders the ⋮ session-options button beside × (only
+ * ever set on the SELECTED tab, only when the terminal header is hidden —
+ * the mobile stand-in for desktop's hover-revealed tab buttons, which cost
+ * no layout width). [optionsContent] is the shared session menu items.
  */
 @Composable
 fun SessionTabItem(
@@ -97,36 +114,90 @@ fun SessionTabItem(
     onCloseRequest: (String) -> Unit,
     modifier: Modifier = Modifier,
     fillMaxWidth: Boolean = false,
+    profileColor: String? = null,
+    showOptions: Boolean = false,
+    optionsOpen: Boolean = false,
+    onOptionsOpen: () -> Unit = {},
+    onOptionsDismiss: () -> Unit = {},
+    optionsContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     val status by handle.status.collectAsState()
     val activity by handle.activity.collectAsState()
     Column(
-        modifier = modifier
-            .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier),
+        // Strip scrolls horizontally = unbounded width, where fillMaxWidth
+        // children (activity line, colorbar) collapse to 0. IntrinsicSize.Max
+        // bounds them to the title-row width instead. Drawer is already
+        // bounded, so it keeps the plain fill.
+        modifier = modifier.then(
+            if (fillMaxWidth) Modifier.fillMaxWidth()
+            else Modifier.width(IntrinsicSize.Max),
+        ),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        // Rounded tab box: the tint, the tap target, and the profile
+        // colorbar share one 8.dp clip, so the bar hugs the box bottom
+        // instead of floating below it as a detached line.
+        Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
                 .background(
                     if (selected) MaterialTheme.colorScheme.secondaryContainer
                     else Color.Transparent,
                 )
-                .clickable { onSelect(handle.sessionId) }
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .clickable { onSelect(handle.sessionId) },
         ) {
-            Box(Modifier.size(10.dp).background(statusDotColor(status), CircleShape))
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
-                else MaterialTheme.colorScheme.onSurface,
-                modifier = if (fillMaxWidth) Modifier.weight(1f) else Modifier.widthIn(max = 140.dp),
-            )
-            CloseBtn(handle.sessionId, onCloseRequest)
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Box(Modifier.size(10.dp).background(statusDotColor(status), CircleShape))
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                        else MaterialTheme.colorScheme.onSurface,
+                        modifier = if (fillMaxWidth) Modifier.weight(1f) else Modifier.widthIn(max = 140.dp),
+                    )
+                    // ⋮ and × sit in their own tight cluster (2.dp): the row-wide
+                    // 8.dp gap between them looked gappy.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        if (showOptions && selected) {
+                            Box {
+                                IconButton(
+                                    onClick = onOptionsOpen,
+                                    modifier = Modifier.size(TabButtonSize),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.MoreVert,
+                                        contentDescription = "Session options",
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = optionsOpen,
+                                    onDismissRequest = onOptionsDismiss,
+                                ) {
+                                    optionsContent()
+                                }
+                            }
+                        }
+                        CloseBtn(handle.sessionId, onCloseRequest)
+                    }
+                }
+                // Tabby parity (tabHeader .colorbar): 3dp profile-color bar
+                // sealing the box bottom, only when the profile sets a
+                // color. The outer clip rounds its bottom corners with the
+                // box; the activity underline below stays primary + inset.
+                profileColorArgb(profileColor)?.let { argb ->
+                    Box(Modifier.fillMaxWidth().height(3.dp).background(Color(argb)))
+                }
+            }
         }
         // Desktop-style activity marker: a primary underline, hidden on the
         // selected tab (select() already clears the flag). Primary, not
@@ -161,12 +232,18 @@ fun SessionTabStrip(
     onNew: () -> Unit,
     scroll: ScrollState,
     modifier: Modifier = Modifier,
+    colorOf: (SshSessionHandle) -> String? = { null },
+    showOptionsOnSelected: Boolean = false,
+    tabMenuFor: String? = null,
+    onOptionsOpen: (String) -> Unit = {},
+    onOptionsDismiss: () -> Unit = {},
+    optionsContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, modifier = modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.horizontalScroll(scroll).padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.horizontalScroll(scroll).padding(horizontal = 8.dp, vertical = 2.dp),
         ) {
             for (h in sessions) {
                 key(h.sessionId) {
@@ -178,6 +255,12 @@ fun SessionTabStrip(
                         onSelect = onSelect,
                         onCloseRequest = onCloseRequest,
                         modifier = Modifier.bringIntoViewRequester(bring),
+                        profileColor = colorOf(h),
+                        showOptions = showOptionsOnSelected,
+                        optionsOpen = tabMenuFor == h.sessionId,
+                        onOptionsOpen = { onOptionsOpen(h.sessionId) },
+                        onOptionsDismiss = onOptionsDismiss,
+                        optionsContent = optionsContent,
                     )
                     if (h.sessionId == selectedId) {
                         LaunchedEffect(h.sessionId) {
@@ -205,6 +288,12 @@ fun SessionTabDrawerContent(
     onHome: () -> Unit = {},
     onSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
+    colorOf: (SshSessionHandle) -> String? = { null },
+    showOptionsOnSelected: Boolean = false,
+    tabMenuFor: String? = null,
+    onOptionsOpen: (String) -> Unit = {},
+    onOptionsDismiss: () -> Unit = {},
+    optionsContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     Column(
         modifier = modifier.fillMaxSize().padding(12.dp),
@@ -229,6 +318,12 @@ fun SessionTabDrawerContent(
                         onSelect = onSelect,
                         onCloseRequest = onCloseRequest,
                         fillMaxWidth = true,
+                        profileColor = colorOf(h),
+                        showOptions = showOptionsOnSelected,
+                        optionsOpen = tabMenuFor == h.sessionId,
+                        onOptionsOpen = { onOptionsOpen(h.sessionId) },
+                        onOptionsDismiss = onOptionsDismiss,
+                        optionsContent = optionsContent,
                     )
                 }
             }

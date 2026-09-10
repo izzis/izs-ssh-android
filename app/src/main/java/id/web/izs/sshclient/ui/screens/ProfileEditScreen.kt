@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -877,10 +878,15 @@ private fun ColourPicker(selected: String, onSelect: (String) -> Unit) {
         } else PROFILE_COLORS
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        (listOf("") + swatches).chunked(7).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { hex -> ColourSwatch(hex = hex, isSelected = hex == selected, onSelect = onSelect) }
-            }
+        // FlowRow, not fixed chunked rows: 7×40dp swatches overflow the
+        // dialog on narrow phones and the clipped rightmost swatch reads
+        // as an oval. Wrapping keeps every swatch a full circle.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ColourSwatch(hex = "", isSelected = selected.isBlank(), onSelect = onSelect)
+            swatches.forEach { hex -> ColourSwatch(hex = hex, isSelected = hex == selected, onSelect = onSelect) }
         }
     }
 }

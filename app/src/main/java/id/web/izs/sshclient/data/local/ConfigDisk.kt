@@ -260,6 +260,30 @@ class ConfigDisk(context: Context) {
         get() = prefs().getString(KEY_LOCAL_SCHEME, "") ?: ""
         set(v) = prefs().edit().putString(KEY_LOCAL_SCHEME, v).apply()
 
+    /**
+     * Hide the terminal header row (Settings > Window). Device-only app
+     * chrome (no desktop equivalent — Tabby desktop always shows its
+     * titlebar/tab bar): when on, session options move to the ⋮ button on
+     * the active tab (or a floating ⋮ when tabs are off). Default false.
+     */
+    var hideTerminalHeader: Boolean
+        get() = prefs().getBoolean(KEY_HIDE_TERMINAL_HEADER, false)
+        set(v) = prefs().edit().putBoolean(KEY_HIDE_TERMINAL_HEADER, v).apply()
+
+    /**
+     * Floating ⋮ anchor (hidden header + tabs off): false = top-end (the
+     * old header ⋮ spot), true = bottom-end above the extra keys. Set by
+     * dragging the button; device-only like [hideTerminalHeader].
+     */
+    var fabAtBottom: Boolean
+        get() = prefs().getBoolean(KEY_FAB_AT_BOTTOM, false)
+        set(v) = prefs().edit().putBoolean(KEY_FAB_AT_BOTTOM, v).apply()
+
+    /** Floating ⋮ anchor, horizontal half: true = left side. */
+    var fabAtLeft: Boolean
+        get() = prefs().getBoolean(KEY_FAB_AT_LEFT, false)
+        set(v) = prefs().edit().putBoolean(KEY_FAB_AT_LEFT, v).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -281,6 +305,9 @@ class ConfigDisk(context: Context) {
         const val KEY_TAB_SOURCE = "window.tabSource"
         const val KEY_TAB_LOCATION = "window.tabLocation"
         const val KEY_NEW_TAB_MODE = "window.newTabMode"
+        const val KEY_HIDE_TERMINAL_HEADER = "window.hideTerminalHeader"
+        const val KEY_FAB_AT_BOTTOM = "window.fabAtBottom"
+        const val KEY_FAB_AT_LEFT = "window.fabAtLeft"
         const val MODE_NEW_TAB_LIST = "list"
         const val MODE_NEW_TAB_SHEET = "sheet"
         const val KEY_SCHEME_SOURCE = "terminal.schemeSource"

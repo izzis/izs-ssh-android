@@ -10,17 +10,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,6 +52,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -78,6 +82,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -91,6 +96,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import id.web.izs.sshclient.core.config.TabLocation
@@ -123,6 +129,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * A real interactive SSH shell: xterm-256color PTY + VT100 emulator grid.
@@ -199,15 +206,28 @@ fun TerminalScreen(
         ),
         state.loaded?.store ?: emptyMap(),
     )
+    // Window setting (hide header): read every composition like tabLoc
+    // above so returning from Settings applies instantly.
+    val hideHeader = state.disk.hideTerminalHeader
+    // Which tab's ⋮ menu is open (strip/drawer share one open menu).
+    var tabMenuFor by remember { mutableStateOf<String?>(null) }
     // Registry read subscribes this scope: strip/drawer follow open/close.
     val tabs = sessionViewModel.ordered()
     // IME dock height (px): declared up here so the outer Column pads the
     // WHOLE content (grid + strip + extra keys), not just the grid.
     val dockDensity = LocalDensity.current
     var dockPx by remember { mutableFloatStateOf(0f) }
+    // Bottom-docked content height (extra keys / box input, px): the
+    // floating ⋮ parks above it when anchored bottom-end.
+    var dockedBarH by remember { mutableFloatStateOf(0f) }
     val liveProfiles = remember(state.loaded) { state.displayProfiles() }
     fun tabTitleOf(h: id.web.izs.sshclient.ui.SshSessionHandle): String =
         liveProfiles.find { it.id == h.profileId }?.name ?: h.profileSnapshot.name
+    // Live color like the title above: the handle snapshot freezes at
+    // session creation, so a color set/changed later would never reach
+    // the tab colorbar without this.
+    fun tabColorOf(h: id.web.izs.sshclient.ui.SshSessionHandle): String? =
+        liveProfiles.find { it.id == h.profileId }?.color ?: h.profileSnapshot.color
     var closeTarget by remember { mutableStateOf<String?>(null) }
     // New-tab mode (Settings > Window, device-only): "sheet" opens the
     // quick-pick bottom sheet over this session, "list" goes home.
@@ -540,6 +560,7 @@ fun TerminalScreen(
                 sessions = tabs,
                 selectedId = sessionId,
                 titleOf = ::tabTitleOf,
+                colorOf = ::tabColorOf,
                 onSelect = { sid ->
                     drawerOpen = false
                     if (sid != sessionId) onOpenSession(sid)
@@ -557,18 +578,51 @@ fun TerminalScreen(
                     drawerOpen = false
                     onSettings()
                 },
+                showOptionsOnSelected = hideHeader,
+                tabMenuFor = tabMenuFor,
+                // No drawerOpen = false here: the ⋮ menu lives inside the
+                // drawer content, closing it would unmount the menu too.
+                onOptionsOpen = { tabMenuFor = it },
+                onOptionsDismiss = { tabMenuFor = null },
+                optionsContent = {
+                    SessionOptionsItems(
+                        hasShell = hasShell,
+                        fontSp = fontSp,
+                        showKeys = showKeys,
+                        boxMode = boxMode,
+                        onDismiss = { tabMenuFor = null },
+                        onDisconnect = { requestDisconnect() },
+                        onSftp = { showSftp = true },
+                        onFontDown = { setFont(fontSp - 1f) },
+                        onFontUp = { setFont(fontSp + 1f) },
+                        onToggleKeys = { showKeys = !showKeys },
+                        onToggleBoxMode = { boxMode = !boxMode },
+                        onSettings = onSettings,
+                        onHome = { goBack() },
+                        showFooter = false,
+                    )
+                },
             )
         },
     ) {
     // Stage stays full-bleed scheme background, but the top bar now matches every other
     // page (themed surface, back arrow + title) — the slate strip is gone.
     // Back keeps the session alive; the status dot disconnects.
+    // Hidden header + tabs off = no chrome at all: the Box overlay below
+    // carries a floating ⋮ with the same session menu; the grid keeps
+    // full bleed underneath.
+    Box(Modifier.fillMaxSize()) {
     // Whole-column dock: on edge-to-edge devices adjustResize no longer
     // shrinks the window, so a grid-only pad leaves the bar under the IME.
     Column(
         Modifier.fillMaxSize().background(stageBg)
             .padding(bottom = with(dockDensity) { dockPx.toDp() }),
     ) {
+        // Window > Hide terminal header: the whole bar (back, title,
+        // disconnect, box toggle, ⋮) goes away; its options move to the
+        // active tab's ⋮ (or a floating ⋮ when tabs are off). System Back
+        // still leaves via the BackHandler above, sessions stay alive.
+        if (!hideHeader) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -643,37 +697,24 @@ fun TerminalScreen(
                     Icon(Icons.Filled.MoreVert, contentDescription = "Terminal options")
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("SFTP") },
-                        enabled = hasShell,
-                        onClick = {
-                            showMenu = false
-                            showSftp = true
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Font - (now ${fontSp.toInt()}sp)") },
-                        onClick = {
-                            showMenu = false
-                            setFont(fontSp - 1f)
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Font + (now ${fontSp.toInt()}sp)") },
-                        onClick = {
-                            showMenu = false
-                            setFont(fontSp + 1f)
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (showKeys) "Hide extra keys" else "Show extra keys") },
-                        onClick = {
-                            showMenu = false
-                            showKeys = !showKeys
-                        },
+                    SessionOptionsItems(
+                        hasShell = hasShell,
+                        fontSp = fontSp,
+                        showKeys = showKeys,
+                        boxMode = boxMode,
+                        onDismiss = { showMenu = false },
+                        onDisconnect = { requestDisconnect() },
+                        onSftp = { showSftp = true },
+                        onFontDown = { setFont(fontSp - 1f) },
+                        onFontUp = { setFont(fontSp + 1f) },
+                        onToggleKeys = { showKeys = !showKeys },
+                        onToggleBoxMode = { boxMode = !boxMode },
+                        onSettings = onSettings,
+                        onHome = { goBack() },
                     )
                 }
             }
+        } // if (!hideHeader)
         }
         // tabsLocation=top: strip under the header, above everything else.
         if (tabLoc == TabLocation.TOP) {
@@ -681,10 +722,32 @@ fun TerminalScreen(
                 sessions = tabs,
                 selectedId = sessionId,
                 titleOf = ::tabTitleOf,
+                colorOf = ::tabColorOf,
                 onSelect = { if (it != sessionId) onOpenSession(it) },
                 onCloseRequest = ::requestTabClose,
                 onNew = ::handleNewTab,
                 scroll = stripScroll,
+                showOptionsOnSelected = hideHeader,
+                tabMenuFor = tabMenuFor,
+                onOptionsOpen = { tabMenuFor = it },
+                onOptionsDismiss = { tabMenuFor = null },
+                optionsContent = {
+                    SessionOptionsItems(
+                        hasShell = hasShell,
+                        fontSp = fontSp,
+                        showKeys = showKeys,
+                        boxMode = boxMode,
+                        onDismiss = { tabMenuFor = null },
+                        onDisconnect = { requestDisconnect() },
+                        onSftp = { showSftp = true },
+                        onFontDown = { setFont(fontSp - 1f) },
+                        onFontUp = { setFont(fontSp + 1f) },
+                        onToggleKeys = { showKeys = !showKeys },
+                        onToggleBoxMode = { boxMode = !boxMode },
+                        onSettings = onSettings,
+                        onHome = { goBack() },
+                    )
+                },
             )
         }
         if (copiedMsg != null) {
@@ -1008,10 +1071,32 @@ fun TerminalScreen(
                         sessions = tabs,
                         selectedId = sessionId,
                         titleOf = ::tabTitleOf,
+                        colorOf = ::tabColorOf,
                         onSelect = { if (it != sessionId) onOpenSession(it) },
                         onCloseRequest = ::requestTabClose,
                         onNew = ::handleNewTab,
                         scroll = stripScroll,
+                        showOptionsOnSelected = hideHeader,
+                        tabMenuFor = tabMenuFor,
+                        onOptionsOpen = { tabMenuFor = it },
+                        onOptionsDismiss = { tabMenuFor = null },
+                        optionsContent = {
+                            SessionOptionsItems(
+                                hasShell = hasShell,
+                                fontSp = fontSp,
+                                showKeys = showKeys,
+                                boxMode = boxMode,
+                                onDismiss = { tabMenuFor = null },
+                                onDisconnect = { requestDisconnect() },
+                                onSftp = { showSftp = true },
+                                onFontDown = { setFont(fontSp - 1f) },
+                                onFontUp = { setFont(fontSp + 1f) },
+                                onToggleKeys = { showKeys = !showKeys },
+                                onToggleBoxMode = { boxMode = !boxMode },
+                                onSettings = onSettings,
+                                onHome = { goBack() },
+                            )
+                        },
                     )
                 }
                 // Docked extra-keys bar (user-editable layout, same composable
@@ -1026,11 +1111,13 @@ fun TerminalScreen(
                         onSendSteps = { sendKeySteps(it) },
                         onToggleCtrl = { ctrlSticky = !ctrlSticky },
                         onToggleAlt = { altSticky = !altSticky },
+                        modifier = Modifier.onSizeChanged { dockedBarH = it.height.toFloat() },
                     )
                 }
                 if (boxMode) {
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth()
+                            .onSizeChanged { dockedBarH = it.height.toFloat() },
                         shape = RectangleShape,
                         color = Color.Black,
                     ) {
@@ -1241,6 +1328,86 @@ fun TerminalScreen(
             dismissButton = null,
         )
         } // Column — full-bleed stage
+        // Floating ⋮ (hidden header + tabs off only): the single surviving
+        // chrome, opening the shared session menu. Drag it to park it in
+        // any corner (bottom parks above the extra keys); the anchor
+        // persists in ConfigDisk across restarts. Taps still open the
+        // menu — only post-slop drags are consumed.
+        if (hideHeader && tabLoc == TabLocation.OFF) {
+            var fabBottom by remember { mutableStateOf(state.disk.fabAtBottom) }
+            var fabLeft by remember { mutableStateOf(state.disk.fabAtLeft) }
+            var fabDragX by remember { mutableFloatStateOf(0f) }
+            var fabDragY by remember { mutableFloatStateOf(0f) }
+            val fabSlopPx = with(dockDensity) { 48.dp.toPx() }
+            Box(
+                modifier = Modifier.fillMaxSize().padding(
+                    top = 12.dp,
+                    start = 12.dp,
+                    end = 12.dp,
+                    bottom = with(dockDensity) { (dockPx + dockedBarH).toDp() } + 12.dp,
+                ),
+                contentAlignment = when {
+                    fabBottom && fabLeft -> Alignment.BottomStart
+                    fabBottom -> Alignment.BottomEnd
+                    fabLeft -> Alignment.TopStart
+                    else -> Alignment.TopEnd
+                },
+            ) {
+                var fabMenu by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier.offset { IntOffset(fabDragX.roundToInt(), fabDragY.roundToInt()) }
+                        .pointerInput(fabBottom, fabLeft) {
+                            detectDragGestures(
+                                onDragCancel = { fabDragX = 0f; fabDragY = 0f },
+                                onDragEnd = {
+                                    if (!fabBottom && fabDragY > fabSlopPx) {
+                                        fabBottom = true
+                                        state.disk.fabAtBottom = true
+                                    } else if (fabBottom && fabDragY < -fabSlopPx) {
+                                        fabBottom = false
+                                        state.disk.fabAtBottom = false
+                                    }
+                                    if (!fabLeft && fabDragX < -fabSlopPx) {
+                                        fabLeft = true
+                                        state.disk.fabAtLeft = true
+                                    } else if (fabLeft && fabDragX > fabSlopPx) {
+                                        fabLeft = false
+                                        state.disk.fabAtLeft = false
+                                    }
+                                    fabDragX = 0f
+                                    fabDragY = 0f
+                                },
+                            ) { change, dragAmount ->
+                                change.consume()
+                                fabDragX += dragAmount.x
+                                fabDragY += dragAmount.y
+                            }
+                        },
+                ) {
+                    SmallFloatingActionButton(onClick = { fabMenu = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Session options")
+                    }
+                    DropdownMenu(expanded = fabMenu, onDismissRequest = { fabMenu = false }) {
+                        SessionOptionsItems(
+                            hasShell = hasShell,
+                            fontSp = fontSp,
+                            showKeys = showKeys,
+                            boxMode = boxMode,
+                            onDismiss = { fabMenu = false },
+                            onDisconnect = { requestDisconnect() },
+                            onSftp = { showSftp = true },
+                            onFontDown = { setFont(fontSp - 1f) },
+                            onFontUp = { setFont(fontSp + 1f) },
+                            onToggleKeys = { showKeys = !showKeys },
+                            onToggleBoxMode = { boxMode = !boxMode },
+                            onSettings = onSettings,
+                            onHome = { goBack() },
+                        )
+                    }
+                }
+            }
+        }
+    } // options Box overlay
     } // TabDrawerFrame
 
     // Tab × with warnOnClose: confirm, then the caller closes + navigates.
@@ -1323,6 +1490,70 @@ fun TerminalScreen(
             locked = state.loaded?.needsPassphrase == true,
             onConnect = { pw, remember -> doConnectWithPassword(pw, remember) },
             onCancel = { sessionViewModel.cancelAuthPrompt(sessionId, state) },
+        )
+    }
+}
+
+/**
+ * Shared session-options menu items (ColumnScope receiver: DropdownMenuItem
+ * needs it). The header ⋮, the active tab's ⋮ (hidden header), and the
+ * floating ⋮ (hidden header + tabs off) all render these — one item list,
+ * three anchors. [onDisconnect] honors warnOnClose via requestDisconnect;
+ * Settings/Profile list cover the header buttons lost in hidden mode.
+ */
+@Composable
+private fun ColumnScope.SessionOptionsItems(
+    hasShell: Boolean,
+    fontSp: Float,
+    showKeys: Boolean,
+    boxMode: Boolean,
+    onDismiss: () -> Unit,
+    onDisconnect: () -> Unit,
+    onSftp: () -> Unit,
+    onFontDown: () -> Unit,
+    onFontUp: () -> Unit,
+    onToggleKeys: () -> Unit,
+    onToggleBoxMode: () -> Unit,
+    onSettings: () -> Unit,
+    onHome: () -> Unit,
+    // Drawer ⋮ passes false: the drawer footer already pins Profile list
+    // + Settings, so the menu skips its own copies.
+    showFooter: Boolean = true,
+) {
+    DropdownMenuItem(
+        text = { Text("Disconnect") },
+        onClick = { onDismiss(); onDisconnect() },
+    )
+    DropdownMenuItem(
+        text = { Text("SFTP") },
+        enabled = hasShell,
+        onClick = { onDismiss(); onSftp() },
+    )
+    DropdownMenuItem(
+        text = { Text(if (boxMode) "Direct typing mode" else "Command box mode") },
+        onClick = { onDismiss(); onToggleBoxMode() },
+    )
+    DropdownMenuItem(
+        text = { Text("Font - (now ${fontSp.toInt()}sp)") },
+        onClick = { onDismiss(); onFontDown() },
+    )
+    DropdownMenuItem(
+        text = { Text("Font + (now ${fontSp.toInt()}sp)") },
+        onClick = { onDismiss(); onFontUp() },
+    )
+    DropdownMenuItem(
+        text = { Text(if (showKeys) "Hide extra keys" else "Show extra keys") },
+        onClick = { onDismiss(); onToggleKeys() },
+    )
+    if (showFooter) {
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text("Settings") },
+            onClick = { onDismiss(); onSettings() },
+        )
+        DropdownMenuItem(
+            text = { Text("Profile list") },
+            onClick = { onDismiss(); onHome() },
         )
     }
 }
