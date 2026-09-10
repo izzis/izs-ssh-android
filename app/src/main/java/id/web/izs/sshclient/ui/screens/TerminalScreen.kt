@@ -197,6 +197,10 @@ fun TerminalScreen(
     )
     // Registry read subscribes this scope: strip/drawer follow open/close.
     val tabs = sessionViewModel.ordered()
+    // IME dock height (px): declared up here so the outer Column pads the
+    // WHOLE content (grid + strip + extra keys), not just the grid.
+    val dockDensity = LocalDensity.current
+    var dockPx by remember { mutableFloatStateOf(0f) }
     val liveProfiles = remember(state.loaded) { state.displayProfiles() }
     fun tabTitleOf(h: id.web.izs.sshclient.ui.SshSessionHandle): String =
         liveProfiles.find { it.id == h.profileId }?.name ?: h.profileSnapshot.name
@@ -570,7 +574,12 @@ fun TerminalScreen(
     // Stage stays full-bleed scheme background, but the top bar now matches every other
     // page (themed surface, back arrow + title) — the slate strip is gone.
     // Back keeps the session alive; the status dot disconnects.
-    Column(Modifier.fillMaxSize().background(stageBg)) {
+    // Whole-column dock: on edge-to-edge devices adjustResize no longer
+    // shrinks the window, so a grid-only pad leaves the bar under the IME.
+    Column(
+        Modifier.fillMaxSize().background(stageBg)
+            .padding(bottom = with(dockDensity) { dockPx.toDp() }),
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -820,7 +829,8 @@ fun TerminalScreen(
         // (3) 500ms re-assert safety net while open.
         // (4) Small settle wait in the hot path (no fit-spam: our refit hits
         //     the network via window-change, so no 150/400ms fit retries).
-        val dockDensity = LocalDensity.current
+        // No fixed shave: one constant can never fit both an over-claiming
+        // keyboard and an accurate one (44dp buried accurate keyboards).
         val imeBottomPx = WindowInsets.ime.getBottom(dockDensity).toFloat()
         val activity = LocalContext.current as? Activity
         var visKbPx by remember { mutableFloatStateOf(0f) }
@@ -838,16 +848,10 @@ fun TerminalScreen(
             decor.viewTreeObserver.addOnGlobalLayoutListener(lis)
             onDispose { decor.viewTreeObserver.removeOnGlobalLayoutListener(lis) }
         }
-        // SwiftKey claims ~35dp more inset than its visible keys (hidden
-        // toolbar slot). Shave 44.dp docks the bar onto the visible keys
-        // (SwiftKey, toolbar OFF) — used only when the visible rect does
-        // NOT prove a smaller true height. One constant to tune.
-        val imeShavePx = with(dockDensity) { 44.dp.toPx() }
-        var dockPx by remember { mutableFloatStateOf(0f) }
         LaunchedEffect(imeBottomPx, visKbPx) {
             // Visible rect notably smaller than claimed inset = true keys.
             val useVis = visKbPx > 0f && visKbPx < imeBottomPx - with(dockDensity) { 10.dp.toPx() }
-            val target = (if (useVis) visKbPx else imeBottomPx - imeShavePx).coerceAtLeast(0f)
+            val target = (if (useVis) visKbPx else imeBottomPx).coerceAtLeast(0f)
             if (target != dockPx) {
                 delay(10)
                 dockPx = target
@@ -856,7 +860,7 @@ fun TerminalScreen(
             // Safety net: re-assert the dock height periodically.
             while (true) {
                 delay(500)
-                val t = (if (useVis) visKbPx else imeBottomPx - imeShavePx).coerceAtLeast(0f)
+                val t = (if (useVis) visKbPx else imeBottomPx).coerceAtLeast(0f)
                 if (t != dockPx) {
                     dockPx = t
                     Log.d("ImeDock", "re-assert ime=$imeBottomPx vis=$visKbPx dock=$t")
@@ -866,7 +870,6 @@ fun TerminalScreen(
         BoxWithConstraints(
             modifier = Modifier.weight(1f).fillMaxWidth()
                 .background(stageBg)
-                .padding(bottom = with(dockDensity) { dockPx.toDp() })
                 .pointerInput(tabLoc, drawerOpen) {
                     // Edge-band fling opens the side drawer. NEVER consumes:
                     // taps, scrollback scrolls and selection drags keep

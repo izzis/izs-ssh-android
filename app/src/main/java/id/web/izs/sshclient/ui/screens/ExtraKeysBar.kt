@@ -3,17 +3,16 @@ package id.web.izs.sshclient.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -72,8 +72,8 @@ fun ExtraKeysBar(
         Column {
             HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
             Column(
-                Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 for (row in layout.rows) {
                     Row(
@@ -168,7 +168,13 @@ private fun MenuKeyBtn(
  * Compact extra key. [fill] tints the button (null = neutral); [content]
  * overrides the label color (null = button default). An explicit per-key
  * color passes both; kind tints pass fill only, keeping default content.
+ *
+ * Uniform [ExtraKeyHeight] for every key (a plain Surface, not a Button:
+ * M3 buttons enforce a 40dp min height internally, which would keep the
+ * dead space this bar was slimmed to remove).
  */
+private val ExtraKeyHeight = 38.dp
+
 @Composable
 private fun ExtraKeyBtn(
     label: String,
@@ -178,22 +184,26 @@ private fun ExtraKeyBtn(
     content: Color? = null,
     onTap: () -> Unit,
 ) {
-    OutlinedButton(
+    Surface(
         onClick = onTap,
         enabled = enabled,
-        modifier = modifier,
+        modifier = modifier.height(ExtraKeyHeight),
         shape = RoundedCornerShape(6.dp),
-        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp),
-        colors = if (fill != null) {
-            ButtonDefaults.outlinedButtonColors(
-                containerColor = fill,
-                contentColor = content ?: MaterialTheme.colorScheme.primary,
-            )
-        } else {
-            ButtonDefaults.outlinedButtonColors()
-        },
+        color = fill ?: Color.Transparent,
+        contentColor = content ?: MaterialTheme.colorScheme.onSurface,
     ) {
-        Text(label, fontSize = 11.sp)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Text(
+                label,
+                fontSize = 11.sp,
+                maxLines = 1,
+                color = (content ?: MaterialTheme.colorScheme.onSurface)
+                    .copy(alpha = if (enabled) 1f else 0.38f),
+            )
+        }
     }
 }
 
