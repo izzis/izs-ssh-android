@@ -187,6 +187,8 @@ private fun ExtraKeyBtn(
     Surface(
         onClick = onTap,
         enabled = enabled,
+        // Bar keys are plain tappables; focus returns to the pipe via
+        // sendKeySteps (requestFocus + show) after every tap.
         modifier = modifier.height(ExtraKeyHeight),
         shape = RoundedCornerShape(6.dp),
         color = fill ?: Color.Transparent,

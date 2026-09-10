@@ -26,8 +26,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -74,18 +74,23 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -312,12 +317,10 @@ fun TerminalScreen(
         onDispose { lifecycle.removeObserver(obs) }
     }
     var boxInput by remember { mutableStateOf("") }
-    // Hidden field MIRROR: diff-based streaming needs the field to match the
-    // shell's input buffer AND carry an explicit end-of-text cursor. A plain
-    // String value leaves the IME cursor wherever it was (stale 0 after a
-    // programmatic set), so typing lands mid-text and backspace misses —
-    // TextFieldValue pins the cursor where the edits actually go.
-    var kbText by remember { mutableStateOf(TextFieldValue("")) }
+    // Hidden pipe state (state-based field, predictions off, Termux-style):
+    // display-only — bytes reach the shell as platform events (see
+    // SshInputPipe), so this never needs to match the remote line.
+    val pipeState = rememberTextFieldState("")
     var fontSp by remember { mutableStateOf(state.disk.terminalFontSp) }
     var ctrlSticky by remember { mutableStateOf(false) }
     var altSticky by remember { mutableStateOf(false) }
@@ -343,23 +346,14 @@ fun TerminalScreen(
     // dismiss, tab switch) never touches a running transfer.
     var showSftp by remember { mutableStateOf(false) }
     var pendingConnect by remember { mutableStateOf(false) }
-    // WebView-based terminals clear their hidden textarea on Enter,
-    // so the web view resets composing and predictions start fresh each line.
-    // Compose must ask for the same explicitly — restartInput() resets the
-    // IME's prediction/composing state while keeping the keyboard open.
+    // Like the web textarea reset: a submitted line clears the pipe and
+    // restarts IME state (composing) with the keyboard staying open.
     val view = LocalView.current
     val imm = remember(context) { context.getSystemService(InputMethodManager::class.java) }
     fun resetImeLine() {
-        kbText = TextFieldValue("")
+        pipeState.edit { replace(0, length, "") }
         try { imm.restartInput(view) } catch (_: Exception) { }
     }
-    /** Mirror external input (paste) into the field with the cursor pinned at the end. */
-    fun mirrorExternalInput(text: String) {
-        val merged = kbText.text + text
-        kbText = TextFieldValue(merged, TextRange(merged.length))
-        try { imm.restartInput(view) } catch (_: Exception) { }
-    }
-
     fun setFont(v: Float) {
         val c = v.coerceIn(8f, 24f)
         fontSp = c
@@ -437,12 +431,12 @@ fun TerminalScreen(
 
     /**
      * Single funnel for every extra-key/menu payload, as explicit step
-     * bytes. Same mirror invariant as paste: printable bytes join the
-     * hidden field (cursor pinned at the end) so backspace diffs correctly;
-     * a submitted line (CR/LF) clears it instead. Pure escape sequences
-     * mirror nothing. Multiple steps go out staged with a settle delay so
-     * each part registers in order (vim `:q!`: ESC, then text, then Enter).
-     * The bar tap steals focus onto the button, so hand it straight back.
+     * bytes. Bytes go out staged with a settle delay so each part registers
+     * in order (vim `:q!`: ESC, then text, then Enter). A submitted line
+     * (CR/LF) resets IME state. UP/DOWN is just ESC[A/B — the shell owns
+     * the recalled line and the IME never models it (Termux: backspace
+     * sends DEL unconditionally, so any length deletes). The bar tap
+     * steals focus onto the button, so hand it straight back.
      */
     fun sendKeySteps(steps: List<KeyStep>) {
         val s = handle.shell ?: return
@@ -451,10 +445,6 @@ fun TerminalScreen(
         var submitted = false
         for (b in byteSteps) {
             if (b.any { it == '\r' || it == '\n' }) submitted = true
-            else {
-                val printable = b.filter { it.code >= 0x20 && it.code != 0x7F }
-                if (printable.isNotEmpty()) mirrorExternalInput(printable)
-            }
         }
         if (submitted) resetImeLine()
         sendChunks(s, byteSteps)
@@ -992,18 +982,14 @@ fun TerminalScreen(
                             copiedMsg = "Selection copied"
                         },
                         onPasteSelection = { text ->
-                            // The hidden field mirrors the shell's input
-                            // buffer for diff-based typing: a paste that
-                            // bypasses it would leave backspace dead (field
-                            // empty while the line has text). Mirror first so
-                            // delete/continue-typing diff correctly; skip in
-                            // box mode (its own field owns the buffer there).
+                            // Bytes go straight out; the pipe is display-only
+                            // (see SshInputPipe), so there is nothing to keep
+                            // in sync here.
                             // The Paste tap steals focus onto the button, so
                             // hand it straight back — otherwise typing and
                             // backspace need an extra terminal tap first.
                             if (handle.shell != null) {
                                 if (!boxMode) {
-                                    mirrorExternalInput(text)
                                     focusRequester.requestFocus()
                                     keyboard?.show()
                                 }
@@ -1085,26 +1071,67 @@ fun TerminalScreen(
         }
         }
         if (!boxMode) {
-            // Hidden field: streams soft-keyboard keystrokes raw (diff-based,
-            // so backspace arrives as DEL). Enter sends CR like a terminal.
-            BasicTextField(
-                value = kbText,
-                onValueChange = { next ->
-                    val prev = kbText.text
-                    val cur = next.text
-                    val common = prev.commonPrefixWith(cur).length
-                    val removed = prev.length - common
-                    repeat(removed) { sendRaw(DEL) }
-                    val added = cur.substring(common).replace(LF, CR)
-                    if (added.isNotEmpty()) sendCooked(added)
-                    // New line (or buffer cap): fresh IME state per line.
-                    if (added.contains(CR) || cur.length > 48) resetImeLine()
-                    else kbText = next
-                },
-                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { sendRaw(CR); resetImeLine() }),
-                modifier = Modifier.size(1.dp).focusRequester(focusRequester),
-            )
+            // Hidden pipe: a 1dp state-based field under the platform
+            // interceptor (SshInputPipe) — Termux's connection, not the
+            // state's: the IME-facing buffer stays empty, commits and
+            // deletes reach the shell as events. Enter (Done action or
+            // committed newline) sends CR like a terminal. Hardware keys
+            // never become connection calls (handled in onKeyEvent below):
+            // the two paths are mutually exclusive per press.
+            val pipeInterceptor = remember {
+                SshInputInterceptor(
+                    view,
+                    onCommitText = { text, submitted ->
+                        if (text.isNotEmpty()) sendCooked(text)
+                        if (submitted) resetImeLine()
+                    },
+                    onDelete = { n -> repeat(n) { sendRaw(DEL) } },
+                    onForwardDelete = { n -> repeat(n) { sendRaw(FWD) } },
+                    onSpecial = { seq -> sendSpecial(seq) },
+                    onEditorAction = {
+                        sendRaw(CR)
+                        resetImeLine()
+                    },
+                )
+            }
+            InterceptPlatformTextInput(pipeInterceptor) {
+                BasicTextField(
+                    state = pipeState,
+                    keyboardOptions = KeyboardOptions(
+                        // Plain text here: the interceptor forces TYPE_NULL
+                        // (Termux default — no strip, no composing tricks, no
+                        // password-manager overlay, no number row) and keeps
+                        // the Done action. Trade-off: gesture/swipe typing is
+                        // off in this invisible pipe; tap-typing unaffected.
+                        keyboardType = KeyboardType.Text,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.size(1.dp).focusRequester(focusRequester)
+                        .onKeyEvent { ev ->
+                            // Hardware keys never become connection calls:
+                            // field them here (Termux: onKeyDown). Printable
+                            // keys go cooked like typed text; the two paths
+                            // (this + the pipe) are mutually exclusive.
+                            if (ev.type != KeyEventType.KeyDown) false
+                            else when {
+                                ev.key == Key.Backspace -> {
+                                    sendRaw(DEL)
+                                    true
+                                }
+                                ev.key == Key.Enter || ev.key == Key.NumPadEnter -> {
+                                    sendRaw(CR)
+                                    resetImeLine()
+                                    true
+                                }
+                                else -> ev.nativeKeyEvent.getUnicodeChar().takeIf { it != 0 }?.let { uni ->
+                                    sendCooked(uni.toChar().toString())
+                                    true
+                                } ?: false
+                            }
+                    },
+                )
+            }
         }
     }
 
@@ -1358,5 +1385,7 @@ private fun PasswordPromptDialog(
 
 // ASCII-safe escape constants (never raw control bytes in source).
 private val DEL = 127.toChar().toString()
-private val LF = 10.toChar().toString()
 private val CR = 13.toChar().toString()
+
+/** Forward (rightward) delete: the DEL preset's twin for after-cursor cuts. */
+private val FWD = 27.toChar().toString() + "[3~"

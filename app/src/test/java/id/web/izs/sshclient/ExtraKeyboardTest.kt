@@ -16,8 +16,8 @@ import id.web.izs.sshclient.core.term.WIDTH_DOUBLE
 import id.web.izs.sshclient.core.term.WIDTH_NORMAL
 import id.web.izs.sshclient.core.term.WIDTH_WIDE
 import id.web.izs.sshclient.core.term.describeStep
-import id.web.izs.sshclient.core.term.maxLabelForWidth
 import id.web.izs.sshclient.core.term.loadKeyLayout
+import id.web.izs.sshclient.core.term.maxLabelForWidth
 import id.web.izs.sshclient.core.term.normalizeKeyLayout
 import id.web.izs.sshclient.core.term.parseKeyLayout
 import id.web.izs.sshclient.core.term.saveKeyLayout
