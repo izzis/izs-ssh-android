@@ -65,8 +65,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
-import android.util.Log
-import id.web.izs.sshclient.BuildConfig
 import id.web.izs.sshclient.core.term.TerminalEmulator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -478,7 +476,6 @@ fun TerminalView(
                 if (v < drawnFirst * lh || v + vpH > (drawnFirst + drawnN) * lh) {
                     val total = emulator.historyRowCount() + emulator.rows
                     drawnFirst = ((v / lh).toInt() - 16).coerceIn(0, (total - drawnN).coerceAtLeast(0))
-                    if (BuildConfig.DEBUG) Log.d("TvScroll", "re-window first=$drawnFirst N=$drawnN")
                 }
             }
         }
@@ -561,13 +558,9 @@ fun TerminalView(
                 if (pinned || vScroll.value >= vScroll.maxValue) {
                     keepCursorVisible()
                     pinned = true
-                    if (BuildConfig.DEBUG) Log.d("TvScroll", "follow v=${vScroll.value} max=${vScroll.maxValue}")
                 } else if (historySize > lastHistory) {
                     vScroll.scrollTo(vScroll.value + ((historySize - lastHistory) * lineH).toInt())
-                    if (BuildConfig.DEBUG) Log.d("TvScroll", "compensate +${historySize - lastHistory}rows")
                 }
-            } else if (BuildConfig.DEBUG) {
-                Log.d("TvScroll", "skip touching=$touching inProgress=${vScroll.isScrollInProgress}")
             }
             // Re-anchor the baked window + gate the redraw. Pinned always
             // redraws (new text at the live edge); growth shifts indices
@@ -589,11 +582,7 @@ fun TerminalView(
         // single snap when pinned and untouched, no follow-up motion.
         LaunchedEffect(viewportW, viewportH, bottomReservePx) {
             if (pinned && !touching && !vScroll.isScrollInProgress) {
-                val b4 = vScroll.value
                 keepCursorVisible()
-                if (BuildConfig.DEBUG && kotlin.math.abs(vScroll.value - b4) > 1) {
-                    Log.d("TvScroll", "viewport-snap $b4->${vScroll.value} max=${vScroll.maxValue}")
-                }
             }
         }
         // Scroll lives OUTSIDE the Canvas: a scrolled Canvas reported a
@@ -601,17 +590,15 @@ fun TerminalView(
         Box(
             modifier = Modifier
                 .pointerInput(Unit) {
-                    // Telemetry + touching flag only: awaits WITHOUT
+                    // touching flag only: awaits WITHOUT
                     // consuming, so scroll/tap behavior is untouched.
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
                         touching = true
-                        if (BuildConfig.DEBUG) Log.d("TvScroll", "down v=${vScroll.value} max=${vScroll.maxValue}")
                         do {
                             val ev = awaitPointerEvent()
                         } while (ev.changes.any { it.pressed })
                         touching = false
-                        if (BuildConfig.DEBUG) Log.d("TvScroll", "up v=${vScroll.value} max=${vScroll.maxValue}")
                     }
                 }
                 // Keyed Unit (never restarts mid-gesture): all reads inside stay
@@ -1040,13 +1027,6 @@ private fun SelHandle(
     }
 }
 
-// Debug telemetry counters (timing only, no PII).
-private var tvDrawN = 0L
-private var tvDrawSlow = 0L
-private var tvPhaseBuild = 0L
-private var tvPhaseDrawT = 0L
-private var tvPhaseRest = 0L
-
 private fun DrawScope.drawTerminal(
     emulator: TerminalEmulator,
     historyRows: Int,
@@ -1058,7 +1038,6 @@ private fun DrawScope.drawTerminal(
     lineH: Float,
     sidePadPx: Float,
 ) {
-    val t0 = if (BuildConfig.DEBUG) System.nanoTime() else 0L
     val total = historyRows + emulator.rows
     val endRow = minOf(firstRow + rowCount, total).coerceAtLeast(firstRow)
     // Backdrop covers the drawn window only (parent page is already black,
@@ -1099,9 +1078,6 @@ private fun DrawScope.drawTerminal(
         // cell): 80 single-char spans made paragraph layout pathological
         // (~15ms/row measured). Typical rows now emit a handful of spans.
         var allSpace = true
-        var b0 = 0L
-        var m0 = 0L
-        if (BuildConfig.DEBUG) b0 = System.nanoTime()
         val rowText = buildAnnotatedString {
             var spanFg = 0
             var spanBold = false
@@ -1132,46 +1108,14 @@ private fun DrawScope.drawTerminal(
                 append(ch)
             }
         }
-        if (BuildConfig.DEBUG) {
-            m0 = System.nanoTime()
-            tvPhaseBuild += m0 - b0
-        }
         flushRun(cols)
         if (!allSpace) {
-            val d0 = if (BuildConfig.DEBUG) System.nanoTime() else 0L
             drawText(
                 textMeasurer = measurer,
                 text = rowText,
                 topLeft = Offset(sidePadPx, top),
                 style = style,
             )
-            if (BuildConfig.DEBUG) {
-                val d1 = System.nanoTime()
-                tvPhaseDrawT += d1 - d0
-                tvPhaseRest += d1 - m0 - (d1 - d0)
-            }
-        } else if (BuildConfig.DEBUG) {
-            tvPhaseRest += System.nanoTime() - m0
         }
-    }
-    if (BuildConfig.DEBUG) {
-        val ms = (System.nanoTime() - t0) / 1_000_000.0
-        tvDrawN++
-        // Slow frames always; fast ones sampled (rate info without spam).
-        if (ms >= 8.0) {
-            tvDrawSlow++
-            Log.d(
-                "TvPerf",
-                "draw SLOW rows=${endRow - firstRow}/$total ms=${"%.1f".format(ms)} " +
-                    "build=${"%.1f".format(tvPhaseBuild / 1_000_000.0)} " +
-                    "drawT=${"%.1f".format(tvPhaseDrawT / 1_000_000.0)} " +
-                    "rest=${"%.1f".format(tvPhaseRest / 1_000_000.0)}",
-            )
-        } else if (tvDrawN % 200 == 1L) {
-            Log.d("TvPerf", "draw ok rows=${endRow - firstRow}/$total ms=${"%.1f".format(ms)} slow=$tvDrawSlow/$tvDrawN")
-        }
-        tvPhaseBuild = 0L
-        tvPhaseDrawT = 0L
-        tvPhaseRest = 0L
     }
 }

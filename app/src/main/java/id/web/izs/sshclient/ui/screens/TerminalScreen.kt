@@ -3,11 +3,9 @@ package id.web.izs.sshclient.ui.screens
 import android.app.Activity
 import android.content.ClipData
 import android.graphics.Rect
-import android.util.Log
 import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
-import id.web.izs.sshclient.BuildConfig
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -845,7 +843,6 @@ fun TerminalScreen(
             if (target != dockPx) {
                 delay(10)
                 dockPx = target
-                Log.d("ImeDock", "ime=$imeBottomPx vis=$visKbPx useVis=$useVis dock=$dockPx")
             }
             // Safety net: re-assert the dock height periodically.
             while (true) {
@@ -853,7 +850,6 @@ fun TerminalScreen(
                 val t = (if (useVis) visKbPx else imeBottomPx).coerceAtLeast(0f)
                 if (t != dockPx) {
                     dockPx = t
-                    Log.d("ImeDock", "re-assert ime=$imeBottomPx vis=$visKbPx dock=$t")
                 }
             }
         }
@@ -917,7 +913,6 @@ fun TerminalScreen(
             val wantRows = (availH / lineH).toInt().coerceIn(8, 64)
 
             suspend fun applySize(c: Int, r: Int) {
-                val t0 = if (BuildConfig.DEBUG) System.nanoTime() else 0L
                 emulator.resize(c, r)
                 handle.bumpVersion()
                 try {
@@ -925,9 +920,6 @@ fun TerminalScreen(
                         handle.shell?.resize(c, r, (c * charW).toInt(), (r * lineH).toInt())
                     }
                 } catch (_: Exception) { }
-                if (BuildConfig.DEBUG) {
-                    Log.d("TvPerf", "resize ${c}x$r ms=${(System.nanoTime() - t0) / 1_000_000.0}")
-                }
             }
             // Refit at SETTLE, never per-frame. Sizes stream every animation
             // frame while the keyboard slides; reflowing per frame (buffer
