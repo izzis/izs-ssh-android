@@ -1,0 +1,18 @@
+izs SSH — NOTICES
+
+This app's own source code is licensed under the MIT License (see LICENSE).
+
+This app is an unofficial, independent implementation. It is compatible with
+Tabby Desktop's config/vault/sync format (behavioral parity, no Tabby code
+copied) and is NOT affiliated with or endorsed by the Tabby Developers.
+Tabby Desktop itself is MIT licensed, Copyright (c) 2017 Tabby Developers
+(https://github.com/Eugeny/tabby).
+
+Third-party libraries shipped in the app (their own licenses apply, see
+Settings > About > Open-source licenses in the app):
+
+- Apache License 2.0: sshj, OkHttp, SnakeYAML, Jetpack Compose / AndroidX,
+  kotlinx.coroutines, kotlinx.serialization-json, SLF4J,
+  Apache MINA SSHD (test-only, never ships in the APK).
+- Bouncy Castle (MIT-style adapted license): bcprov-jdk18on, bcpkix-jdk18on.
+- AndroidX Security Crypto (Apache 2.0).

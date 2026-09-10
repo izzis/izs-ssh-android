@@ -10,6 +10,9 @@ Behavioral parity with [Tabby Desktop](https://github.com/Eugeny/tabby)
 terminal UX (xterm-style). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
 technical design.
 
+Unofficial, independent project — not affiliated with or endorsed by the
+Tabby Developers. Licensed under the MIT License, see [LICENSE](LICENSE).
+
 ## Features (usable today)
 
 - **Tabby Sync import**: host + token setup, cloud config list, download /

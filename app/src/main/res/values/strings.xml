@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Feedback contact: kept out of Kotlin so it can change without code edits. -->
+    <string name="feedback_email">al@izs.web.id</string>
+</resources>

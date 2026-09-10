@@ -49,6 +49,7 @@ import id.web.izs.sshclient.ui.rememberAppDarkTheme
 import id.web.izs.sshclient.ui.SessionLimitReached
 import id.web.izs.sshclient.ui.SshSessionViewModel
 import id.web.izs.sshclient.ui.screens.AppearanceSettingsScreen
+import id.web.izs.sshclient.ui.screens.AboutScreen
 import id.web.izs.sshclient.ui.screens.ConfigFileScreen
 import id.web.izs.sshclient.ui.screens.ConfigSyncScreen
 import id.web.izs.sshclient.ui.screens.ColorSchemeEditorScreen
@@ -465,6 +466,10 @@ private fun AppNav(
         }
         composable("settings/window") {
             WindowSettingsScreen(appState) { nav.popBackStack() }
+        }
+        // About: version + feedback + license attributions.
+        composable("settings/about") {
+            AboutScreen { nav.popBackStack() }
         }
     }
     // Global: cap-blocked taps from home AND the terminal quick-pick sheet

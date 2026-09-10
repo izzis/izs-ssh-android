@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Style
@@ -81,6 +82,10 @@ val SETTING_SECTIONS = listOf(
     SettingSection(
         "window", "Window", "Tab location: synced config or this device",
         Icons.Filled.AspectRatio,
+    ),
+    SettingSection(
+        "about", "About", "Version, send feedback",
+        Icons.Filled.Info,
     ),
 )
 
