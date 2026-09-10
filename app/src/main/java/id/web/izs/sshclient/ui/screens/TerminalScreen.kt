@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -820,6 +821,7 @@ fun TerminalScreen(
         // No fixed shave: one constant can never fit both an over-claiming
         // keyboard and an accurate one (44dp buried accurate keyboards).
         val imeBottomPx = WindowInsets.ime.getBottom(dockDensity).toFloat()
+        val navBottomPx = WindowInsets.navigationBars.getBottom(dockDensity).toFloat()
         val activity = LocalContext.current as? Activity
         var visKbPx by remember { mutableFloatStateOf(0f) }
         DisposableEffect(activity) {
@@ -836,10 +838,16 @@ fun TerminalScreen(
             decor.viewTreeObserver.addOnGlobalLayoutListener(lis)
             onDispose { decor.viewTreeObserver.removeOnGlobalLayoutListener(lis) }
         }
-        LaunchedEffect(imeBottomPx, visKbPx) {
+        LaunchedEffect(imeBottomPx, visKbPx, navBottomPx) {
             // Visible rect notably smaller than claimed inset = true keys.
             val useVis = visKbPx > 0f && visKbPx < imeBottomPx - with(dockDensity) { 10.dp.toPx() }
-            val target = (if (useVis) visKbPx else imeBottomPx).coerceAtLeast(0f)
+            // Minus nav bar: MainActivity's Scaffold already pads content by
+            // safeDrawing (nav included), so a full-IME dock double-counts
+            // it and leaves a black gap between the extra keys and the
+            // keyboard. (Termux never hits this: adjustResize puts its
+            // ExtraKeysView at the window bottom, measured once by the
+            // system instead of stacked manual insets.)
+            val target = ((if (useVis) visKbPx else imeBottomPx) - navBottomPx).coerceAtLeast(0f)
             if (target != dockPx) {
                 delay(10)
                 dockPx = target
@@ -847,7 +855,7 @@ fun TerminalScreen(
             // Safety net: re-assert the dock height periodically.
             while (true) {
                 delay(500)
-                val t = (if (useVis) visKbPx else imeBottomPx).coerceAtLeast(0f)
+                val t = ((if (useVis) visKbPx else imeBottomPx) - navBottomPx).coerceAtLeast(0f)
                 if (t != dockPx) {
                     dockPx = t
                 }
