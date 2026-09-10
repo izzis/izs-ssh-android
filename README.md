@@ -87,6 +87,15 @@ technical design.
   overrides + this-device-only instant mode. Terminal content only.
 - **Crash diagnostics**: debug builds save the last crash trace; the next
   launch offers a Crash Report screen with copy.
+- **Background survival**: connected sessions are guarded by a foreground
+  service (`specialUse`, Android 14+ compliant) with an exact notification
+  ("N SSH sessions active", expandable per-host lines, Disconnect-all
+  action). First connect asks for the notification permission (Android 13+;
+  without it the notice cannot show) and offers the battery-optimization
+  exemption (honest scope: helps Doze, not OEM task killers). Settings >
+  SSH offers an opt-in CPU wake lock (default off) for long jobs; a killed
+  session auto-retries once (background kills also post a tap-to-open
+  notice).
 
 ## Stack (all stable, none deprecated)
 
@@ -125,7 +134,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 242/242 green)
+## Parity guarantees (tested, 255/255 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

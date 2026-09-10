@@ -160,7 +160,14 @@ fun TerminalScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
-    val handle = remember(sessionId) { sessionViewModel.get(sessionId) }
+    // Registry membership as OBSERVABLE state: Close-all (the home Active
+    // card or the service notification action) removes the handle while an
+    // open screen still holds it via remember — without the takeIf the
+    // screen would show a stale "connected" terminal over a closed shell
+    // (the phantom shape this codebase keeps killing). Reuses the closed
+    // branch below.
+    val registered = sessionViewModel.sessions.containsKey(sessionId)
+    val handle = remember(sessionId) { sessionViewModel.get(sessionId) }?.takeIf { registered }
     if (handle == null) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Session closed", color = MaterialTheme.colorScheme.error)
@@ -346,6 +353,52 @@ fun TerminalScreen(
     var copiedMsg by remember { mutableStateOf<String?>(null) }
     var showUnlock by remember { mutableStateOf(false) }
     var showCloseConfirm by remember { mutableStateOf(false) }
+    // Battery-optimization exemption (background survival): offered once on
+    // first connect with honest scope — helps Doze/battery savers, cannot
+    // stop every OEM task killer. "Later" re-arms for the next connect.
+    var showBatteryDialog by remember { mutableStateOf(false) }
+    // Notification permission (API 33+): asked once on first connect,
+    // BEFORE the battery prompt. The FGS notice is exempt, but without
+    // the grant the app-level switch cannot be managed from settings
+    // (the FGS notice sinks with it) and the session-lost alert can
+    // never show.
+    var showNotifDialog by remember { mutableStateOf(false) }
+    fun hasNotifPermission(): Boolean =
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    fun checkBattery() {
+        if (state.disk.batteryOptAsked) return
+        if (id.web.izs.sshclient.core.session.isBatteryExempt(context)) {
+            state.disk.batteryOptAsked = true
+            return
+        }
+        showBatteryDialog = true
+    }
+    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        state.disk.notifAsked = true
+        if (granted) {
+            // The FGS notice may have been suppressed while ungranted (some
+            // OEMs hide even exempt notices): re-mirror so it posts now.
+            id.web.izs.sshclient.core.session.SessionService.refresh(
+                context,
+                sessionViewModel.connectedInfos().map { it.label },
+            )
+        }
+        checkBattery()
+    }
+    LaunchedEffect(status) {
+        if (status != "connected") return@LaunchedEffect
+        if (!hasNotifPermission() && !state.disk.notifAsked) {
+            showNotifDialog = true
+            return@LaunchedEffect
+        }
+        checkBattery()
+    }
     // Deferred vault save of a typed password that connected while locked.
     var pendingPasswordSave by remember { mutableStateOf(false) }
     // The VM raises passwordSavePending only when the save hit a locked
@@ -809,6 +862,87 @@ fun TerminalScreen(
                 delay(2500)
                 copiedMsg = null
             }
+        }
+        if (showNotifDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    state.disk.notifAsked = true
+                    showNotifDialog = false
+                    checkBattery()
+                },
+                title = { Text("Show session notifications?") },
+                text = {
+                    Text(
+                        "Connected sessions are guarded by an ongoing " +
+                            "notification (session count, per-host lines, " +
+                            "Disconnect all). Android 13+ needs your " +
+                            "permission; without it the notice — and the " +
+                            "session-lost alert — cannot show.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showNotifDialog = false
+                        notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }) { Text("Allow") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        state.disk.notifAsked = true
+                        showNotifDialog = false
+                        checkBattery()
+                    }) { Text("Skip") }
+                },
+            )
+        }
+        if (showBatteryDialog) {
+            // True when even the fallbacks opened nothing: keep the dialog
+            // up with a manual path instead of dying silently (the old bug).
+            var batteryStuck by remember { mutableStateOf(false) }
+            AlertDialog(
+                onDismissRequest = { showBatteryDialog = false },
+                title = { Text("Stay connected in background?") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Android may kill background sessions (Doze, battery " +
+                                "savers, aggressive task managers). Allowing " +
+                                "unrestricted battery use helps — but it cannot " +
+                                "stop every phone maker. Killed sessions retry " +
+                                "once automatically.",
+                        )
+                        if (batteryStuck) {
+                            Text(
+                                "Could not open the setting automatically — " +
+                                    "allow it manually: Settings > Apps > " +
+                                    "izs SSH > Battery > Unrestricted.",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        state.disk.batteryOptAsked = true
+                        if (id.web.izs.sshclient.core.session.openBatterySettings(context)) {
+                            showBatteryDialog = false
+                        } else {
+                            batteryStuck = true
+                        }
+                    }) { Text("Allow") }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { showBatteryDialog = false }) {
+                            Text("Later")
+                        }
+                        TextButton(onClick = {
+                            state.disk.batteryOptAsked = true
+                            showBatteryDialog = false
+                        }) { Text("Never") }
+                    }
+                },
+            )
         }
         if (failed != null) {
             Card(modifier = Modifier.fillMaxWidth().padding(12.dp)) {

@@ -16,6 +16,7 @@ import net.schmizz.sshj.SSHClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +41,34 @@ import java.util.UUID
  * sessions. Cap defaults to 5, hard max 8 ([ConfigDisk.MAX_SESSIONS_HARD_MAX]).
  */
 class SessionLimitReached(val max: Int) : IllegalStateException("Session limit reached ($max)")
+
+/** One connected session as mirrored to SessionService (label = `user@host`). */
+data class ConnectedInfo(val sessionId: String, val label: String)
+
+/**
+ * Notification label for a session: `user@host`, falling back to the
+ * profile name when the host is blank (defensive import). Pure for tests.
+ */
+fun sessionLabel(user: String, host: String, profileName: String): String {
+    val u = user.ifBlank { "root" }
+    return if (host.isBlank()) profileName.ifBlank { u } else "$u@$host"
+}
+
+/**
+ * Single-auto-retry gate after a transport death. Only sessions that had a
+ * live shell once qualify (a first-connect failure is the user's explicit
+ * tap — never retry behind their back), exactly once per death, and never
+ * when a UI answer is still pending (vault passphrase, auth password,
+ * host-key prompt). Pure for unit tests.
+ */
+fun shouldAutoRetry(
+    everConnected: Boolean,
+    autoRetried: Boolean,
+    needsPassphrase: Boolean,
+    hasAuthPrompt: Boolean,
+    hasHostKeyPrompt: Boolean,
+): Boolean = everConnected && !autoRetried &&
+    !needsPassphrase && !hasAuthPrompt && !hasHostKeyPrompt
 
 /**
  * Desktop `prompt-password` state: auth failed (wrong or missing password)
@@ -114,6 +143,14 @@ class SshSessionHandle(
     @Volatile var connectJob: Job? = null
     @Volatile var collectJob: Job? = null
     @Volatile var connecting: Boolean = false
+    /**
+     * Background-survival bookkeeping (SessionService plan): [everConnected]
+     * latches once the shell first connects; [autoRetried] re-arms (false)
+     * on every new connect and gates the single automatic retry after a
+     * transport death — manual Retry taps never consult it.
+     */
+    @Volatile var everConnected: Boolean = false
+    @Volatile var autoRetried: Boolean = false
 
     fun setStatus(v: String) { _status.value = v }
     fun setStage(v: String) { _stage.value = v }
@@ -167,8 +204,44 @@ class SshSessionViewModel : ViewModel() {
         _sessions[sessionId]?.setActivity(true)
     }
 
+    private fun sessionLabel(h: SshSessionHandle): String {
+        val o = h.profileSnapshot.options
+        return sessionLabel(o.user, o.host, h.profileSnapshot.name)
+    }
+
     /** One pooled TCP connection shared by tabs ([transportKeyOf]). */
     private class PooledTransport(val client: SSHClient, var refs: Int = 1)
+
+    /**
+     * Background-survival mirror for SessionService. MainActivity installs
+     * these (it owns the Context); the ViewModel itself never touches
+     * Android framework classes so it stays unit-testable.
+     *
+     * - [serviceSync]: the CURRENT connected list (`user@host` per session,
+     *   oldest first) after every transition — the service derives its
+     *   foreground state, exact count, and expanded lines from it, so the
+     *   notification can never drift from the registry.
+     * - [lostListener]: fired with the label when a dead session is
+     *   auto-retried while the app is backgrounded (the "tap to open"
+     *   notice; MainActivity checks POST_NOTIFICATIONS first).
+     *
+     * The last environment handed to [connect] is remembered so the
+     * single auto-retry can run for background tabs too (their
+     * TerminalScreen is not composed while backgrounded).
+     */
+    var serviceSync: ((List<ConnectedInfo>) -> Unit)? = null
+    var lostListener: ((String) -> Unit)? = null
+    private var lastEnv: Pair<AppState, File>? = null
+
+    /** Exact connected snapshot for [serviceSync]. Internal for unit tests. */
+    internal fun connectedInfos(): List<ConnectedInfo> =
+        _sessions.values.filter { it.isConnected }
+            .sortedBy { it.createdAt }
+            .map { ConnectedInfo(it.sessionId, sessionLabel(it)) }
+
+    private fun syncService() {
+        serviceSync?.invoke(connectedInfos())
+    }
 
     /**
      * Transport pool, guarded by [poolGuard] (plain synchronized: pool ops are
@@ -218,6 +291,7 @@ class SshSessionViewModel : ViewModel() {
         if (s != null) viewModelScope.launch {
             withContext(Dispatchers.IO) { closeShellQuietly(s) }
         }
+        syncService()
     }
 
     fun cancelConnect(sessionId: String) {
@@ -236,6 +310,7 @@ class SshSessionViewModel : ViewModel() {
         }
         h.setFailed(msg)
         h.setStatus("disconnected")
+        syncService()
     }
     /** One-shot typed password from the auth-failover prompt (+remember flag). */
     private data class PasswordAttempt(val password: String, val remember: Boolean)
@@ -274,6 +349,7 @@ class SshSessionViewModel : ViewModel() {
             finalizeAuthFailure(profile, appState)
             h.setFailed(prompt.error)
         }
+        syncService()
     }
 
     /**
@@ -315,6 +391,9 @@ class SshSessionViewModel : ViewModel() {
     fun connect(sessionId: String, appState: AppState, cacheDir: File) {
         val h = _sessions[sessionId] ?: return
         if (h.connecting || (h.shell != null && h.isConnected)) return
+        // Remembered for the single background auto-retry (their screen is
+        // not composed while backgrounded, so the ViewModel must redial).
+        lastEnv = appState to cacheDir
         // Retry path clears the previous failure; first connect starts clean.
         h.connecting = true
         h.setStage("Starting…")
@@ -445,6 +524,9 @@ class SshSessionViewModel : ViewModel() {
                 sess.onDied = { onTransportDeath(sessionId, sess, sess.client) }
                 h.shell = sess
                 h.setStatus("connected")
+                // A live shell re-arms the one-shot auto-retry bookkeeping.
+                h.everConnected = true
+                h.autoRetried = false
                 if (attempt != null && attempt.remember && authenticatedFresh) {
                     // Desktop savedPassword parity: the typed password that
                     // worked is stored. A locked vault defers to the unlock
@@ -498,6 +580,9 @@ class SshSessionViewModel : ViewModel() {
             } finally {
                 h.connecting = false
                 h.connectJob = null
+                // Every connect outcome is a service transition (connected
+                // or still disconnected) — the notification mirrors it.
+                syncService()
             }
         }
     }
@@ -541,6 +626,7 @@ class SshSessionViewModel : ViewModel() {
         h.setPrompt(null)
         h.setFailed(msg)
         h.setStatus("disconnected")
+        syncService()
     }
 
     /**
@@ -568,30 +654,68 @@ class SshSessionViewModel : ViewModel() {
     private fun onTransportDeath(sessionId: String, deadShell: SshConnector.ShellSession, deadClient: SSHClient) {
         viewModelScope.launch {
             val alive = try { deadClient.isConnected } catch (_: Exception) { false }
+            val newlyDead = mutableListOf<SshSessionHandle>()
             if (alive) {
-                val h = _sessions[sessionId] ?: return@launch
+                val h = _sessions[sessionId]
                 // Shell identity (not just client): a late callback must not
                 // kill a NEW shell opened by Reconnect on the same transport.
-                if (h.failed.value != null || h.shell !== deadShell) return@launch
-                val s = h.shell
-                h.shell = null
-                if (s != null) viewModelScope.launch {
-                    withContext(Dispatchers.IO) { closeShellQuietly(s) }
+                if (h != null && h.failed.value == null && h.shell === deadShell) {
+                    val s = h.shell
+                    h.shell = null
+                    if (s != null) viewModelScope.launch {
+                        withContext(Dispatchers.IO) { closeShellQuietly(s) }
+                    }
+                    h.setFailed("Session ended")
+                    h.setStatus("disconnected")
+                    newlyDead += h
                 }
-                h.setFailed("Session ended")
-                h.setStatus("disconnected")
-                return@launch
-            }
-            for (h in _sessions.values.toList()) {
-                val s = h.shell ?: continue
-                if (s.client !== deadClient || h.failed.value != null) continue
-                h.shell = null
-                viewModelScope.launch {
-                    withContext(Dispatchers.IO) { closeShellQuietly(s) }
+            } else {
+                for (h in _sessions.values.toList()) {
+                    val s = h.shell ?: continue
+                    if (s.client !== deadClient || h.failed.value != null) continue
+                    h.shell = null
+                    viewModelScope.launch {
+                        withContext(Dispatchers.IO) { closeShellQuietly(s) }
+                    }
+                    h.setFailed("Session ended")
+                    h.setStatus("disconnected")
+                    newlyDead += h
                 }
-                h.setFailed("Session ended")
-                h.setStatus("disconnected")
             }
+            syncService()
+            for (h in newlyDead) maybeAutoRetry(h)
+        }
+    }
+
+    /**
+     * The single automatic retry after a transport death (network loss,
+     * background kill). Runs for every tab — including backgrounded ones
+     * whose screen is not composed — using the last connect environment.
+     * Gated by [shouldAutoRetry]: exactly once per death, never when a UI
+     * answer is pending. A short settle delay lets a flapping network calm
+     * down; the retry aborts if the user already acted (closed, reconnected
+     * manually, or a new shell appeared).
+     */
+    private fun maybeAutoRetry(h: SshSessionHandle) {
+        val env = lastEnv ?: return
+        val (appState, cacheDir) = env
+        if (!shouldAutoRetry(
+                everConnected = h.everConnected,
+                autoRetried = h.autoRetried,
+                needsPassphrase = appState.loaded?.needsPassphrase == true,
+                hasAuthPrompt = h.authPrompt.value != null,
+                hasHostKeyPrompt = h.hostKeyPrompt.value != null,
+            )
+        ) return
+        h.autoRetried = true
+        if (!AppForeground.isForeground) {
+            lostListener?.invoke(sessionLabel(h))
+        }
+        viewModelScope.launch {
+            delay(RETRY_SETTLE_MS)
+            if (_sessions[h.sessionId] !== h) return@launch
+            if (h.shell != null || h.connecting || h.failed.value == null) return@launch
+            connect(h.sessionId, appState, cacheDir)
         }
     }
 
@@ -626,6 +750,10 @@ class SshSessionViewModel : ViewModel() {
             }
         }
         _sessions.clear()
+        // The registry just died (activity finish): mirror the empty list so
+        // a lingering service stands down instead of guarding nothing. The
+        // listener only posts a stop intent — safe with a dead scope.
+        syncService()
         // Direct teardown: every pooled client is disconnected at most once
         // more here (harmless), so no socket can leak past the ViewModel.
         val leftovers = synchronized(poolGuard) {
@@ -636,6 +764,8 @@ class SshSessionViewModel : ViewModel() {
 
     companion object {
         const val DEFAULT_MAX_SESSIONS = 5
+        /** Settle delay before the single auto-retry after a transport death. */
+        const val RETRY_SETTLE_MS = 2000L
     }
 }
 

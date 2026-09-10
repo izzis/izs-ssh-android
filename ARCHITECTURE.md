@@ -31,13 +31,24 @@ Tabby Desktop `config.service.ts` / `vault.service.ts`
 app/src/main/java/id/web/izs/sshclient/
   MainActivity.kt                 Boot sequence, NavHost, owns AppViewModel;
                                   shallow openProfile (sheet picks land without
-                                  stacking), global session-limit dialog
+                                  stacking), global session-limit dialog;
+                                  installs the SessionService mirror
+                                  (serviceSync/lostListener) + singleTop
+                                  Disconnect-all target + AppForeground pump
+  core/session/
+    SessionService.kt             Foreground-service anchor (specialUse): exact
+                                  "N sessions" notification (expandable
+                                  per-host lines, Disconnect-all action),
+                                  opt-in wake lock; pure text builders at
+                                  file level for JVM tests
   ui/
+    AppForeground.kt              Process foreground counter (no extra deps)
     AppViewModel.kt               Rotation-safe holder of AppState (passphrase survives rotate)
     SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8,
-                                   selected tab + hasActivity flag + observable hasShell (never branch UI on the plain shell field);
-                                   per-session SftpTransferManager hosts (transfers survive back/dismiss/rotate,
-                                   die only on close(); Back never reaches close())
+                                    selected tab + hasActivity flag + observable hasShell (never branch UI on the plain shell field);
+                                    per-session SftpTransferManager hosts (transfers survive back/dismiss/rotate,
+                                    die only on close(); Back never reaches close());
+                                    background mirror (serviceSync/lostListener, single auto-retry per transport death)
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
     Theme.kt                      AppPalettes (Izs/Ocean/Forest/Sunset/Grape dark+light;
                                   shared Izs surfaces) + resolveAppPalette; terminal
@@ -95,6 +106,7 @@ app/src/main/java/id/web/izs/sshclient/
       SetVaultPassphraseDialog.kt Set/change vault passphrase
       VaultSettingsScreen.kt      Vault management (set/change/erase, encrypt-config toggle)
       SshSettingsScreen.kt        SSH defaults: host-key verification + warn-on-close
+                                  + background keep-awake toggle (device-only)
                                   (desktop Settings > SSH parity; live-save, plaintext only)
       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
       CrashReportScreen.kt        Shows last crash trace with copy button
@@ -363,7 +375,7 @@ the IME:
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 242 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 255 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -397,8 +409,42 @@ the IME:
 | `SftpTransferTest` | download/upload/listDir against MINA SFTP, chunked 5 MB SHA-256, deterministic cancel |
 | `SftpTransferManagerTest` | DONE/FAILED/CANCELLED rows, per-item + cancelAll abort, once-only Save-as take, clearFinished cleanup |
 | `SshAuthTest` | typed SshAuthFailed + friendly reason (MINA rejects-all server), no-credentials case |
+| `SessionKeepAliveTest` | label fallback, auto-retry gate, mirror exactness, notification text builders |
 
-## 9. Build & diagnostics
+## 9. Background survival (SessionService)
+
+sshj runs as threads inside our own process — no forked children, so
+Android 12's phantom-process killer does not apply (unlike Termux, which
+forks real shells). The remaining enemy is plain background-process death
+(Doze, App Standby, OEM task killers), countered in four layers:
+
+1. **Foreground-service anchor** (`core/session/SessionService`,
+   `specialUse` + subtype property for API 34+/targetSdk 36; sideloaded so
+   no Play review). The ViewModel keeps owning every socket/shell — the
+   service only mirrors the connected list handed to it via `serviceSync`
+   (installed by MainActivity): non-empty = foreground with an exact
+   notification, empty = stand down. Count, oldest-first `user@host` lines
+   (expanded InboxStyle, capped 5 + remainder), and the Disconnect-all action
+   (routes to MainActivity singleTop, which closes every session) are all
+   derived per transition, so the notification cannot drift. `START_NOT_STICKY`:
+   process death clears sessions anyway, nothing to resume.
+2. **Opt-in wake lock** (Settings > SSH, default OFF): partial wake lock
+   held only while sessions are connected; device-only pref
+   `window.keepAwake`.
+3. **Notification permission + battery-opt prompt**: once each, on first
+   connect (notification first). POST_NOTIFICATIONS (API 33+) is required
+   for the FGS notice to be manageable from settings and for the lost
+   notice to show; Allow/Skip persist `window.notifAsked`. The battery
+   prompt follows with honest scope (helps Doze, not OEM killers);
+   Allow/Never persist `window.batteryOptAsked`, Later re-arms.
+4. **Graceful death**: `onTransportDeath` marks failed tabs (existing error
+   card + Retry) and schedules exactly one auto-retry per death
+   (`everConnected` + `!autoRetried` + no pending UI, 2s settle, aborts if
+   the user acted), using the last connect environment so backgrounded tabs
+   redial too. A backgrounded death also posts a tap-to-open "session lost"
+   notice when notifications are allowed.
+
+## 10. Build & diagnostics
 
 - Gradle 9.7.1, AGP 9.4.0, Kotlin 2.4.20, Compose BOM 2026.08.00,
   navigation 2.10.0, OkHttp 5.5.0, SnakeYAML 2.7, security-crypto 1.1.0,
@@ -424,7 +470,7 @@ the IME:
 - `CrashLog` (debug builds only) persists the last crash trace; the next
   launch offers the Crash Report screen with copy.
 
-## 10. Roadmap (missing vs Tabby config.yaml)
+## 11. Roadmap (missing vs Tabby config.yaml)
 
 - **Multi-session (done):** session registry in `SshSessionViewModel`
   (PTYs survive nav + rotation, which fixed the rotation-PTY drop); every

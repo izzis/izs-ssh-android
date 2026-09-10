@@ -1,5 +1,10 @@
 package id.web.izs.sshclient
 
+import android.app.Activity
+import android.app.Application
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -33,8 +38,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.core.sync.TabbySyncApi
+import id.web.izs.sshclient.core.session.SessionService
 import id.web.izs.sshclient.data.local.ConfigDisk
 import id.web.izs.sshclient.data.local.CrashLog
+import id.web.izs.sshclient.ui.AppForeground
 import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.AppViewModel
 import id.web.izs.sshclient.ui.resolveAppPalette
@@ -82,6 +89,17 @@ sealed interface Boot {
     data class Failed(val message: String) : Boot
 }
 
+/** Process foreground pump for [AppForeground] (no lifecycle-process dep). */
+private object ForegroundPump : Application.ActivityLifecycleCallbacks {
+    override fun onActivityStarted(activity: Activity) = AppForeground.onActivityStarted()
+    override fun onActivityStopped(activity: Activity) = AppForeground.onActivityStopped()
+    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+    override fun onActivityResumed(activity: Activity) = Unit
+    override fun onActivityPaused(activity: Activity) = Unit
+    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+    override fun onActivityDestroyed(activity: Activity) = Unit
+}
+
 class MainActivity : ComponentActivity() {
     // Rotation-safe: the vault passphrase lives in AppState (RAM-only by
     // design) and must survive Activity recreation — never re-ask it.
@@ -90,10 +108,74 @@ class MainActivity : ComponentActivity() {
     // RAM-only like the passphrase; process death clears all sessions.
     private val sshHolder: SshSessionViewModel by viewModels()
 
+    /**
+     * Notification action target (SessionService "Disconnect all", singleTop
+     * so this reuses the live instance): close every session — the registry
+     * mirror then reports empty and the service stands itself down. Open
+     * screens show the existing "Session closed" card.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        if (intent?.action != ACTION_DISCONNECT_ALL) return
+        for (h in sshHolder.ordered()) sshHolder.close(h.sessionId)
+    }
+
+    /**
+     * Re-mirror on every resume: granting notifications from settings (or
+     * the system dialog) does not re-post a notice that an OEM suppressed
+     * while ungranted — this heals that and any other drift, silently
+     * (same id, ongoing: an update, never a re-alert).
+     */
+    override fun onResume() {
+        super.onResume()
+        SessionService.refresh(
+            applicationContext,
+            sshHolder.connectedInfos().map { it.label },
+        )
+    }
+
+    companion object {
+        /** SessionService notification action: close every session. */
+        const val ACTION_DISCONNECT_ALL = "id.web.izs.sshclient.DISCONNECT_ALL"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Debug-only tooling: the last-crash recorder must never run in release builds.
         if (BuildConfig.DEBUG)         CrashLog.install(this)
+        // Background survival: pump the process foreground counter (no extra
+        // deps) and mirror the session registry into SessionService. The
+        // ViewModel never touches Context — both lambdas do.
+        registerActivityLifecycleCallbacks(ForegroundPump)
+        sshHolder.serviceSync = { infos ->
+            SessionService.refresh(applicationContext, infos.map { it.label })
+        }
+        sshHolder.lostListener = { label ->
+            // The FGS notification needs no permission, but this one-shot
+            // notice does (API 33+). Ungranted = silent skip; the in-app
+            // error card + auto-retry remain the fallback. Never prompt here.
+            val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+            if (granted) SessionService.notifyLost(this, label)
+        }
+        // A missing notification with live sessions must be visible, not
+        // silent: Toast the start failure (catch runs on any thread).
+        // Application context only — a static hook must never hold the
+        // Activity past destroy.
+        val appCtx = applicationContext
+        SessionService.onError = { msg ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(
+                    appCtx, "Background guard failed: $msg", android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+        handleNotificationIntent(intent)
         setContent {
             val appState = remember {
                 appHolder.state ?: run {

@@ -284,6 +284,36 @@ class ConfigDisk(context: Context) {
         get() = prefs().getBoolean(KEY_FAB_AT_LEFT, false)
         set(v) = prefs().edit().putBoolean(KEY_FAB_AT_LEFT, v).apply()
 
+    /**
+     * Keep the CPU awake while sessions are connected (Settings > SSH).
+     * Default OFF: a partial wake lock drains the battery, so only users
+     * running long jobs (htop, rsync) opt in. Read by SessionService
+     * alongside the connected list. Device-only (no desktop equivalent,
+     * never synced).
+     */
+    var keepAwake: Boolean
+        get() = prefs().getBoolean(KEY_KEEP_AWAKE, false)
+        set(v) = prefs().edit().putBoolean(KEY_KEEP_AWAKE, v).apply()
+
+    /**
+     * Battery-optimization exemption was offered once (Settings > Window
+     * flow is not involved — the prompt appears on first connect). Either
+     * answer (allow / never) sets this; "later" leaves it false so the
+     * prompt can reappear next connect. Device-only, never synced.
+     */
+    var batteryOptAsked: Boolean
+        get() = prefs().getBoolean(KEY_BATTERY_OPT_ASKED, false)
+        set(v) = prefs().edit().putBoolean(KEY_BATTERY_OPT_ASKED, v).apply()
+
+    /**
+     * Notification permission was offered once (first connect, API 33+).
+     * Allow/Skip both set this; the system dialog's own "don't ask"
+     * handling applies after two denials. Device-only, never synced.
+     */
+    var notifAsked: Boolean
+        get() = prefs().getBoolean(KEY_NOTIF_ASKED, false)
+        set(v) = prefs().edit().putBoolean(KEY_NOTIF_ASKED, v).apply()
+
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
@@ -308,6 +338,9 @@ class ConfigDisk(context: Context) {
         const val KEY_HIDE_TERMINAL_HEADER = "window.hideTerminalHeader"
         const val KEY_FAB_AT_BOTTOM = "window.fabAtBottom"
         const val KEY_FAB_AT_LEFT = "window.fabAtLeft"
+        const val KEY_KEEP_AWAKE = "window.keepAwake"
+        const val KEY_BATTERY_OPT_ASKED = "window.batteryOptAsked"
+        const val KEY_NOTIF_ASKED = "window.notifAsked"
         const val MODE_NEW_TAB_LIST = "list"
         const val MODE_NEW_TAB_SHEET = "sheet"
         const val KEY_SCHEME_SOURCE = "terminal.schemeSource"

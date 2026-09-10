@@ -9,8 +9,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.session.isBatteryExempt
+import id.web.izs.sshclient.core.session.openBatterySettings
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,6 +46,7 @@ fun SshSettingsScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val encrypted = state.loaded?.domain?.encrypted == true
     var verify by remember(state.loaded) {
         mutableStateOf(state.loaded?.domain?.ssh?.verifyHostKeys ?: true)
@@ -46,6 +54,8 @@ fun SshSettingsScreen(
     var warn by remember(state.loaded) {
         mutableStateOf(state.loaded?.domain?.ssh?.warnOnClose ?: false)
     }
+    // Device-only (never synced): held only while sessions are connected.
+    var keepAwake by remember { mutableStateOf(state.disk.keepAwake) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
 
@@ -87,6 +97,7 @@ fun SshSettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+        Text("Connection", style = MaterialTheme.typography.titleMedium)
         // Whole-row tap toggles (box onCheckedChange stays null so the
         // row click is the single toggle source, same as Window settings).
         Row(
@@ -132,6 +143,58 @@ fun SshSettingsScreen(
                 Text(
                     "Ask before disconnecting a live session. A profile with " +
                         "its own warnOnClose set still wins (desktop parity).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // Background keep-alive (device-only pref, instant — not part of the
+        // synced YAML above, so it stays enabled on encrypted configs too).
+        // Read every composition so the status below never lies after
+        // returning from the system screen.
+        Text("Background sessions", style = MaterialTheme.typography.titleMedium)
+        val batteryExempt = isBatteryExempt(context)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.clickable { openBatterySettings(context) },
+        ) {
+            Icon(
+                if (batteryExempt) Icons.Filled.BatteryFull else Icons.Filled.BatteryAlert,
+                contentDescription = null,
+                tint = if (batteryExempt) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.error,
+            )
+            Column(Modifier.weight(1f)) {
+                Text("Battery use")
+                Text(
+                    if (batteryExempt) "Unrestricted — background sessions allowed."
+                    else "Optimized — Android may kill background sessions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = "Open battery settings")
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.clickable {
+                keepAwake = !keepAwake
+                state.disk.keepAwake = keepAwake
+            },
+        ) {
+            Checkbox(
+                checked = keepAwake,
+                onCheckedChange = null,
+            )
+            Column {
+                Text("Keep CPU awake during sessions")
+                Text(
+                    "Held only while sessions are connected. Drains battery — " +
+                        "enable for long jobs (htop, rsync). Connected " +
+                        "sessions are always guarded by a foreground " +
+                        "notification; this only adds a CPU wake lock on top.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
