@@ -732,6 +732,23 @@ object RawConfigStore {
     }
 
     /**
+     * Sets `ssh.verifyHostKeys` / `ssh.warnOnClose`, preserving the rest of
+     * the ssh section (knownHosts etc.). Shared by the plaintext local edit
+     * and the encrypted vault-blob edit so both write the identical desktop
+     * ssh-section shape. Mutates [doc] in place, like [appendKnownHost].
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun setSshFlags(doc: LinkedHashMap<String, Any?>, verify: Boolean, warn: Boolean) {
+        val ssh = LinkedHashMap(
+            (doc[KEY_SSH] as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to v }
+                ?: emptyMap(),
+        )
+        ssh["verifyHostKeys"] = verify
+        ssh["warnOnClose"] = warn
+        doc[KEY_SSH] = ssh
+    }
+
+    /**
      * Index of a profile in a raw profiles list. Id-less legacy profiles get
      * session-minted ids, so fall back to name+type+connection params for
      * those (`:custom:` ids only). Returns -1 when absent.

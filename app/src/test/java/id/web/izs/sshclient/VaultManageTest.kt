@@ -116,4 +116,46 @@ class VaultManageTest {
         assertEquals(stored.iv, m["iv"])
         assertEquals(1, m["version"])
     }
+
+    @Test
+    fun `setSshFlags writes flags and preserves the rest of ssh`() {
+        val doc = linkedMapOf<String, Any?>(
+            "version" to 1,
+            "ssh" to linkedMapOf<String, Any?>(
+                "verifyHostKeys" to true,
+                "knownHosts" to listOf(linkedMapOf("host" to "h")),
+            ),
+        )
+        RawConfigStore.setSshFlags(doc, verify = false, warn = true)
+        @Suppress("UNCHECKED_CAST")
+        val ssh = doc["ssh"] as Map<String, Any?>
+        assertEquals(false, ssh["verifyHostKeys"])
+        assertEquals(true, ssh["warnOnClose"])
+        assertEquals(listOf(linkedMapOf("host" to "h")), ssh["knownHosts"])
+    }
+
+    @Test
+    fun `setSshFlags creates the ssh section when absent`() {
+        val doc = linkedMapOf<String, Any?>("version" to 1)
+        RawConfigStore.setSshFlags(doc, verify = false, warn = false)
+        @Suppress("UNCHECKED_CAST")
+        val ssh = doc["ssh"] as Map<String, Any?>
+        assertEquals(false, ssh["verifyHostKeys"])
+        assertEquals(false, ssh["warnOnClose"])
+    }
+
+    @Test
+    fun `ssh flags survive the vault blob round trip`() {
+        val blobConfig = linkedMapOf<String, Any?>(
+            "version" to 1,
+            "profiles" to emptyList<Any?>(),
+        )
+        RawConfigStore.setSshFlags(blobConfig, verify = false, warn = true)
+        val stored = VaultCrypto.encrypt(RawConfigStore.toJson(blobConfig), "[]", "pass")
+        val (cfg, _) = VaultCrypto.decrypt(stored, "pass")
+        val el = Json.parseToJsonElement(cfg) as JsonObject
+        val ssh = el["ssh"] as JsonObject
+        assertEquals(false, (ssh["verifyHostKeys"] as JsonPrimitive).boolean)
+        assertEquals(true, (ssh["warnOnClose"] as JsonPrimitive).boolean)
+    }
 }

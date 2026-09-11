@@ -25,7 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.session.isBatteryExempt
 import id.web.izs.sshclient.core.session.openBatterySettings
 import id.web.izs.sshclient.ui.AppState
@@ -37,8 +36,8 @@ import kotlinx.coroutines.withContext
  * Settings > SSH (desktop SSH-tab parity, mobile-relevant subset).
  * verifyHostKeys + warnOnClose are wired: WinSCP/agent options are
  * Windows-only on desktop and meaningless on Android. Plaintext configs
- * only — on encrypted stores the ssh section lives inside the vault blob
- * (edited on desktop).
+ * write the local document; encrypted ones are edited inside the vault
+ * blob (needs the passphrase — the UI prompts for it at point of use).
  */
 @Composable
 fun SshSettingsScreen(
@@ -48,12 +47,17 @@ fun SshSettingsScreen(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val encrypted = state.loaded?.domain?.encrypted == true
+    // Encrypted + locked: the vault blob owns these keys, so a toggle tap
+    // first asks for the passphrase, then applies the pending change.
+    val lockedForEdit = encrypted && state.loaded?.needsPassphrase == true
     var verify by remember(state.loaded) {
         mutableStateOf(state.loaded?.domain?.ssh?.verifyHostKeys ?: true)
     }
     var warn by remember(state.loaded) {
         mutableStateOf(state.loaded?.domain?.ssh?.warnOnClose ?: false)
     }
+    var showUnlock by remember { mutableStateOf(false) }
+    var pendingTarget by remember { mutableStateOf<String?>(null) }
     // Device-only (never synced): held only while sessions are connected.
     var keepAwake by remember { mutableStateOf(state.disk.keepAwake) }
     var busy by remember { mutableStateOf(false) }
@@ -61,21 +65,16 @@ fun SshSettingsScreen(
 
     // Desktop parity (ngModelChange=config.save()): toggles apply live, no
     // Save button. On failure the checkbox reverts and the error shows.
+    // updateEncryptedSsh routes plaintext to the local document and
+    // encrypted stores into the vault blob (throws when locked, but taps
+    // are gated on lockedForEdit below so that never happens here).
     fun saveLive(nextVerify: Boolean, nextWarn: Boolean, onError: () -> Unit) {
         scope.launch {
             busy = true
             msg = null
             try {
                 withContext(Dispatchers.IO) {
-                    state.repo.updateLocalRaw { raw ->
-                        @Suppress("UNCHECKED_CAST")
-                        val ssh = LinkedHashMap(
-                            (raw[RawConfigStore.KEY_SSH] as? Map<String, Any?>) ?: emptyMap(),
-                        )
-                        ssh["verifyHostKeys"] = nextVerify
-                        ssh["warnOnClose"] = nextWarn
-                        raw[RawConfigStore.KEY_SSH] = ssh
-                    }
+                    state.repo.updateEncryptedSsh(nextVerify, nextWarn)
                 }
                 state.refresh()
             } catch (e: Exception) {
@@ -87,11 +86,35 @@ fun SshSettingsScreen(
         }
     }
 
+    fun toggleVerify() {
+        val old = verify
+        verify = !verify
+        saveLive(verify, warn) { verify = old }
+    }
+
+    fun toggleWarn() {
+        val old = warn
+        warn = !warn
+        saveLive(verify, warn) { warn = old }
+    }
+
+    /** Locked vault: park the tap and ask for the passphrase first. */
+    fun requestToggle(target: String) {
+        if (lockedForEdit) {
+            pendingTarget = target
+            showUnlock = true
+        } else if (target == "verify") toggleVerify()
+        else toggleWarn()
+    }
+
+    val editable = !busy && !lockedForEdit
+
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ScreenHeader("SSH", onBack)
         if (encrypted) {
             Text(
-                "This config is encrypted. SSH options can be edited on desktop.",
+                if (lockedForEdit) "This config is encrypted. Unlock with the vault passphrase to change SSH options."
+                else "SSH options are stored in the encrypted vault.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -101,16 +124,12 @@ fun SshSettingsScreen(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.clickable(enabled = !encrypted && !busy) {
-                val old = verify
-                verify = !verify
-                saveLive(verify, warn) { verify = old }
-            },
+            modifier = Modifier.clickable(enabled = editable) { requestToggle("verify") },
         ) {
             Checkbox(
                 checked = verify,
                 onCheckedChange = null,
-                enabled = !encrypted && !busy,
+                enabled = editable,
             )
             Column {
                 Text("Verify host keys when connecting")
@@ -125,16 +144,12 @@ fun SshSettingsScreen(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.clickable(enabled = !encrypted && !busy) {
-                val old = warn
-                warn = !warn
-                saveLive(verify, warn) { warn = old }
-            },
+            modifier = Modifier.clickable(enabled = editable) { requestToggle("warn") },
         ) {
             Checkbox(
                 checked = warn,
                 onCheckedChange = null,
-                enabled = !encrypted && !busy,
+                enabled = editable,
             )
             Column {
                 Text("Warn when closing active connections")
@@ -199,5 +214,27 @@ fun SshSettingsScreen(
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (busy) CircularProgressIndicator()
+    }
+    if (showUnlock) {
+        VaultUnlockDialog(
+            state = state,
+            onUnlocked = {
+                showUnlock = false
+                // state.loaded is already the fresh unlocked view here, but
+                // the local verify/warn still hold the locked-shell defaults
+                // until recomposition re-inits them. Sync first so the
+                // pending toggle flips (and saves) the real blob values —
+                // otherwise the untouched flag would be clobbered.
+                state.loaded?.domain?.ssh?.let {
+                    verify = it.verifyHostKeys
+                    warn = it.warnOnClose
+                }
+                if (pendingTarget == "verify") toggleVerify()
+                else if (pendingTarget == "warn") toggleWarn()
+                pendingTarget = null
+            },
+            onNoConfig = { showUnlock = false; pendingTarget = null },
+            onDismiss = { showUnlock = false; pendingTarget = null },
+        )
     }
 }

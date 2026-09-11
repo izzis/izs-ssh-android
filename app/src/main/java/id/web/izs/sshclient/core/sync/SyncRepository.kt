@@ -159,6 +159,42 @@ class SyncRepository(
         }
 
     /**
+     * Settings > SSH on any store (desktop vault parity): flips
+     * ssh.verifyHostKeys / ssh.warnOnClose. Plaintext configs delegate to
+     * [updateLocalRaw]; encrypted ones are edited inside the vault blob's
+     * config payload — same decrypt/edit/re-encrypt round-trip (and same
+     * outer-document shape) as [appendKnownHost]. Requires an unlocked
+     * vault; the UI prompts for the passphrase first. Server upload follows
+     * the normal Upload/auto path (never here).
+     */
+    suspend fun updateEncryptedSsh(verify: Boolean, warn: Boolean): Loaded =
+        withContext(Dispatchers.IO) {
+            val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+            val raw = RawConfigStore.loadRaw(yamlStr)
+            if (!RawConfigStore.isEncrypted(raw)) {
+                return@withContext updateLocalRaw { doc ->
+                    RawConfigStore.setSshFlags(doc, verify, warn)
+                }
+            }
+            val pass = rememberedPassphrase ?: throw IllegalStateException("Vault is locked")
+            val vault = RawConfigStore.storedVault(raw)
+                ?: throw IllegalStateException("Vault is not configured")
+            val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
+            val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
+            RawConfigStore.setSshFlags(blobConfig, verify, warn)
+            val stored = VaultCrypto.encrypt(RawConfigStore.toJson(blobConfig), secretsJson, pass)
+            val out: LinkedHashMap<String, Any?> = linkedMapOf(
+                RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
+                RawConfigStore.KEY_ENCRYPTED to true,
+            )
+            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+                out[RawConfigStore.KEY_CONFIG_SYNC] = it
+            }
+            disk.saveYaml(RawConfigStore.dumpRaw(out))
+            decryptToLoaded(out)
+        }
+
+    /**
      * Self-healing legacy upgrade: a prefs-era trust line that matched this
      * session is promoted to a YAML entry and the legacy line retired.
      * Throws when locked (caller keeps session-only trust) — same as above.

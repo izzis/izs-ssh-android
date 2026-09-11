@@ -1,5 +1,6 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,9 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import id.web.izs.sshclient.core.config.ProfileGroup
 import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.SshDefaults
 import id.web.izs.sshclient.core.config.SshProfile
@@ -43,7 +47,7 @@ import id.web.izs.sshclient.ui.AppState
  * New tab = sheet). Search + recent + compact profile list over the
  * current session — no navigation away from the terminal.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun NewTabSheet(
     state: AppState,
@@ -75,17 +79,13 @@ fun NewTabSheet(
         }
     }
     // Desktop selector parity (profiles.service.ts): recents on top, then
-    // profiles grouped under their group names. Searching stays flat.
+    // profiles under sticky group headers — like the home list, the
+    // outgoing header stays stuck while the next section arrives, so two
+    // group names can show during the overlap. Ungrouped profiles have no
+    // header. Searching keeps the same grouped view over the matches.
     val groups = remember(state.loaded) { state.displayGroups() }
-    val grouped = remember(profiles, groups) {
-        profiles.groupBy { state.groupName(groups, it.group) }
-            .toList()
-            .sortedBy { (name, _) -> name.lowercase() }
-            .map { (name, ps) ->
-                val display = name.ifBlank { "Ungrouped" }
-                display to ps.sortedBy { it.name.lowercase() }
-            }
-    }
+    val sections = remember(profiles, groups) { toSections(profiles, groups, state) }
+    val fSections = remember(filtered, groups) { toSections(filtered, groups, state) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -158,25 +158,71 @@ fun NewTabSheet(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (query.isBlank()) {
-                    for ((gname, ps) in grouped) {
-                        item(key = "g:$gname") {
+                    sheetSections(sections = sections, onPick = onPick)
+                } else {
+                    // groupBy yields only groups with matches; an empty
+                    // result shows a note instead of a blank sheet.
+                    sheetSections(sections = fSections, onPick = onPick)
+                    if (fSections.isEmpty()) {
+                        item(key = "no-match") {
                             Text(
-                                gname,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(vertical = 4.dp),
+                                "No profiles match \"$query\".",
+                                style = MaterialTheme.typography.bodyMedium,
                             )
                         }
-                        items(ps, key = { it.id }) { p ->
-                            SheetProfileRow(p = p, onPick = onPick)
-                        }
-                    }
-                } else {
-                    items(filtered, key = { it.id }) { p ->
-                        SheetProfileRow(p = p, onPick = onPick)
                     }
                 }
             }
+        }
+    }
+}
+
+/** Profiles grouped under display group names (blank = ungrouped). */
+private fun toSections(
+    profiles: List<SshProfile>,
+    groups: List<ProfileGroup>,
+    state: AppState,
+): List<Pair<String, List<SshProfile>>> =
+    profiles.groupBy { state.groupName(groups, it.group) }
+        .toList()
+        .sortedBy { (name, _) -> name.lowercase() }
+        .map { (name, ps) -> name to ps.sortedBy { it.name.lowercase() } }
+
+/**
+ * Grouped sheet list: sticky folder header (opaque, so rows scrolling
+ * underneath never bleed through) + profile rows. Ungrouped profiles
+ * render without a header. Shared by the normal and searching views.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun LazyListScope.sheetSections(
+    sections: List<Pair<String, List<SshProfile>>>,
+    onPick: (profileId: String) -> Unit,
+) {
+    for ((gname, ps) in sections) {
+        if (gname.isNotBlank()) {
+            stickyHeader(key = "g:$gname") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(vertical = 4.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Folder,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        gname,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        items(ps, key = { it.id }) { p ->
+            SheetProfileRow(p = p, onPick = onPick)
         }
     }
 }

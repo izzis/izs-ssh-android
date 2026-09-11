@@ -288,7 +288,7 @@ fun ConfigFileScreen(
                     Text(
                         "This replaces the profiles on this device with the imported config" +
                             (pv.profileCount?.let { " ($it profiles)" } ?: "") +
-                            (if (pv.encryptedShell) " (encrypted. The vault passphrase will be asked when needed.)" else "") +
+                            (if (pv.encryptedShell) " (encrypted. The vault passphrase will be asked right after import.)" else "") +
                             ". Your sync target stays unchanged.",
                     )
                 },
@@ -306,6 +306,12 @@ fun ConfigFileScreen(
                                 }
                                 importing = false
                                 importInfo = "Imported${count?.let { " ($it profiles)" } ?: ""}"
+                                // A fully encrypted import blocks the listing:
+                                // ask for the passphrase now instead of
+                                // leaving the app locked without a prompt.
+                                // unlockRequired only — a locked
+                                // plaintext-with-blob stays usable as-is.
+                                if (state.loaded?.unlockRequired == true) showUnlock = true
                             } catch (e: Exception) {
                                 importError = e.message
                             } finally {

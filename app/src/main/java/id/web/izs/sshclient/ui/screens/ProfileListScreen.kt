@@ -6,13 +6,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -61,7 +61,7 @@ import id.web.izs.sshclient.ui.SshSessionViewModel
 /**
  * Home page: SSH profiles grouped into folders per group (nested via
  * parentGroupId, desktop ProfileGroup parity). Folders expand/collapse;
- * searching switches to a flat filtered list.
+ * searching keeps the grouped view over the filtered matches.
  * Data comes from the Domain view (transient defaults); RAW stays lossless.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -100,12 +100,16 @@ fun ProfileListScreen(
         }
     }
     val (roots, ungrouped) = remember(profiles, groups) { buildTree(groups, profiles) }
-    val rows = remember(roots, ungrouped, expanded) {
-        buildList {
-            for (n in roots) addNode(n, depth = 0, expanded, this)
-            for (p in ungrouped.sortedBy { it.name.lowercase() }) add(HomeRow.Profile(p, 0))
-        }
-    }
+    // Per top-level folder: flattened child rows (subfolders + profiles),
+    // empty when collapsed (only the sticky folder bar stays visible).
+    // While searching the same shape is built over the filtered matches
+    // with everything force-expanded, so matches are never hidden inside
+    // a collapsed folder; groups without matches are skipped at render.
+    val sections = remember(roots, expanded) { buildSections(roots, expanded, forceExpand = false) }
+    val ungroupedSorted = remember(ungrouped) { ungrouped.sortedBy { it.name.lowercase() } }
+    val (fRoots, fUngrouped) = remember(groups, filtered) { buildTree(groups, filtered) }
+    val fSections = remember(fRoots, expanded) { buildSections(fRoots, expanded, forceExpand = true) }
+    val fUngroupedSorted = remember(fUngrouped) { fUngrouped.sortedBy { it.name.lowercase() } }
 
     // Recent profiles (desktop start-page parity): N most-recently launched,
     // N = terminal.showRecentProfiles (0 hides). Ids resolve against the
@@ -135,42 +139,59 @@ fun ProfileListScreen(
     // Hide Recent while searching (desktop start-page parity).
     val showRecent = maxRecent > 0 && query.isBlank() && recent.isNotEmpty()
 
-    // Single scroll: header + Active + Recent + search + profiles share one
-    // LazyColumn so a long Active/Recent list never squeezes the profile
-    // viewport into a narrow strip.
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+    // Fixed top bar + fixed search above the scrollable list; Active +
+    // Recent + profiles share one LazyColumn below, so a long
+    // Active/Recent list never squeezes the profile viewport into a
+    // narrow strip. Folder bars are native sticky headers: exactly one
+    // stays pinned and the next folder pushes it off, smooth and
+    // scroll-driven by the framework itself. No mirrored copy anywhere,
+    // so doubling is impossible; no fake backgrounds, so no black bars.
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item(key = "header") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Filled.Terminal,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    "izs SSH",
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f).padding(start = 8.dp),
-                )
-                Text(
-                    "${profiles.size}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                IconButton(onClick = onAdd) {
-                    Icon(Icons.Filled.Add, contentDescription = "New profile")
-                }
-                IconButton(onClick = onSettings) {
-                    Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                }
-                IconButton(onClick = { showExitConfirm = true }) {
-                    Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Exit app")
-                }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                Icons.Filled.Terminal,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                "izs SSH",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
+            )
+            Text(
+                "${profiles.size}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(onClick = onAdd) {
+                Icon(Icons.Filled.Add, contentDescription = "New profile")
+            }
+            IconButton(onClick = onSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings")
+            }
+            IconButton(onClick = { showExitConfirm = true }) {
+                Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Exit app")
             }
         }
+        // Fixed search: outside the list, so it never competes with (or
+        // gets displaced by) the folder sticky headers below.
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Search by name, host, or user") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         if (liveSessions.isNotEmpty()) {
             item(key = "active") {
                 ActiveSessionsSection(
@@ -198,16 +219,6 @@ fun ProfileListScreen(
                 )
             }
         }
-        stickyHeader(key = "search") {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("Search by name, host, or user") },
-                modifier = Modifier.fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background),
-                singleLine = true,
-            )
-        }
         if (state.loading) {
             item(key = "loading") { CircularProgressIndicator() }
         }
@@ -223,43 +234,59 @@ fun ProfileListScreen(
             }
         }
         if (query.isBlank()) {
-            items(rows, key = { it.key }) { row ->
-                when (row) {
-                    is HomeRow.Folder -> {
-                        val id = row.node.group.id
-                        val isCollapsed = id !in expanded
-                        FolderRow(
-                            node = row.node,
-                            depth = row.depth,
-                            collapsed = isCollapsed,
-                            onToggle = {
-                                expanded = if (isCollapsed) expanded + id else expanded - id
-                                state.disk.expandedGroups = expanded
-                            },
-                        )
-                    }
-                    is HomeRow.Profile -> ProfileCard(
-                        state = state,
-                        profile = row.profile,
-                        groupName = state.groupName(groups, row.profile.group),
-                        depth = row.depth,
-                        onOpen = onOpen,
-                        onEdit = onEdit,
-                    )
-                }
-            }
-        } else {
-            items(filtered, key = { it.id }) { p ->
+            groupSections(
+                sections = sections,
+                expanded = expanded,
+                forceExpand = false,
+                state = state,
+                onToggle = { id, isCollapsed ->
+                    expanded = if (isCollapsed) expanded + id else expanded - id
+                    state.disk.expandedGroups = expanded
+                },
+                onOpen = onOpen,
+                onEdit = onEdit,
+            )
+            items(ungroupedSorted, key = { it.id }) { p ->
                 ProfileCard(
                     state = state,
                     profile = p,
-                    groupName = state.groupName(groups, p.group),
                     depth = 0,
                     onOpen = onOpen,
                     onEdit = onEdit,
                 )
             }
+        } else {
+            groupSections(
+                sections = fSections.filter { it.second.isNotEmpty() },
+                expanded = expanded,
+                forceExpand = true,
+                state = state,
+                onToggle = { id, isCollapsed ->
+                    expanded = if (isCollapsed) expanded + id else expanded - id
+                    state.disk.expandedGroups = expanded
+                },
+                onOpen = onOpen,
+                onEdit = onEdit,
+            )
+            items(fUngroupedSorted, key = { it.id }) { p ->
+                ProfileCard(
+                    state = state,
+                    profile = p,
+                    depth = 0,
+                    onOpen = onOpen,
+                    onEdit = onEdit,
+                )
+            }
+            if (fSections.all { it.second.isEmpty() } && fUngroupedSorted.isEmpty()) {
+                item(key = "no-match") {
+                    Text(
+                        "No profiles match \"$query\".",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
+    }
     }
     // Explicit exit: Back already goes home, so home needs its own way out.
     // Sessions are closed first (their sockets tear down off-Main), then the
@@ -333,11 +360,82 @@ private fun buildTree(
         profiles.filter { it.group.isNullOrBlank() || !byId.containsKey(it.group) }
 }
 
-private fun addNode(n: GroupNode, depth: Int, expanded: Set<String>, out: MutableList<HomeRow>) {
+private fun addNode(
+    n: GroupNode,
+    depth: Int,
+    expanded: Set<String>,
+    out: MutableList<HomeRow>,
+    forceExpand: Boolean = false,
+) {
     out += HomeRow.Folder(n, depth)
-    if (n.group.id !in expanded) return
-    for (c in n.children) addNode(c, depth + 1, expanded, out)
+    if (!forceExpand && n.group.id !in expanded) return
+    for (c in n.children) addNode(c, depth + 1, expanded, out, forceExpand)
     for (p in n.profiles) out += HomeRow.Profile(p, depth + 1)
+}
+
+/** Flattened child rows per top-level folder (subfolders + profiles). */
+private fun buildSections(
+    roots: List<GroupNode>,
+    expanded: Set<String>,
+    forceExpand: Boolean,
+): List<Pair<GroupNode, List<HomeRow>>> =
+    roots.map { root ->
+        root to buildList {
+            if (forceExpand || root.group.id in expanded) {
+                for (c in root.children) addNode(c, depth = 1, expanded, this, forceExpand)
+                for (p in root.profiles) add(HomeRow.Profile(p, 1))
+            }
+        }
+    }
+
+/**
+ * Grouped profile list: native sticky folder header (exactly one stays
+ * pinned; the next folder pushes it off, tappable while pinned) + child
+ * rows. Shared by the normal and the searching view.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun LazyListScope.groupSections(
+    sections: List<Pair<GroupNode, List<HomeRow>>>,
+    expanded: Set<String>,
+    forceExpand: Boolean,
+    state: AppState,
+    onToggle: (id: String, isCollapsed: Boolean) -> Unit,
+    onOpen: (String) -> Unit,
+    onEdit: (String) -> Unit,
+) {
+    for ((root, sub) in sections) {
+        val id = root.group.id
+        val isCollapsed = !forceExpand && id !in expanded
+        stickyHeader(key = "g:$id") {
+            FolderRow(
+                node = root,
+                depth = 0,
+                collapsed = isCollapsed,
+                onToggle = { onToggle(id, isCollapsed) },
+            )
+        }
+        items(sub, key = { it.key }) { row ->
+            when (row) {
+                is HomeRow.Folder -> {
+                    val cid = row.node.group.id
+                    val cCollapsed = !forceExpand && cid !in expanded
+                    FolderRow(
+                        node = row.node,
+                        depth = row.depth,
+                        collapsed = cCollapsed,
+                        onToggle = { onToggle(cid, cCollapsed) },
+                    )
+                }
+                is HomeRow.Profile -> ProfileCard(
+                    state = state,
+                    profile = row.profile,
+                    depth = row.depth,
+                    onOpen = onOpen,
+                    onEdit = onEdit,
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -528,7 +626,6 @@ private fun FolderRow(
 private fun ProfileCard(
     state: AppState,
     profile: SshProfile,
-    groupName: String,
     depth: Int,
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
@@ -570,9 +667,6 @@ private fun ProfileCard(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                }
-                if (groupName.isNotBlank()) {
-                    Text(groupName, style = MaterialTheme.typography.bodySmall)
                 }
                 if (profile.type == "ssh") {
                     val creds = buildList {
