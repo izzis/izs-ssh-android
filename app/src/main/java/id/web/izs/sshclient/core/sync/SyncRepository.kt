@@ -1,5 +1,6 @@
 package id.web.izs.sshclient.core.sync
 
+import id.web.izs.sshclient.core.config.ConfigMigrator
 import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.RemoteConfigMeta
 import id.web.izs.sshclient.core.config.StoredVault
@@ -124,8 +125,11 @@ class SyncRepository(
             // A fresh install owns an empty local config, so the app is usable
             // (add profiles) without ever touching Config Sync. Seeded to
             // disk once — later loads see a real document.
+            // Fresh installs are authored at the desktop LATEST: modern shapes
+            // only (plural privateKeys, id-based groups), so the desktop
+            // migrator stays quiet when the file moves phone -> PC.
             val seed = linkedMapOf<String, Any?>(
-                RawConfigStore.KEY_VERSION to 1,
+                RawConfigStore.KEY_VERSION to ConfigMigrator.LATEST_VERSION,
                 RawConfigStore.KEY_PROFILES to mutableListOf<Any?>(),
                 RawConfigStore.KEY_GROUPS to mutableListOf<Any?>(),
                 RawConfigStore.KEY_CONFIG_SYNC to LinkedHashMap<String, Any?>(),
@@ -135,12 +139,23 @@ class SyncRepository(
         }
         val raw = if (yamlStr.isNullOrBlank()) {
             linkedMapOf<String, Any?>(
-                RawConfigStore.KEY_VERSION to 1,
+                RawConfigStore.KEY_VERSION to ConfigMigrator.LATEST_VERSION,
                 RawConfigStore.KEY_PROFILES to mutableListOf<Any?>(),
                 RawConfigStore.KEY_GROUPS to mutableListOf<Any?>(),
             )
         } else {
             RawConfigStore.loadRaw(yamlStr)
+        }
+        // Android-authored plaintext docs carry modern shapes, so stamp any
+        // stale version up to LATEST (one rewrite for pre-v8 installs).
+        // Encrypted shells are untouched: their outer shape
+        // {vault, encrypted, configSync} carries no version by desktop parity.
+        if (!RawConfigStore.isEncrypted(raw)) {
+            val v = (raw[RawConfigStore.KEY_VERSION] as? Number)?.toInt() ?: 0
+            if (v < ConfigMigrator.LATEST_VERSION) {
+                raw[RawConfigStore.KEY_VERSION] = ConfigMigrator.LATEST_VERSION
+                disk.saveYaml(RawConfigStore.dumpRaw(raw))
+            }
         }
         // Alpha cleanup: a prefs-stored sync target from older builds is
         // dropped (never adopted) — YAML > configSync is the only source.
@@ -434,7 +449,7 @@ class SyncRepository(
         else (RawConfigStore.loadRaw(localYaml)[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)
         if (localSync != null) doc[RawConfigStore.KEY_CONFIG_SYNC] = localSync
         else doc.remove(RawConfigStore.KEY_CONFIG_SYNC)
-        if (!doc.containsKey(RawConfigStore.KEY_VERSION)) doc[RawConfigStore.KEY_VERSION] = 1
+        if (!doc.containsKey(RawConfigStore.KEY_VERSION)) doc[RawConfigStore.KEY_VERSION] = ConfigMigrator.LATEST_VERSION
         // Snapshot for abortPendingImport(): cancelling before the first
         // unlock must just fail the import (restore this), not erase local.
         // File import never retargets sync (local configSync is kept above),

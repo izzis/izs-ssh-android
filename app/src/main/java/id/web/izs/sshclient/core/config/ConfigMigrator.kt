@@ -1,17 +1,16 @@
 package id.web.izs.sshclient.core.config
 
 /**
- * A port of the desktop migration in tabby-core/src/services/config.service.ts:315-455.
- * Only the v1-relevant parts (SSH profiles + groups); other migrations are no-ops
- * but the version is still advanced so files written by Android are accepted by desktop.
+ * Read-tolerance helpers for legacy shapes (transient domain view only —
+ * never rewritten to disk, never version-gated).
  *
- * - v1: connection.privateKey -> privateKeys[]
- * - v3: ssh.connections[] -> ssh-typed profiles[] (id ssh:<uuid>)
- * - v4: id-less profiles get an id
- * - v5: group name -> group id + groups[]
- * - v7: default api.tabby.sh host dropped when token-less
- * Others (v2 terminal profiles, v6 clearServiceMessages, v8 compression)
- * stay opaque in Raw.
+ * Android authors v8 documents exclusively (LATEST_VERSION), so no v1-v7
+ * migration exists here by design; the desktop migrator then stays quiet
+ * when a file moves phone -> PC. The two functions below only keep OLD
+ * pasted/imported docs readable:
+ * - migrateGroupNamesToIds: pre-v5 name-based groups -> ids (v8 docs already
+ *   use ids, so this is a no-op for them).
+ * - normalizeJumpHosts: pre-v3 jumpHost names -> profile ids (same no-op rule).
  */
 object ConfigMigrator {
     const val LATEST_VERSION = 8
@@ -52,7 +51,14 @@ object ConfigMigrator {
         }
     }
 
-    fun ensureVersion(version: Int): Int = if (version < 1) 1 else version
+    /**
+     * Stamp for documents Android authors (seed / import default / local
+     * normalization): the desktop LATEST. Android already writes v8 shapes
+     * (plural privateKeys, id-based groups, no ssh.connections), so a fresh
+     * stamp is honest — and the desktop migrator then stays quiet when the
+     * file moves phone -> PC.
+     */
+    fun ensureVersion(version: Int): Int = if (version < LATEST_VERSION) LATEST_VERSION else version
 
     private fun randomId(): String = java.util.UUID.randomUUID().toString()
 }

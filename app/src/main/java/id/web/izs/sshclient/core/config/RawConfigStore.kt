@@ -52,14 +52,14 @@ object RawConfigStore {
 
     @Suppress("UNCHECKED_CAST")
     fun loadRaw(yamlStr: String): LinkedHashMap<String, Any?> {
-        if (yamlStr.isBlank()) return linkedMapOf(KEY_VERSION to 1)
+        if (yamlStr.isBlank()) return linkedMapOf(KEY_VERSION to ConfigMigrator.LATEST_VERSION)
         val loaded = yaml().load<Any>(yamlStr)
         return when (loaded) {
             is LinkedHashMap<*, *> -> loaded as LinkedHashMap<String, Any?>
             is Map<*, *> -> LinkedHashMap<String, Any?>().also { m ->
                 loaded.forEach { (k, v) -> m[k.toString()] = v }
             }
-            else -> linkedMapOf(KEY_VERSION to 1)
+            else -> linkedMapOf(KEY_VERSION to ConfigMigrator.LATEST_VERSION)
         }
     }
 
@@ -383,7 +383,7 @@ object RawConfigStore {
 
     @Suppress("UNCHECKED_CAST")
     fun toDomain(doc: Map<String, Any?>): TabbyConfig {
-        val version = (doc[KEY_VERSION] as? Number)?.toInt() ?: 1
+        val version = (doc[KEY_VERSION] as? Number)?.toInt() ?: ConfigMigrator.LATEST_VERSION
         val encrypted = isEncrypted(doc)
         val vault = storedVault(doc)
         val profiles = ((doc[KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
@@ -554,7 +554,8 @@ object RawConfigStore {
      * The download merge — parity with desktop download().
      * - data.configSync is always the local one (never from the cloud).
      * - When the remote is plaintext and parts[part]==false, the local part is kept.
-     * - version defaults to 1 when missing.
+     * - version defaults to LATEST when missing (a desktop-uploaded remote
+     *   always carries one after the desktop's first save).
      */
     @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun mergeDownload(
@@ -573,7 +574,7 @@ object RawConfigStore {
                 }
             }
         }
-        if (!doc.containsKey(KEY_VERSION)) doc[KEY_VERSION] = 1
+        if (!doc.containsKey(KEY_VERSION)) doc[KEY_VERSION] = ConfigMigrator.LATEST_VERSION
         return doc
     }
 
