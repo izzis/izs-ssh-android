@@ -709,6 +709,17 @@ private fun GeneralTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+    // No vault means the repo stores the literal in the profile YAML
+    // (SyncRepository.saveProfile passwordField parity), so warn before
+    // the user types a password they assume is encrypted.
+    if (!vaultPresent && passwordTouched && passwordText.isNotBlank()) {
+        Text(
+            "No vault yet. This password will be saved as plain text. " +
+                "Set a master passphrase first (Settings > Vault) to keep it encrypted.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
     if (reveal) {
         Text(
             "Saved password: ${effectivePassword ?: "None"}",

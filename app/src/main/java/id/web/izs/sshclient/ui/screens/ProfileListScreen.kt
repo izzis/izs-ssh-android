@@ -669,7 +669,12 @@ private fun ProfileCard(
                     )
                 }
                 if (profile.type == "ssh") {
-                    val creds = buildList {
+                    // Locked vault hides secrets (passwordFor/keysFor resolve
+                    // to null while locked), so say so instead of claiming
+                    // nothing is saved — the creds may be inside the vault.
+                    val locked = state.loaded?.needsPassphrase == true
+                    val creds = if (locked) "Locked — unlock to view"
+                    else buildList {
                         if (state.passwordFor(profile) != null) add("Password saved")
                         val n = state.keysFor(profile).size
                         if (n == 1) add("1 key") else if (n > 1) add("$n keys")

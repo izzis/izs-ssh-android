@@ -86,9 +86,14 @@ fun VaultSettingsScreen(
         }
     }
 
-    /** Desktop parity: change/erase/encrypt-on-locked-vault prompt for unlock first. */
+    /**
+     * Desktop parity: change/erase/encrypt-on-locked-vault prompt for unlock first.
+     * Exception: erasing a plaintext-with-blob vault needs no decryption
+     * (eraseVault just drops the blob), so a forgotten passphrase must not
+     * block it — profiles stay, vault secrets are lost.
+     */
     fun requireUnlock(p: Pending) {
-        if (locked) {
+        if (locked && !(p == Pending.Erase && !encrypted)) {
             pending = p
             showUnlock = true
         } else {
