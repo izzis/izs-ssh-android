@@ -67,7 +67,7 @@ fun VaultSettingsScreen(
                 state.refresh()
                 msg = done
             } catch (e: Exception) {
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -81,8 +81,8 @@ fun VaultSettingsScreen(
                 showSetPass = true
             }
             Pending.Erase -> showErase = true
-            Pending.EncryptOn -> runOp({ state.repo.setConfigEncrypted(true) }, "Config file encryption on")
-            Pending.EncryptOff -> runOp({ state.repo.setConfigEncrypted(false) }, "Config file encryption off")
+            Pending.EncryptOn -> runOp({ state.repo.setConfigEncrypted(true) }, "Config file encryption is on.")
+            Pending.EncryptOff -> runOp({ state.repo.setConfigEncrypted(false) }, "Config file encryption is off.")
         }
     }
 
@@ -118,8 +118,8 @@ fun VaultSettingsScreen(
             ) { Text("Set master passphrase") }
         } else {
             Text(
-                "Encryption: ${if (encrypted) "on" else "off"} · " +
-                    if (locked) "locked" else "unlocked (passphrase in RAM for this session)",
+                if (locked) "Encryption: ${if (encrypted) "On" else "Off"}, Locked"
+                else "Encryption: ${if (encrypted) "On" else "Off"}, Unlocked for this session",
                 style = MaterialTheme.typography.bodyMedium,
             )
             if (locked) {
@@ -133,7 +133,7 @@ fun VaultSettingsScreen(
                         showUnlock = true
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Show vault contents") }
+                ) { Text("Unlock vault") }
             }
             Text("Options", style = MaterialTheme.typography.titleMedium)
             OutlinedButton(
@@ -150,7 +150,7 @@ fun VaultSettingsScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Encrypt config file")
                     Text(
-                        "Puts all of the configuration into the vault",
+                        "Stores the entire configuration in the vault",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -175,10 +175,10 @@ fun VaultSettingsScreen(
             confirmLabel = "Set passphrase",
             onConfirm = { pass ->
                 showSetPass = false
-                if (changeMode) runOp({ state.repo.changeVaultPassphrase(pass) }, "Master passphrase changed")
+                if (changeMode) runOp({ state.repo.changeVaultPassphrase(pass) }, "Master passphrase changed.")
                 else runOp(
                     { state.repo.setVaultPassphrase(pass) },
-                    "Vault configured (saved passwords moved into the vault)",
+                    "Vault is ready. Saved passwords were moved to the vault.",
                 )
             },
             onDismiss = { showSetPass = false },
@@ -212,15 +212,15 @@ fun VaultSettingsScreen(
             title = { Text("Delete vault contents?") },
             text = {
                 Text(
-                    "The vault is removed and the config is restored to plaintext. " +
-                        "Passwords and keys stored in the vault are lost " +
-                        "(re-enter them per profile afterwards). This cannot be undone.",
+                    "The vault is removed and the config is restored to an unencrypted config. " +
+                        "Passwords and keys stored in the vault are lost. " +
+                        "You will need to enter them again for each profile afterwards. This cannot be undone.",
                 )
             },
             confirmButton = {
                 Button(onClick = {
                     showErase = false
-                    runOp({ state.repo.eraseVault() }, "Vault erased")
+                    runOp({ state.repo.eraseVault() }, "Vault deleted.")
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { showErase = false }) { Text("Keep") } },

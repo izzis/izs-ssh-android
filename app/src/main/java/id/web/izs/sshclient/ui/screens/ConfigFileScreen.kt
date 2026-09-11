@@ -77,9 +77,9 @@ fun ConfigFileScreen(
     val hasLocal = remember(loaded) { !state.disk.loadYaml().isNullOrBlank() }
     val viewProfiles = remember(loaded) { (loaded?.store?.get("profiles") as? List<*>)?.size }
     val viewLabel = when {
-        locked -> "encrypted shell (unlock to view)"
-        encrypted -> "decrypted view (vault contents stay encrypted)"
-        else -> "live config"
+        locked -> "Encrypted. Unlock to view."
+        encrypted -> "Decrypted view. Vault contents stay encrypted."
+        else -> "Current config"
     }
     // Import (file or clipboard, local-only, no sync server).
     var importing by remember { mutableStateOf(false) }
@@ -105,7 +105,7 @@ fun ConfigFileScreen(
      * confirm dialog or an error — never renders the text itself. */
     fun handleIncoming(text: String) {
         if (text.length > MAX_IMPORT_BYTES) {
-            importError = "Too large (max ~2 MB)"
+            importError = "File is too large. Maximum size is 2 MB."
             return
         }
         val pv = preview(text)
@@ -138,12 +138,12 @@ fun ConfigFileScreen(
                             if (n < 0) break
                             total += n
                             if (total > MAX_IMPORT_BYTES) {
-                                throw IllegalStateException("File too large (max ~2 MB)")
+                                throw IllegalStateException("File is too large. Maximum size is 2 MB.")
                             }
                             out.write(buf, 0, n)
                         }
                         out.toString(Charsets.UTF_8)
-                    } ?: throw IllegalStateException("Could not read file")
+                    } ?: throw IllegalStateException("Could not read the file")
                 }
                 handleIncoming(text)
             } catch (e: Exception) {
@@ -167,7 +167,7 @@ fun ConfigFileScreen(
                     }
                 }
                 if (text.isBlank()) {
-                    importError = "Clipboard is empty — copy the YAML first"
+                    importError = "Clipboard is empty. Copy the config first."
                 } else {
                     // Validation itself runs here (Main); SnakeYAML on ~2 MB
                     // is milliseconds — the old jank was rendering 4000
@@ -186,17 +186,17 @@ fun ConfigFileScreen(
         ScreenHeader("Config file", onBack)
         if (!importing) {
             Text(
-                "Active ID: ${state.disk.configId.takeIf { it >= 0 } ?: "-"} · $viewLabel · " +
-                    "${yaml?.length ?: 0} chars · " +
-                    "${viewProfiles?.let { "$it profiles in view" } ?: "no view loaded"}",
+                "Config ${state.disk.configId.takeIf { it >= 0 } ?: "-"}, $viewLabel, " +
+                    "${yaml?.length ?: 0} characters, " +
+                    "${viewProfiles?.let { "$it profiles" } ?: "no config loaded"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
             Text(
-                "Replace the local config with a full Tabby YAML (e.g. copied from desktop " +
-                    "Tabby's Config file tab) — no sync server needed. " +
-                    "Your sync target stays untouched.",
+                "Replace the config on this device with a full Tabby config file (for example, copied from " +
+                    "Tabby on desktop). No sync server needed. " +
+                    "Your sync target stays unchanged.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -211,8 +211,8 @@ fun ConfigFileScreen(
             Card(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (!hasLocal) {
                     Text(
-                        "No local config. Tap Import below to load one from a file or the clipboard — " +
-                            "or open Config Sync to download a cloud config.",
+                        "No config on this device. Tap Import below to load one from a file or the clipboard, " +
+                            "or open Config Sync to download one.",
                         modifier = Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -234,7 +234,7 @@ fun ConfigFileScreen(
                         enabled = !busy,
                         onClick = { filePicker.launch("*/*") },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Choose file (.yaml / .yml / .txt)") }
+                    ) { Text("Choose file") }
                     OutlinedButton(
                         enabled = !busy,
                         onClick = { pasteFromClipboard() },
@@ -283,13 +283,13 @@ fun ConfigFileScreen(
         if (pv != null) {
             AlertDialog(
                 onDismissRequest = { pendingText = null },
-                title = { Text("Replace the local config?") },
+                title = { Text("Replace the config on this device?") },
                 text = {
                     Text(
-                        "This overwrites the local profiles with the imported YAML" +
+                        "This replaces the profiles on this device with the imported config" +
                             (pv.profileCount?.let { " ($it profiles)" } ?: "") +
-                            (if (pv.encryptedShell) " (encrypted — the vault passphrase will be asked when needed)" else "") +
-                            ". Your sync target stays untouched.",
+                            (if (pv.encryptedShell) " (encrypted. The vault passphrase will be asked when needed.)" else "") +
+                            ". Your sync target stays unchanged.",
                     )
                 },
                 confirmButton = {
@@ -312,7 +312,7 @@ fun ConfigFileScreen(
                                 busy = false
                             }
                         }
-                    }) { Text("Replace local") }
+                    }) { Text("Replace") }
                 },
                 dismissButton = { TextButton(onClick = { pendingText = null }) { Text("Cancel") } },
             )

@@ -41,10 +41,10 @@ fun CrashReportScreen(
         Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Previous run crashed", style = MaterialTheme.typography.headlineSmall)
+        Text("The app crashed last time", style = MaterialTheme.typography.headlineSmall)
         Text(
             "The app crashed on the last launch. Copy the report below and send " +
-                "it to the developer — it tells exactly what went wrong on this phone.",
+                "it to the developer. It helps fix the problem on this device.",
             style = MaterialTheme.typography.bodyMedium,
         )
         Card(Modifier.fillMaxWidth().weight(1f)) {
@@ -64,10 +64,10 @@ fun CrashReportScreen(
                 copied = true
             },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (copied) "Copied" else "Copy crash report") }
+        ) { Text(if (copied) "Copied to clipboard" else "Copy crash report") }
         OutlinedButton(
             onClick = onDismissed,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Clear report & continue") }
+        ) { Text("Clear report and continue") }
     }
 }

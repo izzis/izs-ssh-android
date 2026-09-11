@@ -142,9 +142,9 @@ fun SftpSheet(
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { out ->
                         tmp.inputStream().use { ins -> ins.copyTo(out) }
-                    } ?: throw IllegalStateException("Could not write file")
+                    } ?: throw IllegalStateException("Could not write the file")
                 }
-                info = "Saved $name"
+                info = "Saved \"$name\"."
             } catch (e: Exception) {
                 error = e.message
             } finally {
@@ -194,11 +194,11 @@ fun SftpSheet(
                 t.status == SftpTransferManager.Status.DONE &&
                 reloaded.add(t.id)
             ) {
-                info = "Uploaded ${t.name}"
+                info = "Uploaded \"${t.name}\"."
                 reload()
             }
             if (t.status == SftpTransferManager.Status.FAILED && reloaded.add(t.id)) {
-                error = t.error ?: "Transfer failed"
+                error = t.error ?: "Transfer failed. Try again."
             }
         }
     }
@@ -220,7 +220,7 @@ fun SftpSheet(
                     val tmp = File.createTempFile("sftp-up-", "-$name", context.cacheDir)
                     context.contentResolver.openInputStream(uri)?.use { ins ->
                         tmp.outputStream().use { out -> ins.copyTo(out) }
-                    } ?: throw IllegalStateException("Could not read file")
+                    } ?: throw IllegalStateException("Could not read the file")
                     tmp
                 }
                 // Same name already on the server: ask instead of silently
@@ -271,17 +271,17 @@ fun SftpSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "SFTP · ${handle?.profileSnapshot?.name ?: "session"}",
+                "SFTP: ${handle?.profileSnapshot?.name ?: "session"}",
                 style = MaterialTheme.typography.titleMedium,
             )
             if (handle == null) {
-                Text("Session closed", color = MaterialTheme.colorScheme.error)
+                Text("This session is closed.", color = MaterialTheme.colorScheme.error)
                 return@Column
             }
             val hasShell by handle.hasShell.collectAsState()
             if (!hasShell) {
                 Text(
-                    "Not connected — SFTP rides the session transport.",
+                    "Not connected. Connect the session to use SFTP.",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -312,7 +312,7 @@ fun SftpSheet(
                                         "${formatSize(t.done)}${if (t.total > 0) " / ${formatSize(t.total)}" else ""}"
                                     SftpTransferManager.Status.DONE -> "Done"
                                     SftpTransferManager.Status.FAILED -> t.error ?: "Failed"
-                                    SftpTransferManager.Status.CANCELLED -> "Cancelled"
+                                    SftpTransferManager.Status.CANCELLED -> "Canceled"
                                 }
                                 Text(
                                     label,
@@ -339,7 +339,7 @@ fun SftpSheet(
                         TextButton(
                             onClick = { manager.clearFinished() },
                             modifier = Modifier.align(Alignment.End),
-                        ) { Text("Clear finished") }
+                        ) { Text("Clear completed transfers") }
                     }
                 }
             }
@@ -373,7 +373,7 @@ fun SftpSheet(
                 val list = entries
                 when {
                     list == null -> Text(
-                        "Loading…",
+                        "Loading...",
                         modifier = Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -429,7 +429,7 @@ fun SftpSheet(
                     overwriteAsk = null
                 },
                 title = { Text("File exists") },
-                text = { Text("“$name” already exists in this folder.") },
+                text = { Text("\"$name\" already exists in this folder.") },
                 confirmButton = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),

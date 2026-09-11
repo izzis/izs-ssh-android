@@ -113,8 +113,8 @@ fun ConfigSyncScreen(
     ) {
         ScreenHeader("Config Sync", onBack)
         Text(
-            "Active ID: ${state.disk.configId.takeIf { it >= 0 } ?: "-"} · " +
-                "Last remote change: ${state.disk.lastRemoteChange.ifBlank { "-" }}",
+            "Current config: ${state.disk.configId.takeIf { it >= 0 } ?: "-"}, " +
+                "updated ${state.disk.lastRemoteChange.ifBlank { "-" }}",
             style = MaterialTheme.typography.bodySmall,
         )
 
@@ -123,8 +123,8 @@ fun ConfigSyncScreen(
         if (showHttpWarning) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                 Text(
-                    "Warning: non-HTTPS host. The synced YAML payload can lead to terminal " +
-                        "command execution if the connection is MITM'd. Use only on trusted LANs.",
+                    "Insecure connection. Connections can be intercepted. Use HTTPS, " +
+                        "or use HTTP only on networks you trust.",
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -133,14 +133,15 @@ fun ConfigSyncScreen(
         OutlinedTextField(
             value = host,
             onValueChange = { host = it },
-            label = { Text("Sync host (https://… or http://IP)") },
+            label = { Text("Sync host") },
+            placeholder = { Text("https://example.com") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
         OutlinedTextField(
             value = token,
             onValueChange = { token = it },
-            label = { Text("Token") },
+            label = { Text("Secret sync token") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
@@ -155,7 +156,7 @@ fun ConfigSyncScreen(
                         withContext(Dispatchers.IO) { state.repo.testConnection(host, token) }
                         state.disk.host = RawConfigStore.normalizeHost(host)
                         state.disk.token = token
-                        info = "Connected — cloud configs below."
+                        info = "Connected."
                         reload()
                     } catch (e: Exception) {
                         error = e.message ?: "Connection failed"
@@ -166,7 +167,7 @@ fun ConfigSyncScreen(
             },
             enabled = !busy && host.isNotBlank() && token.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Test & Save Connection") }
+        ) { Text("Test and save") }
 
         // ---- cloud configs ----
         Text("Cloud configs", style = MaterialTheme.typography.titleMedium)
@@ -210,7 +211,7 @@ fun ConfigSyncScreen(
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        "modified: ${meta.modifiedAt.ifBlank { "-" }}",
+                        "Modified: ${meta.modifiedAt.ifBlank { "-" }}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -240,20 +241,27 @@ fun ConfigSyncScreen(
         Text("Options", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = auto, onCheckedChange = { auto = it })
-            Text("Auto-sync (check every 60 seconds)")
+            Column(Modifier.weight(1f)) {
+                Text("Sync automatically")
+                Text(
+                    "Upload changes and check for updates every minute.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        Text("Synced parts (desktop parts parity):", style = MaterialTheme.typography.titleSmall)
+        Text("Synced parts:", style = MaterialTheme.typography.titleSmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = pHotkeys, onCheckedChange = { pHotkeys = it })
-            Text("hotkeys")
+            Text("Sync hotkeys")
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = pAppearance, onCheckedChange = { pAppearance = it })
-            Text("appearance")
+            Text("Sync window settings")
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = pVault, onCheckedChange = { pVault = it })
-            Text("vault")
+            Text("Sync Vault")
         }
         Button(
             enabled = !busy,
@@ -269,21 +277,21 @@ fun ConfigSyncScreen(
                         info = if (name != null) "Auto-sync: config \"$name\" downloaded" else "Settings saved"
                         state.refresh()
                     } catch (e: Exception) {
-                        error = "Failed: ${e.message}"
+                        error = "Couldn't save: ${e.message}"
                     } finally {
                         busy = false
                     }
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Save & Check Now") }
+        ) { Text("Save and check now") }
     }
 
     confirmDownload?.let { meta ->
         AlertDialog(
             onDismissRequest = { confirmDownload = null },
             title = { Text("Overwrite the local config and start syncing?") },
-            text = { Text("This overwrites the local profiles with \"${meta.name}\" (desktop parity).") },
+            text = { Text("This replaces the local profiles with \"${meta.name}\".") },
             confirmButton = {
                 Button(onClick = {
                     confirmDownload = null
@@ -291,7 +299,7 @@ fun ConfigSyncScreen(
                         busy = true
                         try { doDownload(meta) } catch (e: Exception) { error = e.message } finally { busy = false }
                     }
-                }) { Text("Overwrite local & sync") }
+                }) { Text("Replace and sync") }
             },
             dismissButton = { TextButton(onClick = { confirmDownload = null }) { Text("Cancel") } },
         )
@@ -308,7 +316,7 @@ fun ConfigSyncScreen(
                         busy = true
                         try { doUpload(meta) } catch (e: Exception) { error = e.message } finally { busy = false }
                     }
-                }) { Text("Overwrite remote & sync") }
+                }) { Text("Replace and sync") }
             },
             dismissButton = { TextButton(onClick = { confirmUpload = null }) { Text("Cancel") } },
         )

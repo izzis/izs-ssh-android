@@ -202,7 +202,7 @@ fun ProfileListScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = { Text("Search name / host / user") },
+                label = { Text("Search by name, host, or user") },
                 modifier = Modifier.fillMaxWidth()
                     .background(MaterialTheme.colorScheme.background),
                 singleLine = true,
@@ -217,7 +217,7 @@ fun ProfileListScreen(
         if (!state.loading && profiles.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    "No SSH profiles yet. Tap + to create one, or open Settings > Config Sync to download a cloud config.",
+                    "No SSH profiles yet. Tap New profile to create one, or download one in Settings > Config Sync.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -564,9 +564,9 @@ private fun ProfileCard(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 } else {
-                    // Desktop lists every type; only SSH connects on mobile.
+                    // Other types are shown for reference. Only SSH connects on this device.
                     Text(
-                        "type: ${profile.type}",
+                        "Type: ${profile.type}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -576,12 +576,12 @@ private fun ProfileCard(
                 }
                 if (profile.type == "ssh") {
                     val creds = buildList {
-                        if (state.passwordFor(profile) != null) add("password")
+                        if (state.passwordFor(profile) != null) add("Password saved")
                         val n = state.keysFor(profile).size
-                        if (n > 0) add("$n key")
-                    }.joinToString(" + ").ifBlank { "no saved credentials" }
+                        if (n == 1) add("1 key") else if (n > 1) add("$n keys")
+                    }.joinToString(", ").ifBlank { "No saved credentials" }
                     Text(
-                        "auth: ${profile.options.auth ?: "auto"} · $creds",
+                        "Auth: ${profile.options.auth ?: "Auto"}, $creds",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

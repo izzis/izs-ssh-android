@@ -80,7 +80,7 @@ fun SshSettingsScreen(
                 state.refresh()
             } catch (e: Exception) {
                 onError()
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -91,9 +91,7 @@ fun SshSettingsScreen(
         ScreenHeader("SSH", onBack)
         if (encrypted) {
             Text(
-                "This config is encrypted: SSH options live inside the vault blob " +
-                    "and are edited on desktop. Mobile keeps them read-only to " +
-                    "preserve upload parity.",
+                "This config is encrypted. SSH options can be edited on desktop.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -117,8 +115,8 @@ fun SshSettingsScreen(
             Column {
                 Text("Verify host keys when connecting")
                 Text(
-                    "New or changed keys ask first (fingerprint shown); " +
-                        "off trusts everything silently.",
+                    "New or changed keys ask first and show the fingerprint. " +
+                        "When off, all keys are trusted silently.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -142,7 +140,7 @@ fun SshSettingsScreen(
                 Text("Warn when closing active connections")
                 Text(
                     "Ask before disconnecting a live session. A profile with " +
-                        "its own warnOnClose set still wins (desktop parity).",
+                        "its own setting still takes precedence.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -168,8 +166,8 @@ fun SshSettingsScreen(
             Column(Modifier.weight(1f)) {
                 Text("Battery use")
                 Text(
-                    if (batteryExempt) "Unrestricted — background sessions allowed."
-                    else "Optimized — Android may kill background sessions.",
+                    if (batteryExempt) "Unrestricted. Background sessions are allowed."
+                    else "Optimized. Android may stop background sessions.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -191,10 +189,8 @@ fun SshSettingsScreen(
             Column {
                 Text("Keep CPU awake during sessions")
                 Text(
-                    "Held only while sessions are connected. Drains battery — " +
-                        "enable for long jobs (htop, rsync). Connected " +
-                        "sessions are always guarded by a foreground " +
-                        "notification; this only adds a CPU wake lock on top.",
+                    "Active only while sessions are connected. Uses more battery. " +
+                        "Turn on for long-running commands.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

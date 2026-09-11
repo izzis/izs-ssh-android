@@ -100,10 +100,10 @@ fun ColorSchemeSettingsScreen(
                     pendingRetry = { runWrite(write) }
                     showUnlock = true
                 } else {
-                    msg = "Failed: ${e.message}"
+                    msg = "Couldn't save: ${e.message}"
                 }
             } catch (e: Exception) {
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -153,7 +153,7 @@ fun ColorSchemeSettingsScreen(
     val effectiveCurrent = if (source == SchemeSource.LOCAL) localSel else global
     val currentCustom = effectiveCurrent?.let { g -> customs.find { it == g } }
     val currentBuiltin = effectiveCurrent?.let { g -> builtins.find { it == g } }
-    val currentName = if (effectiveCurrent == null) "System default (Izs)"
+    val currentName = if (effectiveCurrent == null) "System default"
     else (currentCustom?.name ?: currentBuiltin?.name ?: "Custom")
     val currentShown = effectiveCurrent ?: IZS_DEFAULT_SCHEME
 
@@ -169,11 +169,11 @@ fun ColorSchemeSettingsScreen(
         Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item(key = "header") { ScreenHeader("Color scheme", onBack) }
+        item(key = "header") { ScreenHeader("Colour scheme", onBack) }
         item(key = "blurb") {
             Text(
-                "Terminal colors only — the profile list and app chrome keep " +
-                    "their own theme. Applies live, even on open sessions.",
+                "Terminal colours only. The profile list and app theme keep " +
+                    "their own colours. Changes apply immediately, even to open sessions.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -182,7 +182,7 @@ fun ColorSchemeSettingsScreen(
         // Edit (+ Delete when the current matches a custom entry).
         item(key = "current") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Current color scheme", style = MaterialTheme.typography.titleMedium)
+                Text("Current colour scheme", style = MaterialTheme.typography.titleMedium)
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -223,7 +223,7 @@ fun ColorSchemeSettingsScreen(
             }
         }
         item(key = "follows-title") {
-            Text("Color scheme follows", style = MaterialTheme.typography.titleMedium)
+            Text("Colour scheme follows", style = MaterialTheme.typography.titleMedium)
         }
         item(key = "source-synced") {
             Row(
@@ -235,7 +235,7 @@ fun ColorSchemeSettingsScreen(
                     onClick = { commitSource(SchemeSource.SYNCED) },
                 )
                 Text(
-                    "Synced config (terminal.colorScheme)",
+                    "Synced config",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(start = 8.dp),
                 )
@@ -251,11 +251,22 @@ fun ColorSchemeSettingsScreen(
                     onClick = { commitSource(SchemeSource.LOCAL) },
                 )
                 Text(
-                    "This device only (ignores synced value, instant)",
+                    "This device only",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
+        }
+        item(key = "source-note") {
+            Text(
+                if (source == SchemeSource.LOCAL) {
+                    "Uses the scheme stored on this device. The synced config is ignored."
+                } else {
+                    "Uses the synced config. Changes are shared with your other devices."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         if (source == SchemeSource.SYNCED) {
             item(key = "global-title") {
@@ -264,7 +275,7 @@ fun ColorSchemeSettingsScreen(
             if (state.loaded?.needsPassphrase == true) {
                 item(key = "locked-note") {
                     Text(
-                        "Vault locked: saving will ask for the passphrase first.",
+                        "The vault is locked. The passphrase will be asked before saving.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -274,7 +285,7 @@ fun ColorSchemeSettingsScreen(
                 androidx.compose.material3.OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Search schemes") },
+                    label = { Text("Search colour schemes") },
                     singleLine = true,
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -292,9 +303,9 @@ fun ColorSchemeSettingsScreen(
                             onClick = null,
                         )
                         Column(Modifier.weight(1f)) {
-                            Text("System default (Izs)", style = MaterialTheme.typography.titleSmall)
+                            Text("System default", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "No key in YAML — the classic look.",
+                                "The default look.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -318,7 +329,7 @@ fun ColorSchemeSettingsScreen(
                 androidx.compose.material3.OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Search schemes") },
+                    label = { Text("Search colour schemes") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -335,7 +346,7 @@ fun ColorSchemeSettingsScreen(
                             onClick = null,
                         )
                         Column(Modifier.weight(1f)) {
-                            Text("System default (Izs)", style = MaterialTheme.typography.titleSmall)
+                            Text("System default", style = MaterialTheme.typography.titleSmall)
                             Text(
                                 "Stored on this device only.",
                                 style = MaterialTheme.typography.bodySmall,

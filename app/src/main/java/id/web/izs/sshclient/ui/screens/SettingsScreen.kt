@@ -52,39 +52,39 @@ data class SettingSection(
 
 val SETTING_SECTIONS = listOf(
     SettingSection(
-        "sync", "Config Sync", "Host, cloud configs, auto-sync",
+        "sync", "Config Sync", "Sync hosts, cloud configs, and auto-sync",
         Icons.Filled.Sync,
     ),
     SettingSection(
-        "ssh", "SSH", "Host key verification, close warning",
+        "ssh", "SSH", "Host key checks and close warnings",
         Icons.Filled.VpnKey,
     ),
     SettingSection(
-        "vault", "Vault", "Master passphrase, encryption, erase",
+        "vault", "Vault", "Passphrase, encryption, and reset",
         Icons.Filled.Lock,
     ),
     SettingSection(
-        "configfile", "Config file", "View, copy, or import the raw YAML",
+        "configfile", "Config file", "View, copy, or import the config file",
         Icons.Filled.Description,
     ),
     SettingSection(
-        "terminal", "Terminal", "Font size, scrollback, extra keys",
+        "terminal", "Terminal", "Scrollback, extra keys, and session limits",
         Icons.Filled.Terminal,
     ),
     SettingSection(
-        "appearance", "Appearance", "App theme, colors, font, cursor",
+        "appearance", "Appearance", "App theme, colours, font, and cursor",
         Icons.Filled.Style,
     ),
     SettingSection(
-        "colors", "Color scheme", "Terminal palette: built-in, custom, per-profile",
+        "colors", "Colour scheme", "Terminal colours for all profiles",
         Icons.Filled.Palette,
     ),
     SettingSection(
-        "window", "Window", "Tab location: synced config or this device",
+        "window", "Window", "Session tabs, header, and new tab",
         Icons.Filled.AspectRatio,
     ),
     SettingSection(
-        "about", "About", "Version, send feedback",
+        "about", "About", "Version and feedback",
         Icons.Filled.Info,
     ),
 )
@@ -121,7 +121,7 @@ fun SettingsScreen(
         }
         if (!state.disk.isEncryptedStorage) {
             Text(
-                "Note: device keystore unavailable, local storage is unencrypted.",
+                "This device cannot encrypt local storage, so it is stored unencrypted.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )

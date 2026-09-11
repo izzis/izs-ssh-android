@@ -185,7 +185,7 @@ fun SchemePickerList(
     selected: TerminalColorScheme?,
     onSelect: (TerminalColorScheme?) -> Unit,
     globalRow: @Composable (() -> Unit)? = null,
-    emptyHint: String = "No schemes match.",
+    emptyHint: String = "No schemes found.",
     badgeFor: (TerminalColorScheme) -> String? = { null },
 ) {
     var query by remember { mutableStateOf("") }
@@ -198,7 +198,7 @@ fun SchemePickerList(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = { Text("Search schemes") },
+                label = { Text("Search colour schemes") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )

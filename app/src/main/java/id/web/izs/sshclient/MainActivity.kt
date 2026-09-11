@@ -274,7 +274,7 @@ private fun BootFailedScreen(
         Text(message, style = MaterialTheme.typography.bodyMedium)
         Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
         OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
-            Text("Reset local data & restart")
+            Text("Reset and restart")
         }
     }
 }
@@ -330,7 +330,7 @@ private fun AppNav(
                 launchSingleTop = true
             }
         } catch (e: SessionLimitReached) {
-            limitError = "Session limit reached (${e.max}). Close one first."
+            limitError = "Session limit is ${e.max}. Close a session first."
         }
     }
     // Tab × on the current screen: close, then land on the newest remaining
@@ -477,7 +477,7 @@ private fun AppNav(
     if (limitError != null) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { limitError = null },
-            title = { Text("Too many sessions") },
+            title = { Text("Session limit reached") },
             text = { Text(limitError!!) },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = { limitError = null }) {

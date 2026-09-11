@@ -109,28 +109,37 @@ fun WindowSettingsScreen(
         RadioRow(
             selected = source == TabSource.FOLLOW_YAML,
             enabled = true,
-            label = "Synced config (appearance.tabsLocation)",
+            label = "Synced config",
             onClick = { commitSource(TabSource.FOLLOW_YAML) },
         )
         RadioRow(
             selected = source == TabSource.LOCAL,
             enabled = true,
-            label = "This device only (ignores synced value)",
+            label = "This device only",
             onClick = { commitSource(TabSource.LOCAL) },
         )
+        Text(
+            if (source == TabSource.LOCAL) {
+                "Uses the setting stored on this device. The synced config is ignored."
+            } else {
+                "Uses the synced config. Changes are shared with your other devices."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
-        Text("Tab location", style = MaterialTheme.typography.titleMedium)
+        Text("Tabs location", style = MaterialTheme.typography.titleMedium)
         val showingLocal = source == TabSource.LOCAL
         val current = if (showingLocal) localLoc else yamlLoc
         // Follow mode is a read-only mirror of the synced key (absent key =
         // Off default): the active value shows selected, the rest disabled.
         // Only This-device-only writes (to the local pref).
         val options = listOf(
-            TabLocation.OFF to "Off — profile list, no tabs",
-            TabLocation.TOP to "Top — strip under the header",
-            TabLocation.BOTTOM to "Bottom — strip above the extra keys",
-            TabLocation.LEFT to "Left — drawer, hamburger opens it",
-            TabLocation.RIGHT to "Right — drawer on the right",
+            TabLocation.OFF to "Off. Show the profile list without tabs",
+            TabLocation.TOP to "Top. Show tabs below the header",
+            TabLocation.BOTTOM to "Bottom. Show tabs above the extra keys",
+            TabLocation.LEFT to "Left. Show tabs in a side drawer",
+            TabLocation.RIGHT to "Right. Show tabs in a side drawer",
         )
         for ((v, label) in options) {
             RadioRow(
@@ -142,30 +151,34 @@ fun WindowSettingsScreen(
         }
         if (!showingLocal) {
             Text(
-                "Synced value is read-only here — change it on desktop or via Settings > Config file.",
+                "This setting is read-only here. Change it on desktop or in Settings > Config file.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        val effectiveLabel = effective.name.lowercase().replaceFirstChar { it.uppercase() }
+        val effectiveSource = if (showingLocal) {
+            "Using the setting on this device."
+        } else if (blind) {
+            "The synced config is locked. Unlock the vault to apply it."
+        } else {
+            "Using the synced config."
+        }
         Text(
-            "Effective now: ${effective.name.lowercase().replaceFirstChar { it.uppercase() }} " +
-                if (showingLocal) "(device setting)"
-                else if (blind) "(unreadable — locked encrypted config)"
-                else "(synced config)",
+            "Currently: $effectiveLabel. $effectiveSource",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary,
         )
         if (!showingLocal && blind) {
             Text(
-                "Locked encrypted config: unlock to apply the synced value.",
+                "The encrypted config is locked. Unlock it to apply the synced setting.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Text(
-            "Cloud sync: whether the synced value uploads is controlled by " +
-                "Settings > Config Sync > Synced parts > appearance (off = " +
-                "desktop and phone keep their own values).",
+            "To keep different values on phone and desktop, turn off Appearance " +
+                "under Settings > Config Sync > Synced parts.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -187,19 +200,19 @@ fun WindowSettingsScreen(
             Column {
                 Text("Hide terminal header")
                 Text(
-                    "Session options move to the ⋮ button on the active tab " +
-                        "(or a floating ⋮ when tabs are off).",
+                    "Session options move to the menu on the active tab " +
+                        "(or a floating menu button when tabs are off).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
         Text(
-            "Device-only setting, never synced to tabby.yaml.",
+            "Stored only on this device. It is never synced.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text("New tab (+) opens", style = MaterialTheme.typography.titleMedium)
+        Text("New tab opens", style = MaterialTheme.typography.titleMedium)
         RadioRow(
             selected = newTabMode != id.web.izs.sshclient.data.local.ConfigDisk.MODE_NEW_TAB_SHEET,
             enabled = true,
@@ -219,7 +232,7 @@ fun WindowSettingsScreen(
             },
         )
         Text(
-            "Device-only setting, never synced to tabby.yaml.",
+            "Stored only on this device. It is never synced.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

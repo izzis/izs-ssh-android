@@ -223,7 +223,7 @@ fun KeyboardLayoutScreen(
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                            Text(" Export")
+                            Text("Export")
                         }
                         OutlinedButton(
                             onClick = {
@@ -246,7 +246,7 @@ fun KeyboardLayoutScreen(
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Filled.ContentPaste, contentDescription = null)
-                            Text(" Import")
+                            Text("Import")
                         }
                     }
                     notice?.let {
@@ -257,7 +257,7 @@ fun KeyboardLayoutScreen(
                         )
                     }
                     Text(
-                        "Device-local: layouts never enter the synced config.",
+                        "Layouts are stored only on this device. They are never synced.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -332,7 +332,7 @@ fun KeyboardLayoutScreen(
                             } else {
                                 val add = preset.rows.take(room)
                                 commit(layout.copy(rows = layout.rows + add))
-                                notice = "Added ${add.size} row(s)."
+                                notice = "Added ${add.size} rows."
                             }
                             pendingPreset = null
                         },
@@ -488,7 +488,7 @@ private fun KeyEditDialog(
                 item(key = "kind") {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         KindChip("Send", kind == KIND_SEND) { kind = KIND_SEND }
-                        KindChip("Sticky", kind == KIND_STICKY_CTRL || kind == KIND_STICKY_ALT) {
+                        KindChip("Modifier", kind == KIND_STICKY_CTRL || kind == KIND_STICKY_ALT) {
                             kind = KIND_STICKY_CTRL
                         }
                         KindChip("Menu", kind == KIND_MENU) { kind = KIND_MENU }
@@ -576,14 +576,14 @@ private fun KeyEditDialog(
                 item(key = "width") {
                     // Segmented (never wraps): Normal 1x, Wide 1.5x, Double 2x.
                     Text(
-                        "Width (button slots)",
+                        "Key width",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     val widths = listOf(
-                        "Normal 1x" to WIDTH_NORMAL,
-                        "Wide 1.5x" to WIDTH_WIDE,
-                        "Double 2x" to WIDTH_DOUBLE,
+                        "Normal" to WIDTH_NORMAL,
+                        "Wide" to WIDTH_WIDE,
+                        "Double" to WIDTH_DOUBLE,
                     )
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         widths.forEachIndexed { i, (name, value) ->
@@ -720,7 +720,7 @@ private fun StepsEditor(
                         }
                     },
                     enabled = i > 0,
-                ) { Icon(Icons.Filled.ChevronLeft, contentDescription = "Move earlier") }
+                ) { Icon(Icons.Filled.ChevronLeft, contentDescription = "Move left") }
                 IconButton(
                     onClick = {
                         if (i < steps.size - 1) {
@@ -732,7 +732,7 @@ private fun StepsEditor(
                         }
                     },
                     enabled = i < steps.size - 1,
-                ) { Icon(Icons.Filled.ChevronRight, contentDescription = "Move later") }
+                ) { Icon(Icons.Filled.ChevronRight, contentDescription = "Move right") }
                 IconButton(
                     onClick = {
                         onChange(steps.filterIndexed { j, _ -> j != i })
@@ -852,7 +852,7 @@ private fun StepBadge(preset: Boolean) {
         },
     ) {
         Text(
-            if (preset) "key" else "text",
+            if (preset) "Key" else "Text",
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
         )
@@ -874,7 +874,7 @@ private fun KeyColorRow(selected: String, onSelect: (String) -> Unit) {
                         KeyColorDot(
                             fill = null,
                             isSelected = selected.isBlank(),
-                            contentDescription = "Default color",
+                            contentDescription = "Default colour",
                             onSelect = { onSelect("") },
                         )
                     } else {
@@ -882,7 +882,7 @@ private fun KeyColorRow(selected: String, onSelect: (String) -> Unit) {
                         KeyColorDot(
                             fill = Color(argb),
                             isSelected = selected == hex,
-                            contentDescription = "Color $hex",
+                            contentDescription = "Colour $hex",
                             onSelect = { onSelect(hex) },
                         )
                     }

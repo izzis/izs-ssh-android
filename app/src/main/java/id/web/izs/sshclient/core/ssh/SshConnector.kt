@@ -222,9 +222,9 @@ class SshConnector {
         if (!o.jumpHost.isNullOrBlank() || !o.proxyCommand.isNullOrBlank() ||
             !o.socksProxyHost.isNullOrBlank() || !o.httpProxyHost.isNullOrBlank()
         ) {
-            throw IllegalStateException("This profile uses jumpHost/proxy (scheduled for v2)")
+            throw IllegalStateException("This profile uses a jump host or proxy, which is not supported on this device yet.")
         }
-        if (o.host.isBlank()) throw IllegalStateException("Empty host")
+        if (o.host.isBlank()) throw IllegalStateException("Enter a host name or IP address.")
         val port = if (o.port > 0) o.port else 22
         val user = o.user.ifBlank { "root" }
         // Ciphers tab + host-key trust order: the per-connection config
@@ -243,7 +243,7 @@ class SshConnector {
         client.transport.config.keepAliveProvider = KeepAliveProvider.KEEP_ALIVE
         try {
             withTimeout(timeoutMs.coerceIn(5_000, 120_000)) {
-                onStage("Preparing crypto…")
+                onStage("Preparing secure connection...")
                 ensureProvider()
                 val (offeredHostKeys, hostKeysCustom) =
                     SshAlgorithmFactories.effectiveHostKeys(o.algorithms)
@@ -253,7 +253,7 @@ class SshConnector {
                     offeredHostKeys, hostKeysCustom,
                 )
                 client.addHostKeyVerifier(verifier)
-                onStage("Connecting to $user@${o.host}:$port…")
+                onStage("Connecting to $user@${o.host}:$port...")
                 try {
                     client.connect(o.host, port)
                 } catch (e: UnknownHostKeyException) {
@@ -266,7 +266,7 @@ class SshConnector {
                 }
                 var lastErr = ""
                 if (!password.isNullOrBlank()) {
-                    onStage("Authenticating with password…")
+                    onStage("Checking password...")
                     try {
                         client.authPassword(user, password)
                     } catch (e: Exception) {
@@ -276,7 +276,7 @@ class SshConnector {
                 if (!client.isAuthenticated) {
                     val usable = keys.filter { it.pem.isNotBlank() }
                     for ((i, k) in usable.withIndex()) {
-                        onStage("Trying private key ${i + 1} of ${usable.size}…")
+                        onStage("Trying key ${i + 1} of ${usable.size}...")
                         if (tryKeyAuth(client, user, k.pem, listOf(k.passphrase) + keyPassphrases, cacheDir)) break
                         else lastErr = "publickey auth failed"
                     }
@@ -321,7 +321,7 @@ class SshConnector {
         onStage: (String) -> Unit = {},
     ): ShellSession = withContext(Dispatchers.IO) {
         val o = profile.options
-        onStage("Opening shell…")
+        onStage("Opening shell...")
         val session = client.startSession()
         try {
             // xterm-256color (not dumb): fullscreen apps gate colors
@@ -333,7 +333,7 @@ class SshConnector {
             // Login tab: unconditional scripts at session ready, then
             // per-chunk expect/send automation (LoginScriptRunner).
             val scriptRunner = o.scripts.takeIf { it.isNotEmpty() }?.let { LoginScriptRunner(it) }
-            if (scriptRunner != null) onStage("Running login scripts…")
+            if (scriptRunner != null) onStage("Running login scripts...")
             scriptRunner?.runUnconditional()?.forEach { sess.send(it) }
             startReaderPump(shell, flow, scriptRunner, sess)
             return@withContext sess

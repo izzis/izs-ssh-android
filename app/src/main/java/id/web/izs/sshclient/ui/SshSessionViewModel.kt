@@ -40,7 +40,7 @@ import java.util.UUID
  * RAM-only by design (like the vault passphrase): process death clears all
  * sessions. Cap defaults to 5, hard max 8 ([ConfigDisk.MAX_SESSIONS_HARD_MAX]).
  */
-class SessionLimitReached(val max: Int) : IllegalStateException("Session limit reached ($max)")
+    class SessionLimitReached(val max: Int) : IllegalStateException("Session limit is $max")
 
 /** One connected session as mirrored to SessionService (label = `user@host`). */
 data class ConnectedInfo(val sessionId: String, val label: String)

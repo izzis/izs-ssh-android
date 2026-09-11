@@ -57,7 +57,6 @@ import id.web.izs.sshclient.core.config.parseSchemeSource
 import id.web.izs.sshclient.core.config.resolveActiveScheme
 import id.web.izs.sshclient.core.config.resolveTerminalFont
 import id.web.izs.sshclient.core.config.schemeColorArgb
-import id.web.izs.sshclient.core.config.terminalCursorYamlName
 import id.web.izs.sshclient.core.config.IZS_DEFAULT_LIGHT_SCHEME
 import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.data.local.ConfigDisk
@@ -152,10 +151,10 @@ fun AppearanceSettingsScreen(
                     pendingRetry = { runWrite(write) }
                     showUnlock = true
                 } else {
-                    msg = "Failed: ${e.message}"
+                    msg = "Couldn't save: ${e.message}"
                 }
             } catch (e: Exception) {
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -251,8 +250,8 @@ fun AppearanceSettingsScreen(
     ) {
         ScreenHeader("Appearance", onBack)
         Text(
-            "App chrome theme plus terminal font and cursor. The terminal " +
-                "colors themselves live under Settings > Color scheme.",
+            "App theme plus terminal font and cursor. The terminal " +
+                "colors are under Settings > Color scheme.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -260,7 +259,7 @@ fun AppearanceSettingsScreen(
         RadioRow(
             selected = theme == ConfigDisk.THEME_SYSTEM,
             enabled = !busy,
-            label = "System (follows phone dark/light)",
+            label = "System (follows the phone theme)",
             onClick = { commitTheme(ConfigDisk.THEME_SYSTEM) },
         )
         RadioRow(
@@ -276,12 +275,11 @@ fun AppearanceSettingsScreen(
             onClick = { commitTheme(ConfigDisk.THEME_LIGHT) },
         )
         Text(
-            "Device-only, never synced — the desktop appearance keys " +
-                "describe its window manager, not this phone.",
+            "Stored only on this device. It is never synced.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text("App colors", style = MaterialTheme.typography.titleMedium)
+        Text("App colours", style = MaterialTheme.typography.titleMedium)
         // Accent palette for buttons, switches, tabs and highlights.
         // Terminal content is untouched (Settings > Color scheme owns
         // that); the terminal stage and key bar keep their own colors.
@@ -319,20 +317,19 @@ fun AppearanceSettingsScreen(
         RadioRow(
             selected = yamlFont == TerminalFont.SYSTEM,
             enabled = !busy,
-            label = "System monospace (no terminal.font key)",
+            label = "System monospace",
             onClick = { commitFont(TerminalFont.SYSTEM) },
         )
         RadioRow(
             selected = yamlFont == TerminalFont.SOURCE_CODE_PRO,
             enabled = !busy,
-            label = "Source Code Pro (bundled, like desktop)",
+            label = "Source Code Pro (bundled)",
             onClick = { commitFont(TerminalFont.SOURCE_CODE_PRO) },
         )
         Text(
-            "Writes terminal.font = \"$SOURCE_CODE_PRO_YAML_NAME\" (synced, " +
-                "desktop shows the same font when installed there). Other " +
-                "desktop font names render as system monospace here and are " +
-                "never rewritten.",
+            "Synced. Desktop uses the same font when available. Other " +
+                "desktop fonts appear as system monospace here and are " +
+                "never changed.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -343,7 +340,7 @@ fun AppearanceSettingsScreen(
                     fontSp = (fontSp - 1f).coerceIn(8f, 24f)
                     state.disk.terminalFontSp = fontSp
                 },
-            ) { Icon(Icons.Filled.Remove, contentDescription = "Smaller") }
+            ) { Icon(Icons.Filled.Remove, contentDescription = "Decrease font size") }
             Text(
                 "${fontSp.toInt()}sp",
                 style = MaterialTheme.typography.titleLarge,
@@ -354,16 +351,15 @@ fun AppearanceSettingsScreen(
                     fontSp = (fontSp + 1f).coerceIn(8f, 24f)
                     state.disk.terminalFontSp = fontSp
                 },
-            ) { Icon(Icons.Filled.Add, contentDescription = "Bigger") }
+            ) { Icon(Icons.Filled.Add, contentDescription = "Increase font size") }
         }
         Text(
-            "Device-only (same setting as the terminal A-/A+ menu): " +
-                "screens differ, syncing would resize the desktop.",
+            "Stored only on this device. It does not affect other devices.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "Preview (live font + size, active scheme + cursor)",
+            "Preview",
             style = MaterialTheme.typography.titleMedium,
         )
         FontPreview(font = yamlFont, fontSp = fontSp, scheme = previewScheme, cursor = cursor)
@@ -418,15 +414,7 @@ fun AppearanceSettingsScreen(
             Switch(checked = blink, enabled = !busy, onCheckedChange = { commitBlink(it) })
         }
         Text(
-            "Synced terminal.cursor " +
-                "(${terminalCursorYamlName(cursor)}) + cursorBlink ($blink), " +
-                "like desktop. Applies to open sessions on return.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            "Desktop-managed (kept in the synced file, edited on desktop): " +
-                "window frame, vibrancy, dock, spacing, opacity, custom CSS.",
+            "Synced. Applies to open sessions when you return.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -195,7 +195,7 @@ fun ProfileEditScreen(
     if (!isNew && original?.type != "ssh") {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ScreenHeader("Edit profile", onBack)
-            Text("Only SSH profiles can be edited on mobile v1.")
+            Text("Only SSH profiles can be edited on this device.")
         }
         return
     }
@@ -252,7 +252,7 @@ fun ProfileEditScreen(
 
     fun doSave() {
         if (host.isBlank()) {
-            msg = "Host is empty"
+            msg = "Enter a host name or IP address."
             return
         }
         scope.launch {
@@ -301,10 +301,10 @@ fun ProfileEditScreen(
                     pendingSave = true
                     showUnlock = true
                 } else {
-                    msg = "Failed: ${e.message}"
+                    msg = "Couldn't save: ${e.message}"
                 }
             } catch (e: Exception) {
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -326,10 +326,10 @@ fun ProfileEditScreen(
                     pendingNewGroup = true
                     showUnlock = true
                 } else {
-                    msg = "Failed: ${e.message}"
+                    msg = "Couldn't save: ${e.message}"
                 }
             } catch (e: Exception) {
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -349,10 +349,10 @@ fun ProfileEditScreen(
                     pendingDelete = true
                     showUnlock = true
                 } else {
-                    msg = "Failed: ${e.message}"
+                    msg = "Couldn't save: ${e.message}"
                 }
             } catch (e: Exception) {
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -533,8 +533,8 @@ fun ProfileEditScreen(
             title = { Text("Delete this profile?") },
             text = {
                 Text(
-                    "“${original?.name}” is removed from the config. " +
-                        "Saved vault secrets are kept (they may serve other profiles). " +
+                    "\"${original?.name}\" will be removed from the config. " +
+                        "Saved vault secrets are kept because other profiles may use them. " +
                         "This cannot be undone.",
                 )
             },
@@ -676,9 +676,9 @@ private fun GeneralTab(
             placeholder = {
                 Text(
                     when {
-                        locked -> "locked — tap the eye to unlock"
-                        hasSavedPassword -> "saved — leave empty to keep, clear to remove"
-                        else -> "no password saved"
+                        locked -> "Locked. Tap Show to unlock."
+                        hasSavedPassword -> "Saved. Leave empty to keep it."
+                        else -> "No password saved."
                     },
                 )
             },
@@ -700,14 +700,14 @@ private fun GeneralTab(
     }
     if (passwordTouched && passwordText.isEmpty() && hasSavedPassword) {
         Text(
-            "Password will be forgotten when you Save.",
+            "The password will be removed when you save.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
     if (reveal) {
         Text(
-            "Current: ${effectivePassword ?: "(none)"}",
+            "Saved password: ${effectivePassword ?: "None"}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -718,7 +718,7 @@ private fun GeneralTab(
     )
     if (vaultPresent && locked) {
         Text(
-            "Key list is locked — unlock to manage keys.",
+            "The key list is locked. Unlock to manage keys.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -741,7 +741,7 @@ private fun GeneralTab(
     for (entry in addedKeys) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(
-                "new • ${entry.second.ifBlank { "pasted key" }} (${entry.first.lines().size} lines)",
+                "New key: ${entry.second.ifBlank { "pasted key" }}",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
@@ -753,7 +753,7 @@ private fun GeneralTab(
     for (ref in attachedRefs) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(
-                "saved • ${keyLabel(ref)}",
+                "Saved key: ${keyLabel(ref)}",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
@@ -768,11 +768,11 @@ private fun GeneralTab(
                 enabled = !locked,
                 onClick = onAddKey,
                 modifier = Modifier.weight(1f),
-            ) { Text("Paste new") }
+            ) { Text("Paste new key") }
             OutlinedButton(
                 onClick = onUseSavedKey,
                 modifier = Modifier.weight(1f),
-            ) { Text("Use saved (${savedKeys.size})") }
+            ) { Text("Use saved key") }
         }
         if (locked) {
             Text(
@@ -791,7 +791,7 @@ private fun GeneralTab(
     ConnectionDropdown(selected = connectionMode, onSelect = onConnectionMode)
     if (connectionMode != "direct") {
         Text(
-            "Mobile connects direct only for now — this is saved as-is and works on desktop.",
+            "This connection type works on desktop. This device always connects directly.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -803,7 +803,8 @@ private fun GeneralTab(
         )
         "jumpHost" -> OutlinedTextField(
             value = jumpHost, onValueChange = onJumpHost,
-            label = { Text("Jump host (profile name or id)") },
+            label = { Text("Jump host") },
+            placeholder = { Text("Profile name or ID") },
             modifier = Modifier.fillMaxWidth(), singleLine = true,
         )
         "socksProxy" -> Row(
@@ -857,7 +858,7 @@ private fun ColourDot(selected: String, onClick: () -> Unit) {
         if (argb == null) {
             Icon(
                 Icons.Filled.FormatColorReset,
-                contentDescription = "Pick profile color",
+                contentDescription = "Pick profile colour",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -907,7 +908,7 @@ private fun ColourSwatch(hex: String, isSelected: Boolean, onSelect: (String) ->
         ) {
             Icon(
                 Icons.Filled.FormatColorReset,
-                contentDescription = "Default color",
+                contentDescription = "Default colour",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -928,12 +929,7 @@ private fun ColourSwatch(hex: String, isSelected: Boolean, onSelect: (String) ->
 private fun PortsTab(forwards: List<ForwardedPort>, onChange: (List<ForwardedPort>) -> Unit) {
     Text("Port forwarding", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Local/Remote listen on interface:port and reach target:port. Dynamic is a SOCKS proxy (target hidden).",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Text(
-        "Stored for desktop — forwarding is not opened on mobile yet.",
+        "Forward traffic between this device and the server. Forwarding is set up on desktop.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1027,33 +1023,34 @@ private fun AdvancedTab(
     CheckRow("Skip banner", skipBanner, onSkipBanner)
     CheckRow("Reuse session", reuseSession, onReuseSession)
     Text(
-        "Reuse session shares one connection for all tabs of this profile " +
-            "(desktop multiplex parity: extra tabs skip re-auth). Off means " +
-            "every tab connects separately. The other three options are " +
-            "stored for desktop and have no effect on mobile " +
-            "(no X server, no ssh-agent, no banner display).",
+        "Reuse session shares one connection for all tabs of this profile. " +
+            "When off, every tab connects separately. The options above are " +
+            "stored for desktop and have no effect on this device.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Text("Timeouts", style = MaterialTheme.typography.titleMedium)
     OutlinedTextField(
         value = keepaliveText, onValueChange = onKeepalive,
-        label = { Text("Keepalive interval (ms, default 5000)") },
+        label = { Text("Keep-alive interval") },
+        placeholder = { Text("In milliseconds. Default: 5000.") },
         modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
     OutlinedTextField(
         value = keepaliveMaxText, onValueChange = onKeepaliveMax,
-        label = { Text("Keepalive max misses (default 10)") },
+        label = { Text("Keep-alive max misses") },
+        placeholder = { Text("Default: 10.") },
         modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
     Text(
-        "Mobile sends heartbeats on the interval above; max misses is stored for desktop.",
+        "Sends keep-alive messages at this interval.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     OutlinedTextField(
         value = readyTimeoutText, onValueChange = onReadyTimeout,
-        label = { Text("Ready timeout (ms, blank = default)") },
+        label = { Text("Ready timeout") },
+        placeholder = { Text("In milliseconds. Empty uses the default.") },
         modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
 }
@@ -1070,7 +1067,7 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 private fun CiphersTab(checked: Map<String, List<String>>, onChange: (Map<String, List<String>>) -> Unit) {
     Text("Algorithms", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Uncheck to restrict negotiation. Untouched lists stay at desktop defaults and are omitted from the config.",
+        "Uncheck to restrict negotiation. Unchanged lists use the default algorithms.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1119,8 +1116,7 @@ private fun ColoursTab(
     val all = remember(builtins, customs) { customs + builtins }
     Text("Colours", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Terminal colors for this profile only. The list and app chrome " +
-            "are unaffected.",
+        "Terminal colours for this profile only.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1140,7 +1136,7 @@ private fun ColoursTab(
                     Column(Modifier.weight(1f)) {
                         Text("Use global default", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            global?.name ?: "System default (Izs)",
+                            global?.name ?: "System default",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1155,7 +1151,7 @@ private fun ColoursTab(
 private fun ScriptsTab(scriptsList: List<LoginScript>, onChange: (List<LoginScript>) -> Unit) {
     Text("Login scripts", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Wait for expect, then send. Regex and optional tweak matching.",
+        "Wait for a prompt, then send a reply. Matching can be exact or a regular expression.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1270,7 +1266,7 @@ private fun GroupDropdown(
                 )
             }
             DropdownMenuItem(
-                text = { Text("New group…") },
+                text = { Text("New group...") },
                 onClick = { expanded = false; onNewGroup() },
             )
         }
@@ -1326,13 +1322,13 @@ private fun AddKeyDialog(defaultDesc: String, onAdd: (pem: String, desc: String)
             ) {
                 OutlinedTextField(
                     value = pem, onValueChange = { pem = it },
-                    label = { Text("Paste PEM (or key path for plaintext configs)") },
+                    label = { Text("Paste private key") },
                     modifier = Modifier.fillMaxWidth().height(200.dp),
                     minLines = 3,
                 )
                 OutlinedTextField(
                     value = desc, onValueChange = { desc = it },
-                    label = { Text("Description (optional label)") },
+                    label = { Text("Description (optional)") },
                     placeholder = { Text(defaultDesc) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1370,7 +1366,7 @@ private fun UseSavedKeyDialog(
         title = { Text("Use saved key") },
         text = {
             if (available.isEmpty()) {
-                Text("No other saved keys in the vault — paste one with “Paste new” first.")
+                Text("No saved keys yet. Paste a new key first.")
             } else {
                 Column(
                     Modifier.verticalScroll(rememberScrollState()),

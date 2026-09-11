@@ -99,11 +99,11 @@ fun NewTabSheet(
                 .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("New connection", style = MaterialTheme.typography.titleMedium)
+            Text("New tab", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = { Text("Search name / host / user") },
+                label = { Text("Search by name, host, or user") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )

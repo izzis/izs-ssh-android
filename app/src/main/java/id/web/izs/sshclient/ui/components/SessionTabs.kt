@@ -336,7 +336,7 @@ fun SessionTabDrawerContent(
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("New connection…", style = MaterialTheme.typography.bodyMedium)
+                Text("New tab", style = MaterialTheme.typography.bodyMedium)
             }
         }
         // Pinned footer: drawer mode replaces the header back arrow with a

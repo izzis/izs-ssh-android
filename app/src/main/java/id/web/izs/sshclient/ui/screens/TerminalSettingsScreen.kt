@@ -100,7 +100,7 @@ fun TerminalSettingsScreen(
                 state.refresh()
             } catch (e: Exception) {
                 maxRecent = old
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -133,14 +133,14 @@ fun TerminalSettingsScreen(
         }
         Text("Scrollback buffer", style = MaterialTheme.typography.titleMedium)
         Text(
-            "Lines kept above the live grid. Drag up in the terminal to " +
-                "read history; new output follows only while parked at the bottom.",
+            "Lines kept above the visible area. Drag up in the terminal to " +
+                "read history. New output stays at the bottom.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { commitScrollback(scrollback - SCROLLBACK_STEP) }) {
-                Icon(Icons.Filled.Remove, contentDescription = "Less")
+                Icon(Icons.Filled.Remove, contentDescription = "Decrease")
             }
             // Same look as the font row above: borderless number (tap to
             // type any value), not a boxed field.
@@ -167,7 +167,7 @@ fun TerminalSettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             IconButton(onClick = { commitScrollback(scrollback + SCROLLBACK_STEP) }) {
-                Icon(Icons.Filled.Add, contentDescription = "More")
+                Icon(Icons.Filled.Add, contentDescription = "Increase")
             }
         }
         // Labels computed first: String.format only applies to the segment
@@ -176,9 +176,9 @@ fun TerminalSettingsScreen(
         val maxLabel = "%,d".format(SCROLLBACK_MAX)
         val stepLabel = "%,d".format(SCROLLBACK_STEP)
         Text(
-            "0 = off, max $maxLabel. ±$stepLabel per tap, or tap the number " +
-                "to type. Applies live; lowering trims immediately. Very " +
-                "large buffers use lots of RAM.",
+            "0 turns it off, maximum is $maxLabel. $stepLabel per tap, or tap the number " +
+                "to type an exact value. Changes apply immediately. Lowering trims the buffer " +
+                "right away. Very large buffers use more memory.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -191,7 +191,7 @@ fun TerminalSettingsScreen(
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { commitStepDelay(stepDelayMs - STEP_DELAY_STEP_MS) }) {
-                Icon(Icons.Filled.Remove, contentDescription = "Less")
+                Icon(Icons.Filled.Remove, contentDescription = "Decrease")
             }
             BasicTextField(
                 value = delayText,
@@ -214,20 +214,19 @@ fun TerminalSettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             IconButton(onClick = { commitStepDelay(stepDelayMs + STEP_DELAY_STEP_MS) }) {
-                Icon(Icons.Filled.Add, contentDescription = "More")
+                Icon(Icons.Filled.Add, contentDescription = "Increase")
             }
         }
         Text(
-            "0 = no pause, max $MAX_MACRO_STEP_DELAY_MS. ±$STEP_DELAY_STEP_MS per tap, " +
-                "or tap the number to type. Applies to the next macro sent.",
+            "0 means no pause, maximum is $MAX_MACRO_STEP_DELAY_MS. $STEP_DELAY_STEP_MS per tap, " +
+                "or tap the number to type an exact value. Applies to the next macro sent.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text("Max sessions", style = MaterialTheme.typography.titleMedium)
         Text(
-            "Concurrent SSH sessions kept alive in the background. Back never " +
-                "disconnects; the Active sessions list re-attaches. Big-RAM " +
-                "phones can raise to ${id.web.izs.sshclient.data.local.ConfigDisk.MAX_SESSIONS_HARD_MAX}.",
+            "Sessions kept alive in the background. Sessions stay connected " +
+                "when you go back. Rejoin them from Active sessions.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -237,7 +236,7 @@ fun TerminalSettingsScreen(
                     maxSessions = (maxSessions - 1).coerceIn(1, id.web.izs.sshclient.data.local.ConfigDisk.MAX_SESSIONS_HARD_MAX)
                     state.disk.maxSessions = maxSessions
                 },
-            ) { Icon(Icons.Filled.Remove, contentDescription = "Less") }
+            ) { Icon(Icons.Filled.Remove, contentDescription = "Decrease") }
             Text(
                 "$maxSessions",
                 style = MaterialTheme.typography.titleLarge,
@@ -248,19 +247,19 @@ fun TerminalSettingsScreen(
                     maxSessions = (maxSessions + 1).coerceIn(1, id.web.izs.sshclient.data.local.ConfigDisk.MAX_SESSIONS_HARD_MAX)
                     state.disk.maxSessions = maxSessions
                 },
-            ) { Icon(Icons.Filled.Add, contentDescription = "More") }
+            ) { Icon(Icons.Filled.Add, contentDescription = "Increase") }
         }
         Text("Recent profiles", style = MaterialTheme.typography.titleMedium)
         Text(
             "How many recently connected profiles the home page lists for " +
-                "quick connect (desktop Profiles > Advanced). 0 hides the list. " +
-                "Synced via YAML like desktop.",
+                "quick connect. 0 hides the list. " +
+                "Synced to your other devices.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (encrypted) {
             Text(
-                "Encrypted config: edited on desktop, read-only here.",
+                "This setting is read-only for encrypted configs. Edit it on desktop.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -269,7 +268,7 @@ fun TerminalSettingsScreen(
             IconButton(
                 onClick = { commitMaxRecent(maxRecent - 1) },
                 enabled = !encrypted && !busy,
-            ) { Icon(Icons.Filled.Remove, contentDescription = "Less") }
+            ) { Icon(Icons.Filled.Remove, contentDescription = "Decrease") }
             Text(
                 "$maxRecent",
                 style = MaterialTheme.typography.titleLarge,
@@ -278,7 +277,7 @@ fun TerminalSettingsScreen(
             IconButton(
                 onClick = { commitMaxRecent(maxRecent + 1) },
                 enabled = !encrypted && !busy,
-            ) { Icon(Icons.Filled.Add, contentDescription = "More") }
+            ) { Icon(Icons.Filled.Add, contentDescription = "Increase") }
         }
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         if (busy) CircularProgressIndicator()

@@ -42,7 +42,7 @@ fun AboutScreen(onBack: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "Found a bug or have a suggestion? Send feedback — it opens " +
+            "Found a bug or have a suggestion? Send feedback. This opens " +
                 "your mail app addressed to $feedbackEmail.",
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -64,9 +64,9 @@ fun AboutScreen(onBack: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
-            "Unofficial Tabby-compatible client: implements Tabby Desktop's " +
-                "config/vault/sync format with behavioral parity (no Tabby code " +
-                "copied). Not affiliated with or endorsed by the Tabby Developers. " +
+            "Unofficial Tabby-compatible client. It reads the config, vault, and sync format " +
+                "used by Tabby Desktop. No Tabby code is used. Not affiliated with or endorsed " +
+                "by the Tabby Developers. " +
                 "Tabby Desktop is MIT licensed, Copyright (c) 2017 Tabby Developers.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

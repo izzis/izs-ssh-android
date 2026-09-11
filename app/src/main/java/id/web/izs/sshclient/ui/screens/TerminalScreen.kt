@@ -170,7 +170,7 @@ fun TerminalScreen(
     val handle = remember(sessionId) { sessionViewModel.get(sessionId) }?.takeIf { registered }
     if (handle == null) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Session closed", color = MaterialTheme.colorScheme.error)
+            Text("This session is closed.", color = MaterialTheme.colorScheme.error)
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
         }
         return
@@ -690,7 +690,7 @@ fun TerminalScreen(
                 }
             } else {
                 IconButton(onClick = { onBack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back (session stays alive)")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back. Session stays connected.")
                 }
             }            // Status dot sits on the NAME row so user@host below gets the
             // full width (green = connected, amber = connecting, red =
@@ -742,7 +742,7 @@ fun TerminalScreen(
             IconButton(onClick = { boxMode = !boxMode }) {
                 Icon(
                     if (boxMode) Icons.Filled.Terminal else Icons.Filled.Keyboard,
-                    contentDescription = if (boxMode) "Direct typing mode" else "Command box mode",
+                    contentDescription = if (boxMode) "Switch to direct typing" else "Switch to command box",
                 )
             }
             Box {
@@ -870,14 +870,12 @@ fun TerminalScreen(
                     showNotifDialog = false
                     checkBattery()
                 },
-                title = { Text("Show session notifications?") },
+                title = { Text("Allow session notifications?") },
                 text = {
                     Text(
-                        "Connected sessions are guarded by an ongoing " +
-                            "notification (session count, per-host lines, " +
-                            "Disconnect all). Android 13+ needs your " +
-                            "permission; without it the notice — and the " +
-                            "session-lost alert — cannot show.",
+                        "Connected sessions show an ongoing notification with the session count. " +
+                            "Android 13 and later needs your permission. " +
+                            "Without it, background sessions may stop silently.",
                     )
                 },
                 confirmButton = {
@@ -891,7 +889,7 @@ fun TerminalScreen(
                         state.disk.notifAsked = true
                         showNotifDialog = false
                         checkBattery()
-                    }) { Text("Skip") }
+                    }) { Text("Later") }
                 },
             )
         }
@@ -901,21 +899,18 @@ fun TerminalScreen(
             var batteryStuck by remember { mutableStateOf(false) }
             AlertDialog(
                 onDismissRequest = { showBatteryDialog = false },
-                title = { Text("Stay connected in background?") },
+                title = { Text("Stay connected in the background?") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "Android may kill background sessions (Doze, battery " +
-                                "savers, aggressive task managers). Allowing " +
-                                "unrestricted battery use helps — but it cannot " +
-                                "stop every phone maker. Killed sessions retry " +
-                                "once automatically.",
+                            "Android may stop background sessions to save battery. " +
+                                "Allowing unrestricted use helps, but some devices may still stop them. " +
+                                "Stopped sessions retry once automatically.",
                         )
                         if (batteryStuck) {
                             Text(
-                                "Could not open the setting automatically — " +
-                                    "allow it manually: Settings > Apps > " +
-                                    "izs SSH > Battery > Unrestricted.",
+                                "The setting could not be opened. Allow it manually in " +
+                                    "Settings > Apps > izs SSH > Battery > Unrestricted.",
                                 color = MaterialTheme.colorScheme.error,
                             )
                         }
@@ -939,7 +934,7 @@ fun TerminalScreen(
                         TextButton(onClick = {
                             state.disk.batteryOptAsked = true
                             showBatteryDialog = false
-                        }) { Text("Never") }
+                        }) { Text("Don't ask again") }
                     }
                 },
             )
@@ -1367,7 +1362,7 @@ fun TerminalScreen(
     if (showCloseConfirm) {        AlertDialog(
             onDismissRequest = { showCloseConfirm = false },
             title = { Text("Disconnect?") },
-            text = { Text("“${profile.name}” is still connected.") },
+            text = { Text("\"${profile.name}\" is still connected.") },
             confirmButton = {
                 TextButton(
                     onClick = { showCloseConfirm = false; doDisconnectAndBack() },
@@ -1390,8 +1385,8 @@ fun TerminalScreen(
                     if (prompt.mismatched) {
                         Text(
                             "Warning: the host key of ${prompt.host}:${prompt.port} has " +
-                                "CHANGED since your last visit. This could be a " +
-                                "man-in-the-middle attack — or the server was reinstalled.",
+                                "changed since your last visit. This may mean someone is intercepting " +
+                                "the connection, or the server was reinstalled.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -1550,7 +1545,7 @@ fun TerminalScreen(
         AlertDialog(
             onDismissRequest = { closeTarget = null },
             title = { Text("Close tab?") },
-            text = { Text("Close \"${targetTitle ?: "this tab"}\"? The connection drops.") },
+            text = { Text("Close \"${targetTitle ?: "this tab"}\"? This will disconnect it.") },
             confirmButton = {
                 TextButton(onClick = {
                     val t = closeTarget
@@ -1664,15 +1659,15 @@ private fun ColumnScope.SessionOptionsItems(
         onClick = { onDismiss(); onSftp() },
     )
     DropdownMenuItem(
-        text = { Text(if (boxMode) "Direct typing mode" else "Command box mode") },
+        text = { Text(if (boxMode) "Switch to direct typing" else "Switch to command box") },
         onClick = { onDismiss(); onToggleBoxMode() },
     )
     DropdownMenuItem(
-        text = { Text("Font - (now ${fontSp.toInt()}sp)") },
+        text = { Text("Decrease font size") },
         onClick = { onDismiss(); onFontDown() },
     )
     DropdownMenuItem(
-        text = { Text("Font + (now ${fontSp.toInt()}sp)") },
+        text = { Text("Increase font size") },
         onClick = { onDismiss(); onFontUp() },
     )
     DropdownMenuItem(
@@ -1729,9 +1724,9 @@ private fun PasswordPromptDialog(
                 }
                 Text(
                     when {
-                        !vaultPresent -> "Stored in the profile on success."
-                        locked -> "Vault is locked — you'll unlock after connecting to save."
-                        else -> "Saved to the vault on success."
+                        !vaultPresent -> "It will be stored in the profile."
+                        locked -> "Unlock the vault after connecting to save it."
+                        else -> "It will be saved to the vault."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

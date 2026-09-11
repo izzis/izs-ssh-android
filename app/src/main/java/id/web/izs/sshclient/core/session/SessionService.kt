@@ -244,7 +244,7 @@ class SessionService : Service() {
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_warning)
                 .setContentTitle("SSH session lost")
-                .setContentText("$label — retrying, tap to open")
+                .setContentText("$label. Trying to reconnect. Tap to open.")
                 .setContentIntent(openApp)
                 .setAutoCancel(true)
                 .build()

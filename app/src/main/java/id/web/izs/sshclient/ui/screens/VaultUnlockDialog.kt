@@ -42,12 +42,12 @@ fun VaultUnlockDialog(
 
     AlertDialog(
         onDismissRequest = { if (dismissible) onDismiss() },
-        title = { Text("Encrypted Config") },
+        title = { Text("Encrypted config") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "The vault must be unlocked to load the configuration (desktop parity). " +
-                        "The passphrase is kept in RAM for the session only.",
+                    "The vault must be unlocked to load the configuration. " +
+                        "The passphrase is kept only for this session.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 OutlinedTextField(
@@ -65,11 +65,11 @@ fun VaultUnlockDialog(
             Button(
                 enabled = !state.loading && pass.isNotEmpty(),
                 onClick = { state.unlock(pass) { ok -> if (ok) onUnlocked() } },
-            ) { Text(if (state.loading) "Unlocking…" else "Unlock") }
+            ) { Text(if (state.loading) "Unlocking..." else "Unlock") }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { showDelete = true }) { Text("Delete local") }
+                TextButton(onClick = { showDelete = true }) { Text("Delete saved config") }
                 if (dismissible) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                 }

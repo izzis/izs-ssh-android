@@ -77,11 +77,11 @@ private data class Slot(val key: String, val label: String, val hint: String)
 private val SLOT_ORDER: List<Slot> = listOf(
     Slot("foreground", "FG", "Foreground"),
     Slot("background", "BG", "Background"),
-    Slot("cursor", "CU", "Cursor color"),
+    Slot("cursor", "CU", "Cursor colour"),
     Slot("cursorAccent", "CA", "Block cursor foreground"),
     Slot("selection", "SB", "Selection background"),
     Slot("selectionForeground", "SF", "Selection foreground"),
-) + (0..15).map { Slot("color$it", "$it", "ANSI color $it") }
+) + (0..15).map { Slot("color$it", "$it", "ANSI colour $it") }
 
 /**
  * Desktop picker level 1: 4 x 5 family grid (material 500s + black).
@@ -190,10 +190,10 @@ fun ColorSchemeEditorScreen(
                     pendingRetry = { runWrite(write, andBack) }
                     showUnlock = true
                 } else {
-                    msg = "Failed: ${e.message}"
+                    msg = "Couldn't save: ${e.message}"
                 }
             } catch (e: Exception) {
-                msg = "Failed: ${e.message}"
+                msg = "Couldn't save: ${e.message}"
             } finally {
                 busy = false
             }
@@ -201,8 +201,8 @@ fun ColorSchemeEditorScreen(
     }
 
     fun onSave() {
-        val scheme = draft ?: run { msg = "Fix the highlighted colors first."; return }
-        if (scheme.name.isEmpty()) { msg = "Name is empty."; return }
+        val scheme = draft ?: run { msg = "Fix the highlighted colours first."; return }
+        if (scheme.name.isEmpty()) { msg = "Enter a scheme name."; return }
         if (deviceMode) {
             // Instant first: the device uses it now (plain pref, no vault).
             onDeviceSave(scheme)
@@ -243,12 +243,11 @@ fun ColorSchemeEditorScreen(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ScreenHeader("Edit color scheme", onBack)
+        ScreenHeader("Edit colour scheme", onBack)
         Text(
-            if (deviceMode) "Edits this device's scheme (applies instantly, " +
-                "also added to the shared custom list)."
-            else "Edits the current scheme. Rename + Save keeps the old one " +
-                "as a separate custom entry (same name replaces it).",
+            if (deviceMode) "Edits the scheme on this device. Saving also adds it to your custom schemes."
+            else "Edits the current scheme. Rename and save to keep the old version " +
+                "as a separate custom entry. Using the same name replaces it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -264,7 +263,7 @@ fun ColorSchemeEditorScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        "Readability warning (not blocking):",
+                        "Readability warning:",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -274,7 +273,7 @@ fun ColorSchemeEditorScreen(
                 }
             }
         }
-        Text("Colors (22)", style = MaterialTheme.typography.titleMedium)
+        Text("Colours (22)", style = MaterialTheme.typography.titleMedium)
         // Dense labeled swatches like desktop's color-picker row
         // (FG/BG/CU… + 0-15), not big buttons.
         FlowRow(
@@ -295,9 +294,9 @@ fun ColorSchemeEditorScreen(
             }
         }
         Text(
-            "FG text · BG background · CU cursor · CA cursor accent · " +
-                "SB selection · SF selection text · 0-15 ANSI colors. " +
-                "Empty CA/SF = desktop default. Tap a swatch to pick.",
+            "FG is text, BG is background, CU is cursor, CA is cursor accent, " +
+                "SB is selection, SF is selection text, and 0 to 15 are ANSI colors. " +
+                "Empty CA or SF uses the default. Tap a colour to change it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -322,7 +321,7 @@ fun ColorSchemeEditorScreen(
         ) {
             key(slot.key) {
                 PresetPicker(
-                    label = "${slot.label} — ${slot.hint}",
+                    label = "${slot.label}: ${slot.hint}",
                     currentHex = slots[slot.key] ?: "",
                     onPick = { slots[slot.key] = it },
                     onPresetPick = { slots[slot.key] = it; editingSlot = null },
@@ -385,7 +384,7 @@ private fun SlotDot(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
             androidx.compose.material3.TooltipAnchorPosition.Above,
         ),
-        tooltip = { PlainTooltip { Text("${slot.label} — ${slot.hint}") } },
+        tooltip = { PlainTooltip { Text("${slot.label}: ${slot.hint}") } },
         state = tooltipState,
     ) {
         Column(
@@ -502,7 +501,7 @@ private fun PresetPicker(
                 hexError = norm == null
                 if (norm != null) onPick(norm)
             },
-            label = { Text("Hex (#rrggbb or #aarrggbb)") },
+            label = { Text("Hex colour (#rrggbb or #aarrggbb)") },
             singleLine = true,
             isError = hexError,
             modifier = Modifier.fillMaxWidth(),
