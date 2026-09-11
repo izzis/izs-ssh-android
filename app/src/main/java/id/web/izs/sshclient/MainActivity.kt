@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -230,7 +232,17 @@ class MainActivity : ComponentActivity() {
                             is Boot.Failed ->
                                 BootFailedScreen(
                                     message = b.message,
+                                    canRestore = appState.disk.hasYamlBackup(),
                                     onRetry = { rebootCounter++ },
+                                    onRestore = {
+                                        try {
+                                            appState.disk.restoreYamlBackup()
+                                            rebootCounter++
+                                            null
+                                        } catch (e: Exception) {
+                                            e.message ?: "Restore failed"
+                                        }
+                                    },
                                     onReset = {
                                         appState.disk.clearYaml()
                                         appState.repo.forgetPassphrase()
@@ -274,9 +286,14 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun BootFailedScreen(
     message: String,
+    canRestore: Boolean,
     onRetry: () -> Unit,
+    /** Returns an error message to display, or null on success. */
+    onRestore: () -> String?,
     onReset: () -> Unit,
 ) {
+    var showResetConfirm by remember { mutableStateOf(false) }
+    var restoreError by remember { mutableStateOf<String?>(null) }
     Column(
         Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -284,9 +301,39 @@ private fun BootFailedScreen(
         Text("Could not load local data", style = MaterialTheme.typography.headlineSmall)
         Text(message, style = MaterialTheme.typography.bodyMedium)
         Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
-        OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
+        if (canRestore) {
+            OutlinedButton(
+                onClick = { restoreError = onRestore() },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Restore backup") }
+        }
+        restoreError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        OutlinedButton(
+            onClick = { showResetConfirm = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Text("Reset and restart")
         }
+    }
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("Reset local data?") },
+            text = {
+                Text(
+                    "This deletes all profiles, vault secrets, keys and sync " +
+                        "settings on this device. It cannot be undone.",
+                )
+            },
+            confirmButton = {
+                Button(onClick = { showResetConfirm = false; onReset() }) {
+                    Text("Delete everything")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

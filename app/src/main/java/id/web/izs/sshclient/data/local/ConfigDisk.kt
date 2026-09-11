@@ -82,11 +82,39 @@ class ConfigDisk(context: Context) {
 
     fun saveYaml(yaml: String) {
         requireEncrypted("config (holds the sync token, vault blob and possible plaintext secrets)")
-        prefs().edit().putString(KEY_YAML, yaml).apply()
+        // Desktop saveConfig parity (tabby/app/lib/config.ts): every save
+        // also keeps a .backup copy — the safety net for a corrupt main
+        // value. Single-slot rolling: only the previous generation is kept
+        // (see rotatedBackup); same-content rewrites leave .bak untouched.
+        val bak = rotatedBackup(prefs().getString(KEY_YAML, null), yaml)
+        prefs().edit().putString(KEY_YAML, yaml).also { e ->
+            if (bak != null) e.putString(KEY_YAML_BAK, bak)
+        }.apply()
+    }
+
+    /**
+     * Desktop config.yaml.backup parity: the previous YAML generation, if any.
+     * Offered on the boot-failure screen so a corrupt main value is
+     * recoverable without wiping.
+     */
+    fun loadYamlBackup(): String? = prefs().getString(KEY_YAML_BAK, null)
+
+    fun hasYamlBackup(): Boolean = prefs().contains(KEY_YAML_BAK)
+
+    /**
+     * Restore the .backup copy over the main value. The backup itself is
+     * kept, so restore is repeatable; the next saveYaml rolls normally from
+     * the restored content.
+     */
+    fun restoreYamlBackup(): String {
+        requireEncrypted("config backup restore (holds the sync token, vault blob and possible plaintext secrets)")
+        val bak = loadYamlBackup() ?: throw IllegalStateException("No config backup available")
+        prefs().edit().putString(KEY_YAML, bak).apply()
+        return bak
     }
 
     fun clearYaml() {
-        prefs().edit().remove(KEY_YAML).apply()
+        prefs().edit().remove(KEY_YAML).remove(KEY_YAML_BAK).apply()
     }
 
     fun loadKnownHostsJson(): String? = prefs().getString(KEY_KNOWN_HOSTS, null)
@@ -351,6 +379,8 @@ class ConfigDisk(context: Context) {
 
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
+        /** Desktop config.yaml.backup parity: previous YAML generation. */
+        const val KEY_YAML_BAK = "tabby-config-yaml.bak"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
         // Pre-YAML-only leftovers, dropped once by dropLegacySyncTarget.
         const val KEY_HOST = "sync.host"
@@ -391,6 +421,16 @@ class ConfigDisk(context: Context) {
         const val PALETTE_IZS = "izs"
         /** Hard ceiling for [maxSessions]: 10 sockets + histories is the most a phone should hold. */
         const val MAX_SESSIONS_HARD_MAX = 10
+
+        /**
+         * Single-slot rolling backup decision (pure, unit-tested): returns
+         * the value to store as .bak, or null to leave the existing backup
+         * untouched. Only a genuinely older, non-blank generation is
+         * preserved — first seed (no current value) and no-op rewrites never
+         * clobber a good backup.
+         */
+        fun rotatedBackup(currentMain: String?, incoming: String): String? =
+            if (!currentMain.isNullOrBlank() && currentMain != incoming) currentMain else null
     }
 }
 
