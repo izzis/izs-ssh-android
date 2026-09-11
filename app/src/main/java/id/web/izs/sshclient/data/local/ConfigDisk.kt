@@ -114,7 +114,32 @@ class ConfigDisk(context: Context) {
     }
 
     fun clearYaml() {
-        prefs().edit().remove(KEY_YAML).remove(KEY_YAML_BAK).apply()
+        prefs().edit().remove(KEY_YAML).remove(KEY_YAML_BAK)
+            .remove(KEY_YAML_PREIMPORT).remove(KEY_PREIMPORT_STAMP).apply()
+    }
+
+    /**
+     * Pre-overwrite snapshot (mobile-gap fix, desktop has no equivalent —
+     * desktop overwrites local on download with no undo): the YAML + stamp
+     * from before the last download/import/autosync tick. Single slot,
+     * superseded by the next overwrite; restored by abortPendingImport (via
+     * SyncRepository) or explicit undo. The session passphrase is never
+     * stored here (RAM only, like rememberedPassphrase itself).
+     */
+    fun savePreImport(yaml: String, lastChange: String) {
+        requireEncrypted("pre-import snapshot (holds the sync token, vault blob and possible plaintext secrets)")
+        prefs().edit().putString(KEY_YAML_PREIMPORT, yaml)
+            .putString(KEY_PREIMPORT_STAMP, lastChange).apply()
+    }
+
+    fun loadPreImportYaml(): String? = prefs().getString(KEY_YAML_PREIMPORT, null)
+
+    fun loadPreImportStamp(): String = prefs().getString(KEY_PREIMPORT_STAMP, "") ?: ""
+
+    fun hasPreImport(): Boolean = prefs().contains(KEY_YAML_PREIMPORT)
+
+    fun clearPreImport() {
+        prefs().edit().remove(KEY_YAML_PREIMPORT).remove(KEY_PREIMPORT_STAMP).apply()
     }
 
     fun loadKnownHostsJson(): String? = prefs().getString(KEY_KNOWN_HOSTS, null)
@@ -381,6 +406,9 @@ class ConfigDisk(context: Context) {
         const val KEY_YAML = "tabby-config-yaml"
         /** Desktop config.yaml.backup parity: previous YAML generation. */
         const val KEY_YAML_BAK = "tabby-config-yaml.bak"
+        /** Pre-overwrite snapshot slot (see savePreImport). */
+        const val KEY_YAML_PREIMPORT = "tabby-config-yaml.preimport"
+        const val KEY_PREIMPORT_STAMP = "sync.preImportLastRemoteChange"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
         // Pre-YAML-only leftovers, dropped once by dropLegacySyncTarget.
         const val KEY_HOST = "sync.host"

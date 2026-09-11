@@ -422,6 +422,15 @@ class SyncRepository(
         // merged doc below retargets at the cloud config.
         val preTarget = RawConfigStore.syncTargetOf(localRaw)
         preImportSyncTarget = SyncTarget(preTarget.host, preTarget.token, preTarget.configId, disk.lastRemoteChange)
+        // Disk-persisted twin of the RAM snapshot (beta-blockers #2/#3):
+        // abort must survive process death, and autosync ticks (which funnel
+        // through here) need an undo even when unlocked. Skipped while a
+        // previous fresh shell still awaits its first unlock, so a chained
+        // overwrite can't orphan the original — abort then restores the
+        // oldest generation.
+        if (!pendingEncryptedRewrite && !localYaml.isNullOrBlank()) {
+            disk.savePreImport(localYaml, disk.lastRemoteChange)
+        }
         // Make sure the local configSync points at the freshly downloaded config
         @Suppress("UNCHECKED_CAST")
         val cs = (merged[RawConfigStore.KEY_CONFIG_SYNC] as? LinkedHashMap<String, Any?>)
@@ -476,6 +485,12 @@ class SyncRepository(
             preImportSyncTarget = null
         }
         preImportPassphrase = rememberedPassphrase
+        // Disk twin of the snapshot (same beta-blocker rationale as in
+        // downloadIntoLocal above); file import keeps the local target, so
+        // only the YAML + stamp need persisting.
+        if (!pendingEncryptedRewrite && !localYaml.isNullOrBlank()) {
+            disk.savePreImport(localYaml, disk.lastRemoteChange)
+        }
         disk.saveYaml(RawConfigStore.dumpRaw(doc))
         maybeReencryptFreshShell(doc)
     }
@@ -494,7 +509,7 @@ class SyncRepository(
      * on disk still locked — the user can retry the passphrase or erase it.
      */
     suspend fun abortPendingImport(): Loaded = withContext(Dispatchers.IO) {
-        val backup = preImportBackupYaml
+        val ramBackup = preImportBackupYaml
         val target = preImportSyncTarget
         val pass = preImportPassphrase
         settlePendingRewrite()
@@ -504,9 +519,32 @@ class SyncRepository(
             disk.lastRemoteChange = target.lastRemoteChange
         }
         if (!pass.isNullOrEmpty()) rememberPassphrase(pass)
-        if (backup.isNullOrBlank()) return@withContext loadLocal()
-        disk.saveYaml(backup)
-        decryptToLoaded(RawConfigStore.loadRaw(backup), forgiveStaleRemembered = true)
+        val source = pickRestoreSource(ramBackup, disk.loadPreImportYaml())
+        if (source.isNullOrBlank()) return@withContext loadLocal()
+        if (ramBackup.isNullOrBlank()) {
+            // RAM snapshot lost (process death): the persisted copy + its
+            // stamp stand in. The session passphrase is unrestorable by
+            // design (never written to disk) — the restored config simply
+            // unlocks on demand.
+            disk.lastRemoteChange = disk.loadPreImportStamp()
+        }
+        disk.saveYaml(source)
+        decryptToLoaded(RawConfigStore.loadRaw(source), forgiveStaleRemembered = true)
+    }
+
+    /**
+     * Explicit undo of the last download/import/autosync overwrite
+     * (autosync safety net, beta-blocker #2): restores the persisted
+     * pre-overwrite copy + stamp. The snapshot is kept so undo is
+     * repeatable; the next overwrite supersedes it. The session passphrase
+     * is unrestorable by design (never written to disk).
+     */
+    suspend fun restorePreImport(): Loaded = withContext(Dispatchers.IO) {
+        val snap = disk.loadPreImportYaml()
+            ?: throw IllegalStateException("No pre-overwrite snapshot available")
+        disk.lastRemoteChange = disk.loadPreImportStamp()
+        disk.saveYaml(snap)
+        decryptToLoaded(RawConfigStore.loadRaw(snap), forgiveStaleRemembered = true)
     }
 
     suspend fun deleteRemote(hostRaw: String, token: String, configId: Long) =
@@ -1355,5 +1393,14 @@ class SyncRepository(
 
     companion object {
         fun storedVaultOf(raw: Map<String, Any?>): StoredVault? = RawConfigStore.storedVault(raw)
+
+        /**
+         * Restore-source decision (pure, unit-tested): the RAM snapshot wins
+         * (it also carries the target + session passphrase); the persisted
+         * pre-overwrite copy is the process-death fallback; null means
+         * nothing is pending.
+         */
+        fun pickRestoreSource(ramBackup: String?, diskBackup: String?): String? =
+            if (!ramBackup.isNullOrBlank()) ramBackup else diskBackup?.takeIf { it.isNotBlank() }
     }
 }

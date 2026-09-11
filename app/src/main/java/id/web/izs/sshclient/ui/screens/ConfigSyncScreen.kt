@@ -71,6 +71,7 @@ fun ConfigSyncScreen(
     var confirmDownload by remember { mutableStateOf<RemoteConfigMeta?>(null) }
     var confirmUpload by remember { mutableStateOf<RemoteConfigMeta?>(null) }
     var confirmDelete by remember { mutableStateOf<RemoteConfigMeta?>(null) }
+    var confirmUndo by remember { mutableStateOf(false) }
     var auto by remember { mutableStateOf(state.disk.auto) }
     var pHotkeys by remember { mutableStateOf(state.disk.partsHotkeys) }
     var pAppearance by remember { mutableStateOf(state.disk.partsAppearance) }
@@ -118,6 +119,18 @@ fun ConfigSyncScreen(
         val loaded = withContext(Dispatchers.IO) {
             state.repo.downloadIntoLocal(host, token, meta.id)
         }
+        state.adopt(loaded)
+        if (loaded.unlockRequired) {
+            showUnlock = true
+        } else {
+            onDownloaded()
+        }
+    }
+    suspend fun doUndo() {
+        // Explicit undo of the last download/import/autosync overwrite:
+        // restores the persisted pre-overwrite snapshot (kept, so undo is
+        // repeatable; superseded by the next overwrite).
+        val loaded = withContext(Dispatchers.IO) { state.repo.restorePreImport() }
         state.adopt(loaded)
         if (loaded.unlockRequired) {
             showUnlock = true
@@ -277,6 +290,11 @@ fun ConfigSyncScreen(
 
         // ---- options ----
         Text("Options", style = MaterialTheme.typography.titleMedium)
+        OutlinedButton(
+            enabled = !busy && state.disk.hasPreImport(),
+            onClick = { confirmUndo = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Undo last download") }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = auto, onCheckedChange = { auto = it })
             Column(Modifier.weight(1f)) {
@@ -362,6 +380,32 @@ fun ConfigSyncScreen(
                 }) { Text("Replace and sync") }
             },
             dismissButton = { TextButton(onClick = { confirmUpload = null }) { Text("Cancel") } },
+        )
+    }
+    if (confirmUndo) {
+        AlertDialog(
+            onDismissRequest = { confirmUndo = false },
+            title = { Text("Undo last download?") },
+            text = {
+                Text(
+                    "This restores the config from before the last download " +
+                        "or import. Changes made since will be lost.",
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmUndo = false
+                    scope.launch {
+                        busy = true
+                        error = null
+                        try {
+                            doUndo()
+                            info = "Restored the config from before the last download."
+                        } catch (e: Exception) { error = e.message } finally { busy = false }
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { confirmUndo = false }) { Text("Cancel") } },
         )
     }
     confirmDelete?.let { meta ->

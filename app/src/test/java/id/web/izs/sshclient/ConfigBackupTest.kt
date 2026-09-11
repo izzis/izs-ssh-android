@@ -1,5 +1,6 @@
 package id.web.izs.sshclient
 
+import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.data.local.ConfigDisk
 import org.junit.Assert.*
 import org.junit.Test
@@ -42,5 +43,24 @@ class ConfigBackupTest {
         val afterSecond = ConfigDisk.rotatedBackup("B", "C")
         assertEquals("B", afterSecond)
         assertNotEquals("A", afterSecond)
+    }
+
+    @Test
+    fun `restore prefers RAM snapshot`() {
+        assertEquals("ram", SyncRepository.pickRestoreSource("ram", "disk"))
+    }
+
+    @Test
+    fun `restore falls back to disk when RAM is gone`() {
+        assertEquals("disk", SyncRepository.pickRestoreSource(null, "disk"))
+        assertEquals("disk", SyncRepository.pickRestoreSource("", "disk"))
+        assertEquals("disk", SyncRepository.pickRestoreSource("  ", "disk"))
+    }
+
+    @Test
+    fun `restore is null when nothing is pending`() {
+        assertNull(SyncRepository.pickRestoreSource(null, null))
+        assertNull(SyncRepository.pickRestoreSource("", ""))
+        assertNull(SyncRepository.pickRestoreSource(null, "  "))
     }
 }
