@@ -202,6 +202,29 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   `file{id}=base64(PEM)` <-> `vault://id`.
 - **Set-vault sweep:** setting a vault passphrase moves inline plaintext
   passwords + PEM keys into the vault once (single save, no duplicates).
+- **Post-download re-encrypt (desktop `writeConfigDataFromSync` parity):**
+  a fresh encrypted shell is saved verbatim, then re-encrypted once with a
+  fresh salt/iv after the passphrase prompt — immediately when already
+  unlocked (RAM passphrase reused, no extra prompt), otherwise on the first
+  unlock. `keySalt` therefore rotates exactly like desktop; plaintext docs
+  are never rewritten, and upload stays verbatim (no encrypt).
+- **Failed-import restore:** before every download/import overwrite, the
+  previous YAML + sync target (`host`/`token`/`configID`/`lastRemoteChange`)
+  + session passphrase are snapshotted in RAM (`preImportBackup*`,
+  `pendingEncryptedRewrite` in `SyncRepository`, surfaced as
+  `Loaded.pendingRewrite`). Cancelling/deleting before the first unlock
+  (`abortPendingImport`) restores all three — the old config comes back
+  already unlocked. Ordinary boot unlocks keep desktop "Erase config"
+  semantics instead (erase → `refresh()` → seeded empty, so the UI never
+  strands on a stale locked view).
+- **Foreground auto-sync (desktop `autoSync` parity):** `AutoSyncTicker` in
+  `MainActivity` polls cloud metadata every 60s while the app is open.
+  Guards run cheap-first (background/busy/`sync.auto`-off/locked/stamp-equal
+  all skip before any download); default OFF. An update refreshes state
+  with a toast, never a modal — RAM sessions keep running untouched.
+- **Secret-field keyboards:** every passphrase/password field uses
+  `KeyboardType.Password` (no predictions/autocomplete), not just visual
+  masking — secrets never leak into the keyboard dictionary.
 - **Host keys (single source: `ssh.knownHosts` in YAML):** unknown/changed
   keys NEVER auto-trust — the connect pauses with a desktop-parity dialog
   (MITM warning + previous fingerprint on mismatch; Accept and remember /
@@ -375,7 +398,7 @@ the IME:
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 255 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 259 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -483,7 +506,7 @@ forks real shells). The remaining enemy is plain background-process death
   the last tab's disconnect, exactly like desktop);
   the home list shows an Active-sessions section (green/amber/red dot)
   replacing disconnect-on-back; per-session warn-on-close; cap on concurrent
-   sessions (default 5, hard max 8, tunable in Settings > Terminal, now
+   sessions (default 5, hard max 10, tunable in Settings > Terminal, now
    scrollable). Reader-pump death marks tabs failed (red + Retry): single
    `exit` fails only its tab, a dead transport fails all riders.
 - **Tab chrome (done):** strip for `top`/`bottom` (status dot + profile

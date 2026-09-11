@@ -64,7 +64,16 @@ object VaultCrypto {
         }
         val text = plain.toString(Charsets.UTF_8)
         // Payload = {"config":{...},"secrets":[...]} — split at top level without a full JSON parser.
-        return splitVaultPayload(text)
+        // A wrong passphrase yields random bytes; valid PKCS#7 padding by
+        // chance (~1/256) must still surface as BadDecrypt (never leak a
+        // raw require() IllegalArgumentException to callers).
+        try {
+            return splitVaultPayload(text)
+        } catch (e: BadDecryptException) {
+            throw e
+        } catch (e: Exception) {
+            throw BadDecryptException("BAD_DECRYPT: not a vault payload")
+        }
     }
 
     /**

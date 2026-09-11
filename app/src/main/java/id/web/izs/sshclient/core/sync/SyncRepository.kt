@@ -18,6 +18,10 @@ import kotlinx.coroutines.withContext
  * - Disk = raw YAML (lossless). Memory = raw document + session-only passphrase.
  * - Decrypt happens ONLY on: initial load, after download, and secret resolution
  *   for connect. Upload/listing/metadata NEVER need decrypt.
+ * - A freshly downloaded/imported encrypted shell is saved verbatim first,
+ *   then re-encrypted once with a fresh salt/iv after the passphrase prompt
+ *   (desktop writeConfigDataFromSync parity) — immediately when already
+ *   unlocked, otherwise on the first unlock. Plaintext docs are never rewritten.
  * - Upload: local raw minus configSync + parts-merge from remote.
  * - Download: remote + local configSync + parts-merge when plaintext.
  *
@@ -28,6 +32,53 @@ class SyncRepository(
     private val api: TabbySyncApi = TabbySyncApi(),
 ) {
     @Volatile private var rememberedPassphrase: String? = null
+
+    /**
+     * Desktop `writeConfigDataFromSync` parity flag: a freshly
+     * downloaded/imported encrypted shell is saved verbatim first, then
+     * re-encrypted once with a fresh salt/iv after the passphrase prompt
+     * (`config.load()` -> `config.save()` on desktop). True only between
+     * the verbatim save and the first successful unlock (or the immediate
+     * rewrite when already unlocked). Ordinary boot unlocks never rewrite.
+     */
+    @Volatile private var pendingEncryptedRewrite = false
+
+    /**
+     * Pre-overwrite disk snapshot taken by [downloadIntoLocal] /
+     * [importRawYaml] before the verbatim save. RAM only, never persisted.
+     * [abortPendingImport] restores it so cancelling a fresh import whose
+     * shell was never unlocked leaves the previous local config untouched
+     * instead of erasing everything. Cleared together with the pending flag.
+     */
+    @Volatile private var preImportBackupYaml: String? = null
+
+    /**
+     * Pre-overwrite sync-target snapshot ([ConfigDisk.host]/token/configId/
+     * lastRemoteChange) taken next to [preImportBackupYaml]. [downloadIntoLocal]
+     * retargets these at the cloud config; abort must put them back or the
+     * restored YAML and the poll target would disagree. Null when the op
+     * doesn't retarget (file import keeps the local target).
+     */
+    @Volatile private var preImportSyncTarget: SyncTarget? = null
+
+    /** Sync-target half of the pre-overwrite snapshot (RAM only). */
+    private data class SyncTarget(
+        val host: String?,
+        val token: String?,
+        val configId: Long,
+        val lastRemoteChange: String,
+    )
+
+    /**
+     * Pre-overwrite session passphrase snapshot (RAM only, like
+     * [rememberedPassphrase] itself). The old passphrase is forgotten as
+     * stale when the fresh blob fails to open with it — but it is still
+     * valid for the backup, so [abortPendingImport] restores it: after a
+     * cancelled import the previous config comes back already unlocked,
+     * exactly the session state from before the download. Cleared together
+     * with the pending flag.
+     */
+    @Volatile private var preImportPassphrase: String? = null
 
     fun isVaultOpen(): Boolean = rememberedPassphrase != null
 
@@ -58,6 +109,13 @@ class SyncRepository(
          * the opaque vault blob, exactly like desktop.
          */
         val store: LinkedHashMap<String, Any?>,
+        /**
+         * True when this state came from a freshly downloaded/imported
+         * encrypted shell whose post-prompt re-encrypt is still pending.
+         * The unlock UI uses it to offer "cancel the import" (restore the
+         * pre-overwrite backup) instead of "erase the local config".
+         */
+        val pendingRewrite: Boolean = false,
     )
 
     suspend fun loadLocal(): Loaded = withContext(Dispatchers.IO) {
@@ -92,9 +150,27 @@ class SyncRepository(
         val raw = RawConfigStore.loadRaw(yamlStr)
         val vault = RawConfigStore.storedVault(raw)
             ?: throw IllegalStateException("Vault is not configured")
-        // Throws BadDecrypt on a wrong passphrase -> UI shows Retry/Delete/Cancel
-        val (configJson, _) = VaultCrypto.decrypt(vault, passphrase)
+        // Throws BadDecrypt on a wrong passphrase -> UI shows Retry/Delete/Cancel.
+        // Reuse the payload for a pending rewrite so the blob is decrypted once.
+        val (configJson, secretsJson) = VaultCrypto.decrypt(vault, passphrase)
         rememberPassphrase(passphrase)
+        // Desktop writeConfigDataFromSync parity (config.load() -> config.save()):
+        // a freshly downloaded/imported encrypted shell is re-encrypted once
+        // with a fresh salt/iv after the prompt. Plaintext-with-blob configs
+        // and ordinary boot unlocks keep the verbatim blob (desktop
+        // maybeEncryptConfig early-returns when encrypted=false; boot load()
+        // never re-saves).
+        if (pendingEncryptedRewrite) {
+            if (RawConfigStore.isEncrypted(raw)) {
+                val out = reencryptShellDoc(raw, configJson, secretsJson, passphrase)
+                disk.saveYaml(RawConfigStore.dumpRaw(out))
+                settlePendingRewrite()
+                return@withContext decryptToLoaded(out)
+            }
+            // Stale flag (e.g. an encrypted download followed by a plaintext
+            // import before unlock): nothing to rewrite.
+            settlePendingRewrite()
+        }
         // Rebuild the loaded state from the existing raw (vault stays a blob on disk)
         decryptToLoaded(raw)
     }
@@ -267,6 +343,14 @@ class SyncRepository(
      * Parity with downloadAndSync: GET content -> merge (local configSync preserved)
      * -> save raw -> load (may need a passphrase when encrypted).
      * UI confirmation for local overwrite is required before calling this.
+     *
+     * Desktop `writeConfigDataFromSync` parity: the merged document is saved
+     * verbatim first. When it is an encrypted shell, the blob is then
+     * re-encrypted once with a fresh salt/iv (desktop `config.save()` after
+     * `config.load()`): immediately when the vault is already open with the
+     * right passphrase, otherwise deferred via [pendingEncryptedRewrite]
+     * until the first successful [unlockWithPassphrase]. Background callers
+     * ([autoSyncTick]) therefore never prompt.
      */
     suspend fun downloadIntoLocal(
         hostRaw: String,
@@ -298,8 +382,13 @@ class SyncRepository(
         cs["host"] = host
         cs["token"] = token
         cs["configID"] = configId
+        // Snapshot for abortPendingImport(): cancelling before the first
+        // unlock must just fail the import (restore this), not erase local.
+        preImportBackupYaml = localYaml
+        preImportSyncTarget = SyncTarget(disk.host, disk.token, disk.configId, disk.lastRemoteChange)
+        preImportPassphrase = rememberedPassphrase
         disk.saveYaml(RawConfigStore.dumpRaw(merged))
-        decryptToLoaded(merged, forgiveStaleRemembered = true)
+        maybeReencryptFreshShell(merged)
     }
 
     /**
@@ -312,6 +401,10 @@ class SyncRepository(
      * dropped — importing someone else's host/token must never hijack sync.
      * A stale remembered passphrase is forgiven: the imported vault (if any)
      * belongs to another passphrase until the user unlocks it.
+     *
+     * Like [downloadIntoLocal], an imported encrypted shell is re-encrypted
+     * once with a fresh salt/iv after the prompt (immediately when already
+     * unlocked, otherwise on the first [unlockWithPassphrase]).
      */
     @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun importRawYaml(text: String): Loaded = withContext(Dispatchers.IO) {
@@ -322,8 +415,45 @@ class SyncRepository(
         if (localSync != null) doc[RawConfigStore.KEY_CONFIG_SYNC] = localSync
         else doc.remove(RawConfigStore.KEY_CONFIG_SYNC)
         if (!doc.containsKey(RawConfigStore.KEY_VERSION)) doc[RawConfigStore.KEY_VERSION] = 1
+        // Snapshot for abortPendingImport(): cancelling before the first
+        // unlock must just fail the import (restore this), not erase local.
+        // File import never retargets sync, so snapshotting the current
+        // target makes its restore a no-op (and supersedes any older one).
+        preImportBackupYaml = localYaml
+        preImportSyncTarget = SyncTarget(disk.host, disk.token, disk.configId, disk.lastRemoteChange)
+        preImportPassphrase = rememberedPassphrase
         disk.saveYaml(RawConfigStore.dumpRaw(doc))
-        decryptToLoaded(doc, forgiveStaleRemembered = true)
+        maybeReencryptFreshShell(doc)
+    }
+
+    /**
+     * Cancel a fresh download/import whose encrypted shell was never
+     * unlocked: restore the pre-overwrite disk snapshot so the failed
+     * import leaves the previous local config untouched instead of
+     * erasing everything. The pre-overwrite session passphrase is
+     * restored too, so the previous config comes back unlocked exactly
+     * as before the download — no re-typing needed.
+     *
+     * When no import is pending this is a no-op returning the current
+     * disk state. When there was never a previous config (blank backup,
+     * e.g. first download on a fresh install), the downloaded doc stays
+     * on disk still locked — the user can retry the passphrase or erase it.
+     */
+    suspend fun abortPendingImport(): Loaded = withContext(Dispatchers.IO) {
+        val backup = preImportBackupYaml
+        val target = preImportSyncTarget
+        val pass = preImportPassphrase
+        settlePendingRewrite()
+        if (target != null) {
+            disk.host = target.host
+            disk.token = target.token
+            disk.configId = target.configId
+            disk.lastRemoteChange = target.lastRemoteChange
+        }
+        if (!pass.isNullOrEmpty()) rememberPassphrase(pass)
+        if (backup.isNullOrBlank()) return@withContext loadLocal()
+        disk.saveYaml(backup)
+        decryptToLoaded(RawConfigStore.loadRaw(backup), forgiveStaleRemembered = true)
     }
 
     suspend fun deleteRemote(hostRaw: String, token: String, configId: Long) =
@@ -468,6 +598,7 @@ class SyncRepository(
         }
         disk.saveYaml(RawConfigStore.dumpRaw(out))
         forgetPassphrase()
+        settlePendingRewrite()
         decryptToLoaded(out)
     }
 
@@ -628,6 +759,7 @@ class SyncRepository(
             }
         }
         disk.saveYaml(RawConfigStore.dumpRaw(out))
+        settlePendingRewrite()
         decryptToLoaded(out)
     }
 
@@ -1099,7 +1231,71 @@ class SyncRepository(
             needsPassphrase = v.needsPassphrase,
             store = v.store,
             unlockRequired = v.unlockRequired,
+            pendingRewrite = pendingEncryptedRewrite,
         )
+    }
+
+    /** Clear the post-download/import pending state (and its backup) together. */
+    private fun settlePendingRewrite() {
+        pendingEncryptedRewrite = false
+        preImportBackupYaml = null
+        preImportSyncTarget = null
+        preImportPassphrase = null
+    }
+
+    /**
+     * Desktop `writeConfigDataFromSync` second half (`config.save()` after
+     * `config.load()`): re-encrypt an encrypted shell with a fresh salt/iv,
+     * preserving the exact desktop outer shape `{vault, encrypted, configSync}`.
+     * Plaintext docs (including plaintext-with-blob) are never rewritten here.
+     */
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    private fun reencryptShellDoc(
+        raw: LinkedHashMap<String, Any?>,
+        configJson: String,
+        secretsJson: String,
+        pass: String,
+    ): LinkedHashMap<String, Any?> {
+        val stored = VaultCrypto.encrypt(configJson, secretsJson, pass)
+        return linkedMapOf<String, Any?>(
+            RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
+            RawConfigStore.KEY_ENCRYPTED to true,
+        ).also { m ->
+            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+                m[RawConfigStore.KEY_CONFIG_SYNC] = it
+            }
+        }
+    }
+
+    /**
+     * Shared tail of [downloadIntoLocal] and [importRawYaml]: the fresh
+     * document is already saved verbatim on disk. When it is an encrypted
+     * shell, re-encrypt immediately if the remembered passphrase opens it
+     * (desktop `save()` with no prompt needed); otherwise arm
+     * [pendingEncryptedRewrite] so the first [unlockWithPassphrase] rotates
+     * the salt. Never prompts — background-safe for [autoSyncTick].
+     */
+    private fun maybeReencryptFreshShell(doc: LinkedHashMap<String, Any?>): Loaded {
+        if (!RawConfigStore.isEncrypted(doc) || RawConfigStore.storedVault(doc) == null) {
+            settlePendingRewrite()
+            return decryptToLoaded(doc, forgiveStaleRemembered = true)
+        }
+        val pass = rememberedPassphrase
+        if (pass != null) {
+            try {
+                val vault = RawConfigStore.storedVault(doc)!!
+                val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
+                val out = reencryptShellDoc(doc, configJson, secretsJson, pass)
+                disk.saveYaml(RawConfigStore.dumpRaw(out))
+                settlePendingRewrite()
+                return decryptToLoaded(out)
+            } catch (_: Exception) {
+                // Stale/wrong remembered passphrase for the new blob: stay
+                // locked and rewrite on the next successful unlock instead.
+            }
+        }
+        pendingEncryptedRewrite = true
+        return decryptToLoaded(doc, forgiveStaleRemembered = true)
     }
 
     companion object {

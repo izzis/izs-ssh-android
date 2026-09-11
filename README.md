@@ -17,6 +17,11 @@ Tabby Developers. Licensed under the MIT License, see [LICENSE](LICENSE).
 
 - **Tabby Sync import**: host + token setup, cloud config list, download /
   upload with lossless RAW round-trip (unknown keys survive untouched).
+  Foreground auto-sync every 60s when enabled (default off): metadata check
+  only, download on real change, silent toast, never a modal. Encrypted
+  downloads re-encrypt once after the passphrase (desktop salt-rotation
+  parity); cancelling before unlock just fails the import (previous config
+  + sync target + session passphrase restored from a RAM snapshot).
 - **Vault**: PBKDF2-HmacSHA512 + AES-256-CBC interop with desktop vaults;
   lazy unlock (passphrase asked only when a secret is actually needed);
   survives rotation via ViewModel; RAM-only, never written to disk.
@@ -137,7 +142,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 255/255 green)
+## Parity guarantees (tested, 259/259 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`
@@ -158,7 +163,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
   with `reuseSession` transport sharing (desktop multiplex parity),
    Active-sessions list on home replacing disconnect-on-back (Back keeps the
    session alive), per-session warn-on-close, cap on concurrent sessions
-   (default 5, max 8). Tab strip (top/bottom) + side drawer (left/right) +
+   (default 5, max 10). Tab strip (top/bottom) + side drawer (left/right) +
    background-output activity underline (primary) driven by the desktop `appearance.tabsLocation`
    key; shell presence is an observable `hasShell` flow (branching composition
    on the plain `shell` field renders stale nulls — green dot + dead

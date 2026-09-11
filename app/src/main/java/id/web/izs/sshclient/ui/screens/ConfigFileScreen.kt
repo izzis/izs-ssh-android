@@ -122,6 +122,28 @@ fun ConfigFileScreen(
         }
     }
 
+    /**
+     * Cancel a fresh import whose shell was never unlocked (wrong/unknown
+     * new passphrase): restore the pre-import local config (failed import),
+     * not erase anything.
+     */
+    fun abortConfigImport() {
+        scope.launch {
+            busy = true
+            importError = null
+            try {
+                val restored = withContext(Dispatchers.IO) { state.repo.abortPendingImport() }
+                state.adopt(restored)
+                importInfo = "Import cancelled — previous config restored."
+            } catch (e: Exception) {
+                importError = e.message
+            } finally {
+                busy = false
+                showUnlock = false
+            }
+        }
+    }
+
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -326,13 +348,34 @@ fun ConfigFileScreen(
     }
 
     if (showUnlock) {
-        VaultUnlockDialog(
-            state = state,
-            onUnlocked = { showUnlock = false },
-            onNoConfig = { showUnlock = false },
-            onDismiss = { showUnlock = false },
-            dismissible = true,
-        )
+        // Fresh import with a different master password: cancelling or
+        // deleting before the first unlock just fails the import (restore
+        // the previous config). An ordinary locked config keeps the
+        // default erase-local flow (desktop "Erase config" parity).
+        if (state.loaded?.pendingRewrite == true) {
+            VaultUnlockDialog(
+                state = state,
+                onUnlocked = { showUnlock = false },
+                onNoConfig = { showUnlock = false },
+                onDismiss = { abortConfigImport() },
+                dismissible = true,
+                onDeleteConfirmed = { abortConfigImport() },
+                deleteTitle = "Cancel the import?",
+                deleteText = "The imported config needs a different passphrase. " +
+                    "Cancel the import and keep the previous local config?",
+                deleteButtonText = "Cancel import",
+                deleteConfirmButtonText = "Yes, cancel",
+                showCancelButton = false,
+            )
+        } else {
+            VaultUnlockDialog(
+                state = state,
+                onUnlocked = { showUnlock = false },
+                onNoConfig = { showUnlock = false },
+                onDismiss = { showUnlock = false },
+                dismissible = true,
+            )
+        }
     }
 }
 

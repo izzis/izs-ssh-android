@@ -353,8 +353,8 @@ class ConfigDisk(context: Context) {
         const val THEME_LIGHT = "light"
         const val KEY_APP_PALETTE = "appearance.appPalette"
         const val PALETTE_IZS = "izs"
-        /** Hard ceiling for [maxSessions]: 8 sockets + histories is the most a phone should hold. */
-        const val MAX_SESSIONS_HARD_MAX = 8
+        /** Hard ceiling for [maxSessions]: 10 sockets + histories is the most a phone should hold. */
+        const val MAX_SESSIONS_HARD_MAX = 10
     }
 }
 

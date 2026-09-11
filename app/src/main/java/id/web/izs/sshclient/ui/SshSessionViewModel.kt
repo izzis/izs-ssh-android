@@ -38,7 +38,7 @@ import java.util.UUID
  * connects separately per tab (re-auth each time).
  *
  * RAM-only by design (like the vault passphrase): process death clears all
- * sessions. Cap defaults to 5, hard max 8 ([ConfigDisk.MAX_SESSIONS_HARD_MAX]).
+ * sessions. Cap defaults to 5, hard max 10 ([ConfigDisk.MAX_SESSIONS_HARD_MAX]).
  */
     class SessionLimitReached(val max: Int) : IllegalStateException("Session limit is $max")
 

@@ -79,6 +79,25 @@ class VaultManageTest {
     }
 
     @Test
+    fun `same passphrase re-encrypt rotates salt but preserves payload`() {
+        // Desktop writeConfigDataFromSync parity: config.save() after
+        // config.load() calls encryptVault with fresh random salt/iv even
+        // when the passphrase is unchanged — keySalt must rotate while the
+        // decrypted payload stays byte-identical.
+        val configJson = """{"version":1,"profiles":[]}"""
+        val secretsJson = """[{"type":"ssh:password","key":{"user":"root"},"value":"s3cr3t"}]"""
+        val downloaded = VaultCrypto.encrypt(configJson, secretsJson, "pass")
+        val (cfg, sec) = VaultCrypto.decrypt(downloaded, "pass")
+        val rewritten = VaultCrypto.encrypt(cfg, sec, "pass")
+        assertNotEquals(downloaded.keySalt, rewritten.keySalt)
+        assertNotEquals(downloaded.iv, rewritten.iv)
+        assertNotEquals(downloaded.contents, rewritten.contents)
+        val (cfg2, sec2) = VaultCrypto.decrypt(rewritten, "pass")
+        assertEquals(configJson, cfg2)
+        assertEquals(secretsJson, sec2)
+    }
+
+    @Test
     fun `encrypted outer document has exactly the desktop disk shape`() {
         val plain = linkedMapOf<String, Any?>(
             "version" to 1,

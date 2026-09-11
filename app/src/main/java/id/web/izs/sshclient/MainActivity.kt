@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -30,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -71,6 +73,7 @@ import id.web.izs.sshclient.ui.screens.VaultSettingsScreen
 import id.web.izs.sshclient.ui.screens.VaultUnlockDialog
 import id.web.izs.sshclient.ui.screens.WindowSettingsScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
@@ -234,7 +237,14 @@ class MainActivity : ComponentActivity() {
                                         rebootCounter++
                                     },
                                 )
-                            is Boot.Ready ->
+                            is Boot.Ready -> {
+                                // Foreground auto-sync (desktop autoSync + tabby-android
+                                // AutoSyncService parity): while the app is open, check
+                                // cloud metadata every 60s; download only when
+                                // modified_at changed. Default OFF (disk.auto).
+                                // Silent + non-blocking: toast on update, never a
+                                // modal (RAM sessions are unaffected by reloads).
+                                AutoSyncTicker(appState)
                                 AppNav(
                                     appState = appState,
                                     sessionViewModel = sshHolder,
@@ -252,6 +262,7 @@ class MainActivity : ComponentActivity() {
                                         finish()
                                     },
                                 )
+                            }
                         }
                     }
                 }
@@ -275,6 +286,45 @@ private fun BootFailedScreen(
         Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
         OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
             Text("Reset and restart")
+        }
+    }
+}
+
+/** Foreground auto-sync poll interval (desktop autoSync parity: 60s). */
+private const val AUTO_SYNC_INTERVAL_MS = 60_000L
+
+/**
+ * Silent foreground poll: metadata check only, download on real change.
+ * Skips when backgrounded, busy (boot/unlock/refresh), unconfigured, or
+ * auto-sync off — so an idle tick costs nothing (no network, no crypto).
+ * On update the state refreshes and a toast shows; a locked result never
+ * pops a modal here (the unlock dialog appears naturally on the profile
+ * list, and active terminal sessions keep running untouched).
+ */
+@Composable
+private fun AutoSyncTicker(appState: AppState) {
+    val appCtx = LocalContext.current.applicationContext
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(AUTO_SYNC_INTERVAL_MS)
+            if (!AppForeground.isForeground) continue
+            if (appState.loading) continue
+            if (!appState.disk.auto) continue
+            val name = try {
+                appState.repo.autoSyncTick()
+            } catch (_: Exception) {
+                // Silent: network/auth errors surface on the sync screen.
+                null
+            } ?: continue
+            appState.refresh {
+                val locked = appState.loaded?.unlockRequired == true
+                Toast.makeText(
+                    appCtx,
+                    if (locked) "Config \"$name\" updated — passphrase needed"
+                    else "Config \"$name\" updated",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 }
