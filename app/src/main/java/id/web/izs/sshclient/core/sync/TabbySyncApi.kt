@@ -1,5 +1,6 @@
 package id.web.izs.sshclient.core.sync
 
+import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.RemoteConfigMeta
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -16,8 +17,9 @@ import java.util.concurrent.TimeUnit
  * Parity with tabby-settings/src/services/configSync.service.ts:161-198.
  *
  * ONE deliberate difference: the desktop rejects http:// (throws unless https).
- * Here http:// is ALLOWED for self-hosted/LAN use per user request,
- * with a warning in the UI (a MITM'd YAML payload can RCE via command/env).
+ * Here http:// is allowed ONLY for local targets (loopback, RFC 1918 LAN,
+ * link-local, .local-style names — see RawConfigStore.isSyncHostAllowed,
+ * enforced on every request below), with a warning in the UI.
  *
  * Body compatibility: official flat {name} / {content, last_used_with_version} first,
  * {data:{...}} fallback for older server variants. Empty (204) responses are null-safe.
@@ -106,6 +108,7 @@ class TabbySyncApi(
     }
 
     fun deleteConfig(host: String, token: String, id: Long) {
+        requireHostAllowed(host)
         val req = Request.Builder()
             .url("$host/api/1/configs/$id")
             .delete()
@@ -118,7 +121,14 @@ class TabbySyncApi(
 
     // ---- low level ----
 
+    private fun requireHostAllowed(host: String) {
+        require(RawConfigStore.isSyncHostAllowed(host)) {
+            "Refusing cleartext sync to non-local host (use https:// or a LAN address): $host"
+        }
+    }
+
     private fun get(host: String, token: String, path: String): String {
+        requireHostAllowed(host)
         val req = Request.Builder()
             .url("$host$path")
             .get()
@@ -133,6 +143,7 @@ class TabbySyncApi(
     }
 
     private fun post(host: String, token: String, path: String, body: String): Pair<Int, String> {
+        requireHostAllowed(host)
         val req = Request.Builder()
             .url("$host$path")
             .post(body.toRequestBody(JSON))
@@ -144,6 +155,7 @@ class TabbySyncApi(
     }
 
     private fun patch(host: String, token: String, path: String, body: String): Pair<Int, String> {
+        requireHostAllowed(host)
         val req = Request.Builder()
             .url("$host$path")
             .patch(body.toRequestBody(JSON))

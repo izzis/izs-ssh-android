@@ -161,8 +161,9 @@ fun ConfigSyncScreen(
         if (showHttpWarning) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                 Text(
-                    "Insecure connection. Connections can be intercepted. Use HTTPS, " +
-                        "or use HTTP only on networks you trust.",
+                    "Insecure connection. Sync is sent in cleartext and can be " +
+                        "intercepted. HTTP is allowed only for local addresses " +
+                        "(LAN/loopback) — use HTTPS for anything else.",
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
                 )

@@ -790,6 +790,64 @@ object RawConfigStore {
     fun isHttps(host: String): Boolean = host.startsWith("https://", ignoreCase = true)
 
     /**
+     * Cleartext policy for Config Sync (pure, unit-tested).
+     *
+     * `https://` is always allowed. `http://` is allowed ONLY for local
+     * targets: loopback, RFC 1918 private ranges, link-local, well-known
+     * local suffixes (.local/.lan/.home/.internal) and single-label LAN
+     * names. Anything else (in particular public http://) is refused so a
+     * Bearer token + executable YAML payload never cross the open internet
+     * in cleartext. Enforced by [TabbySyncApi] on every request.
+     *
+     * Note: this lives in code (not network_security_config.xml) because
+     * Android network-security-config cannot express IP CIDR ranges.
+     */
+    fun isSyncHostAllowed(raw: String): Boolean {
+        val h = raw.trim()
+        if (h.startsWith("https://", ignoreCase = true)) return true
+        if (!h.startsWith("http://", ignoreCase = true)) return false
+        var authority = h.substringAfter("://").substringBefore('/').trim()
+        if (authority.isEmpty()) return false
+        authority = authority.substringAfterLast('@')
+        val hostOnly = if (authority.startsWith("[")) {
+            authority.substringAfter('[').substringBefore(']')
+        } else if (authority.count { it == ':' } > 1) {
+            authority // bare IPv6 literal, brackets omitted
+        } else {
+            authority.substringBefore(':')
+        }
+        val host = hostOnly.trim().trimEnd('.').lowercase()
+        if (host.isEmpty()) return false
+        if (host == "localhost" || host == "::1") return true
+        val numericIp = host.all { it.isDigit() || it == '.' }
+        if (numericIp) {
+            if (host.startsWith("127.") || host.startsWith("10.") ||
+                host.startsWith("192.168.") || host.startsWith("169.254.")
+            ) return true
+            val parts = host.split('.')
+            if (parts.size == 4) {
+                val second = parts[1].toIntOrNull()
+                if (parts[0].toIntOrNull() == 172 && second != null && second in 16..31) return true
+            }
+            return false
+        }
+        if (host.startsWith("fe80:") || host == "fe80") return true
+        // IPv6 unique-local (fc00::/7) — only for real IPv6 literals.
+        if (':' in host) {
+            val firstHextet = host.substringBefore(':')
+            if (firstHextet.length == 4 &&
+                (firstHextet.startsWith("fc") || firstHextet.startsWith("fd"))
+            ) return true
+        }
+        if (host.endsWith(".local") || host.endsWith(".lan") ||
+            host.endsWith(".home") || host.endsWith(".internal")
+        ) return true
+        // Single-label names (e.g. http://nas:5000) resolve on the LAN.
+        if (!host.contains('.') && !host.contains(':')) return true
+        return false
+    }
+
+    /**
      * Desktop id parity (profiles.service.ts): `<type>:custom:<slug>:<uuid>`.
      * slugify approximation: lowercase, non-alphanumerics collapse to '-'.
      */

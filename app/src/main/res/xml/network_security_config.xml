@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- v1 allows self-hosted/LAN http:// per user request.
-     The UI shows a warning banner for non-HTTPS hosts (a MITM'd YAML payload can RCE via command/env).
-     For public production use, prefer https:// for parity with Tabby Desktop, which enforces HTTPS. -->
+<!-- http:// is allowed for self-hosted LAN use per user request, but ONLY for
+     local targets (loopback, RFC 1918, link-local, .local-style names).
+     Android network-security-config cannot express IP CIDR ranges, so the
+     restriction is enforced in code (RawConfigStore.isSyncHostAllowed, checked
+     by TabbySyncApi on every request) — this file stays permissive so LAN
+     http can connect at the socket layer. The UI shows a warning banner for
+     non-HTTPS hosts (a MITM'd YAML payload can RCE via command/env).
+     For public production use, prefer https:// for parity with Tabby Desktop. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
