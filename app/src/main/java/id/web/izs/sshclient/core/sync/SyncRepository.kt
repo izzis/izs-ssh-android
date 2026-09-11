@@ -360,9 +360,21 @@ class SyncRepository(
         val uploadDoc = RawConfigStore.buildUploadDoc(localRaw, remoteRaw, parts)
         val content = RawConfigStore.dumpRaw(uploadDoc)
         api.updateConfig(host, token, configId, content, appVersion)
+        // Desktop setConfig parity: uploadAndSync calls setConfig(cfg) BEFORE
+        // upload(), so uploading to a different cloud config moves the local
+        // subscription to it. Without this, autosync would poll the old ID
+        // with the new stamp (spurious download / missed change). Host/token
+        // already live in YAML (written by "Test and save"); only the ID
+        // moves here, and only across IDs — same-ID re-upload is a no-op.
+        val cur = RawConfigStore.syncTargetOf(localRaw)
+        if (cur.configId != configId) {
+            RawConfigStore.setSyncTarget(
+                localRaw,
+                RawConfigStore.RawSyncTarget(cur.host, cur.token, configId),
+            )
+            disk.saveYaml(RawConfigStore.dumpRaw(localRaw))
+        }
         // Refresh the stamp so autosync does not treat this as a new change.
-        // The target itself already lives in YAML > configSync (written by
-        // setSyncTarget on "Test and save" / by downloadIntoLocal below).
         val meta = api.getConfig(host, token, configId)
         disk.lastRemoteChange = meta.modifiedAt
         meta.modifiedAt
