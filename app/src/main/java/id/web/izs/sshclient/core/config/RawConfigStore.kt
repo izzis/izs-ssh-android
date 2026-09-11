@@ -790,6 +790,36 @@ object RawConfigStore {
     fun isHttps(host: String): Boolean = host.startsWith("https://", ignoreCase = true)
 
     /**
+     * Sync-target half of the `configSync` section (host/token/configID).
+     * Lives in the outer RAW document — readable while the vault is locked,
+     * exactly like desktop (config.service keeps configSync outside the
+     * encrypted blob). Single source of truth; RAM mirrors it after load.
+     */
+    data class RawSyncTarget(
+        val host: String?,
+        val token: String?,
+        val configId: Long,
+    )
+
+    fun syncTargetOf(doc: Map<String, Any?>): RawSyncTarget {
+        val cs = doc[KEY_CONFIG_SYNC] as? Map<String, Any?>
+        return RawSyncTarget(
+            host = cs?.get("host")?.toString(),
+            token = cs?.get("token")?.toString(),
+            configId = (cs?.get("configID") as? Number)?.toLong() ?: -1L,
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
+    fun setSyncTarget(doc: LinkedHashMap<String, Any?>, target: RawSyncTarget) {
+        val cs = (doc[KEY_CONFIG_SYNC] as? LinkedHashMap<String, Any?>)
+            ?: linkedMapOf<String, Any?>().also { doc[KEY_CONFIG_SYNC] = it }
+        if (target.host == null) cs.remove("host") else cs["host"] = target.host
+        if (target.token == null) cs.remove("token") else cs["token"] = target.token
+        if (target.configId < 0) cs.remove("configID") else cs["configID"] = target.configId
+    }
+
+    /**
      * Cleartext policy for Config Sync (pure, unit-tested).
      *
      * `https://` is always allowed. `http://` is allowed ONLY for local

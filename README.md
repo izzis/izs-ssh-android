@@ -119,13 +119,14 @@ Tabby Developers. Licensed under the MIT License, see [LICENSE](LICENSE).
 | Crypto | `javax.crypto` only, pure JVM — unit-testable |
 | SDK | minSdk 26, compileSdk 37, targetSdk 36 |
 
-`http://` sync hosts are allowed for self-hosted LAN use (with an in-app
-warning); prefer `https://` for anything public, matching Tabby Desktop.
+`http://` sync hosts are allowed only for local targets (loopback, LAN,
+link-local, .local-style names — enforced in code, with an in-app warning);
+prefer `https://` for anything public, matching Tabby Desktop.
 
 ## Quick start
 
 ```bash
-./gradlew :app:testDebugUnitTest   # 242 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance, config import, sftp transfers, auth failover, pipe input, monospace check)
+./gradlew :app:testDebugUnitTest   # 266 unit tests (vault, sync, emulator, profiles, connect opts, host trust, selection, extra keys, sessions, tabs, recents, color schemes, appearance, config import, sftp transfers, auth failover, pipe input, monospace check, sync host policy)
 ./gradlew :app:assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -142,7 +143,7 @@ and WHAT would remove it. See [ARCHITECTURE.md](ARCHITECTURE.md) §9.
 3. Tap the terminal to raise the keyboard; use the extra-keys bar for
    ESC/arrows/HOME/END/PGUP/PGDN/TAB/CTRL/ALT.
 
-## Parity guarantees (tested, 259/259 green)
+## Parity guarantees (tested, 266/266 green)
 
 - Decrypt-only-when-needed (listing/upload never decrypt).
 - Lossless RAW round-trip (`configSync` stripped/restored, disabled `parts`

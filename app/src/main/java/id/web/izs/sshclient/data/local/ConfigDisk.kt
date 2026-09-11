@@ -14,7 +14,11 @@ import androidx.security.crypto.MasterKey
  *
  * EncryptedSharedPreferences (stable 1.1.0, Tink/AES256-GCM) with a plain
  * SharedPreferences fallback when the Keystore is unavailable (old emulators) —
- * the fallback is reported via [isEncryptedStorage] so the UI can inform the user.
+ * the fallback is reported via [isEncryptedStorage] so the UI can inform the
+ * user, and writes of secrets (config YAML, sync token/target, known hosts)
+ * are refused outright instead of landing in cleartext. The backend is pinned
+ * once per process so a transient Keystore glitch can never split-brain
+ * reads and writes across the two stores.
  */
 class ConfigDisk(context: Context) {
     private val appContext = context.applicationContext
@@ -44,16 +48,40 @@ class ConfigDisk(context: Context) {
     var isEncryptedStorage: Boolean = true
         private set
 
-    private fun prefs(): SharedPreferences = try {
-        secure.also { isEncryptedStorage = true }
-    } catch (e: Exception) {
-        isEncryptedStorage = false
-        plain
+    /**
+     * Backend is pinned ONCE per process: either the encrypted store or the
+     * plain fallback — never mixed. Per-call `try secure` used to split-brain
+     * (a transient Keystore glitch wrote to plain, the next read came back
+     * from secure looking empty, and a blank config could then overwrite the
+     * cloud). First access decides; [isEncryptedStorage] reports which won.
+     */
+    private val backend: SharedPreferences by lazy {
+        try {
+            secure.also { isEncryptedStorage = true }
+        } catch (e: Exception) {
+            isEncryptedStorage = false
+            plain
+        }
+    }
+
+    private fun prefs(): SharedPreferences = backend
+
+    /**
+     * Refuses to persist secrets where they would land in cleartext. Reads
+     * stay best-effort (so data can still be viewed/exported); only writes
+     * throw, loudly instead of silently downgrading to plain.
+     */
+    private fun requireEncrypted(what: String) {
+        prefs() // force backend init so the flag below is real, not the default
+        check(isEncryptedStorage) {
+            "Refusing to store $what unencrypted (this device cannot encrypt local storage)"
+        }
     }
 
     fun loadYaml(): String? = prefs().getString(KEY_YAML, null)
 
     fun saveYaml(yaml: String) {
+        requireEncrypted("config (holds the sync token, vault blob and possible plaintext secrets)")
         prefs().edit().putString(KEY_YAML, yaml).apply()
     }
 
@@ -64,20 +92,13 @@ class ConfigDisk(context: Context) {
     fun loadKnownHostsJson(): String? = prefs().getString(KEY_KNOWN_HOSTS, null)
 
     fun saveKnownHostsJson(json: String) {
+        requireEncrypted("known hosts (reveals your infrastructure)")
         prefs().edit().putString(KEY_KNOWN_HOSTS, json).apply()
     }
 
-    // ---- sync prefs (token aside, non-sensitive; encrypted too when secure storage is active) ----
+    // ---- sync behavior prefs (non-secret: auto/parts/stamp; the target
+    // itself — host/token/configID — lives only in YAML > configSync) ----
 
-    var host: String?
-        get() = prefs().getString(KEY_HOST, null)
-        set(v) = prefs().edit().putString(KEY_HOST, v).apply()
-    var token: String?
-        get() = prefs().getString(KEY_TOKEN, null)
-        set(v) = prefs().edit().putString(KEY_TOKEN, v).apply()
-    var configId: Long
-        get() = prefs().getLong(KEY_CONFIG_ID, -1L)
-        set(v) = prefs().edit().putLong(KEY_CONFIG_ID, v).apply()
     var auto: Boolean
         get() = prefs().getBoolean(KEY_AUTO, false)
         set(v) = prefs().edit().putBoolean(KEY_AUTO, v).apply()
@@ -93,6 +114,20 @@ class ConfigDisk(context: Context) {
     var lastRemoteChange: String
         get() = prefs().getString(KEY_LAST_CHANGE, "") ?: ""
         set(v) = prefs().edit().putString(KEY_LAST_CHANGE, v).apply()
+
+    /**
+     * Alpha cleanup: the sync target used to live in these prefs keys; it now
+     * lives only in YAML > configSync. Old installs may still carry the keys
+     * — drop them (no data is adopted). No-op when nothing is left, so the
+     * per-boot call from loadLocal costs nothing after the first run.
+     * (Deliberately NOT gated on the config `version`: that key is
+     * desktop-owned parity and must never carry app-local state.)
+     */
+    fun dropLegacySyncTarget() {
+        val p = prefs()
+        if (!p.contains(KEY_HOST) && !p.contains(KEY_TOKEN) && !p.contains(KEY_CONFIG_ID)) return
+        p.edit().remove(KEY_HOST).remove(KEY_TOKEN).remove(KEY_CONFIG_ID).apply()
+    }
 
     /**
      * Home folder expansion memory. The home list defaults to all-collapsed,
@@ -317,6 +352,7 @@ class ConfigDisk(context: Context) {
     companion object {
         const val KEY_YAML = "tabby-config-yaml"
         const val KEY_KNOWN_HOSTS = "tabby-known-hosts"
+        // Pre-YAML-only leftovers, dropped once by dropLegacySyncTarget.
         const val KEY_HOST = "sync.host"
         const val KEY_TOKEN = "sync.token"
         const val KEY_CONFIG_ID = "sync.configID"

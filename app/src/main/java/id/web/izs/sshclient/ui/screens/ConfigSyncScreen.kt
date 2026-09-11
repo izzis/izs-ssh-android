@@ -57,11 +57,12 @@ fun ConfigSyncScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    // Keyed on the disk values: abortPendingImport() restores the previous
-    // sync target, and the fields must follow (typing alone never writes
+    // Keyed on the YAML sync target: abortPendingImport() restores the
+    // previous target, and the fields must follow (typing alone never writes
     // disk, so no reset-while-typing).
-    var host by remember(state.disk.host) { mutableStateOf(state.disk.host ?: "") }
-    var token by remember(state.disk.token) { mutableStateOf(state.disk.token ?: "") }
+    val yamlTarget = state.loaded?.domain?.configSync
+    var host by remember(yamlTarget?.host) { mutableStateOf(yamlTarget?.host ?: "") }
+    var token by remember(yamlTarget?.token) { mutableStateOf(yamlTarget?.token ?: "") }
     var items by remember { mutableStateOf<List<RemoteConfigMeta>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -79,7 +80,8 @@ fun ConfigSyncScreen(
     // popping back with a locked config and no prompt.
     var showUnlock by remember { mutableStateOf(false) }
 
-    val connected = !state.disk.host.isNullOrBlank() && !state.disk.token.isNullOrBlank()
+    val connected = !yamlTarget?.host.isNullOrBlank() && !yamlTarget?.token.isNullOrBlank()
+    val syncId = yamlTarget?.configID ?: -1L
     val showHttpWarning = remember(host) {
         host.isNotBlank() && !RawConfigStore.isHttps(host.trim().trimEnd('/'))
     }
@@ -90,7 +92,7 @@ fun ConfigSyncScreen(
             error = null
             try {
                 items = withContext(Dispatchers.IO) {
-                    state.repo.listRemote(state.disk.host!!, state.disk.token!!)
+                    state.repo.listRemote(host, token)
                 }
             } catch (e: Exception) {
                 error = e.message
@@ -103,7 +105,7 @@ fun ConfigSyncScreen(
 
     suspend fun doUpload(meta: RemoteConfigMeta) {
         withContext(Dispatchers.IO) {
-            state.repo.uploadAsCurrent(state.disk.host!!, state.disk.token!!, meta.id, "android-1.0.0")
+            state.repo.uploadAsCurrent(host, token, meta.id, "android-1.0.0")
         }
         state.refresh()
         reload()
@@ -114,7 +116,7 @@ fun ConfigSyncScreen(
         // dialog on THIS screen: popping back silently would leave the new
         // config locked with no prompt until the next app start.
         val loaded = withContext(Dispatchers.IO) {
-            state.repo.downloadIntoLocal(state.disk.host!!, state.disk.token!!, meta.id)
+            state.repo.downloadIntoLocal(host, token, meta.id)
         }
         state.adopt(loaded)
         if (loaded.unlockRequired) {
@@ -151,7 +153,7 @@ fun ConfigSyncScreen(
     ) {
         ScreenHeader("Config Sync", onBack)
         Text(
-            "Current config: ${state.disk.configId.takeIf { it >= 0 } ?: "-"}, " +
+            "Current config: ${syncId.takeIf { it >= 0 } ?: "-"}, " +
                 "updated ${state.disk.lastRemoteChange.ifBlank { "-" }}",
             style = MaterialTheme.typography.bodySmall,
         )
@@ -194,8 +196,8 @@ fun ConfigSyncScreen(
                     info = null
                     try {
                         withContext(Dispatchers.IO) { state.repo.testConnection(host, token) }
-                        state.disk.host = RawConfigStore.normalizeHost(host)
-                        state.disk.token = token
+                        withContext(Dispatchers.IO) { state.repo.setSyncTarget(host, token) }
+                        state.refresh()
                         info = "Connected."
                         reload()
                     } catch (e: Exception) {
@@ -226,7 +228,7 @@ fun ConfigSyncScreen(
                         busy = true
                         try {
                             val created = withContext(Dispatchers.IO) {
-                                state.repo.createRemote(state.disk.host!!, state.disk.token!!, newName)
+                                state.repo.createRemote(host, token, newName)
                             }
                             newName = ""
                             if (created.id >= 0) doUpload(created) else reload()
@@ -242,7 +244,7 @@ fun ConfigSyncScreen(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         info?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         for (meta in items ?: emptyList()) {
-            val active = meta.id == state.disk.configId
+            val active = meta.id == syncId
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
@@ -261,7 +263,7 @@ fun ConfigSyncScreen(
                         ) { Text("Download") }
                         OutlinedButton(
                             onClick = {
-                                if (meta.id == state.disk.configId) scope.launch {
+                                if (meta.id == syncId) scope.launch {
                                     busy = true
                                     try { doUpload(meta) } catch (e: Exception) { error = e.message } finally { busy = false }
                                 } else confirmUpload = meta
@@ -374,7 +376,7 @@ fun ConfigSyncScreen(
                         busy = true
                         try {
                             withContext(Dispatchers.IO) {
-                                state.repo.deleteRemote(state.disk.host!!, state.disk.token!!, meta.id)
+                                state.repo.deleteRemote(host, token, meta.id)
                             }
                             reload()
                         } catch (e: Exception) { error = e.message } finally { busy = false }

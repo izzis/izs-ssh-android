@@ -158,14 +158,21 @@ app/src/main/java/id/web/izs/sshclient/
                           scrollback history deque capped by maxHistory
       TerminalInput.kt    Pure sticky CTRL/ALT mapping (c & 0x1F, ALT = ESC prefix)
   data/local/
-    ConfigDisk.kt         EncryptedSharedPreferences: sync creds, RAW YAML cache,
-                           known_hosts (TOFU), terminal prefs (font size),
+    ConfigDisk.kt         EncryptedSharedPreferences (backend pinned once per
+                           process; secret writes refused when encryption is
+                           unavailable): sync behavior prefs (auto/parts/stamp),
+                           RAW YAML cache, known_hosts (TOFU), terminal prefs
+                           (font size),
+                           Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode/window.hideTerminalHeader/window.fabAtBottom/window.fabAtLeft (never synced to YAML).
+                           The sync target (host/token/configID) lives ONLY in
+                           YAML > configSync (single source, RAM-mirrored after
+                           load — never a prefs duplicate).
                            Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode/window.hideTerminalHeader/window.fabAtBottom/window.fabAtLeft (never synced to YAML).
                           security-crypto 1.1.0 deprecated the API wholesale
                           (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (30 files, 242 tests — §8)
+app/src/test/... (32 files, 266 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -209,7 +216,8 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   unlock. `keySalt` therefore rotates exactly like desktop; plaintext docs
   are never rewritten, and upload stays verbatim (no encrypt).
 - **Failed-import restore:** before every download/import overwrite, the
-  previous YAML + sync target (`host`/`token`/`configID`/`lastRemoteChange`)
+  previous YAML + sync target (YAML `configSync` host/token/configID + prefs
+  `lastRemoteChange`) + session passphrase are snapshotted in RAM
   + session passphrase are snapshotted in RAM (`preImportBackup*`,
   `pendingEncryptedRewrite` in `SyncRepository`, surfaced as
   `Loaded.pendingRewrite`). Cancelling/deleting before the first unlock
@@ -394,11 +402,18 @@ the IME:
   While selecting, user scrolling is off, output-follow freezes, tap clears;
   absolute rows are scroll-stable so handles track the text (a history
   shrink, resize, font change, or alt-buffer switch drops the selection).
-- `http://` sync hosts allowed for self-hosted LAN (with in-app warning).
+- **Sync target (YAML-only):** host/token/configID live ONLY in YAML >
+  `configSync` (outer shell, readable while locked — desktop parity) and are
+  RAM-mirrored after load; no prefs duplicate exists. "Test and save" writes
+  the YAML section; the ticker reads it back from disk each poll.
+- **Cleartext policy:** `https://` always; `http://` only for local targets
+  (loopback, RFC 1918, link-local, .local-style, single-label LAN) enforced
+  in code (`RawConfigStore.isSyncHostAllowed`, checked by `TabbySyncApi` on
+  every request — network-security-config cannot express CIDR ranges).
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 259 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 266 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -433,6 +448,7 @@ the IME:
 | `SftpTransferManagerTest` | DONE/FAILED/CANCELLED rows, per-item + cancelAll abort, once-only Save-as take, clearFinished cleanup |
 | `SshAuthTest` | typed SshAuthFailed + friendly reason (MINA rejects-all server), no-credentials case |
 | `SessionKeepAliveTest` | label fallback, auto-retry gate, mirror exactness, notification text builders |
+| `SyncHostPolicyTest` | cleartext matrix: https always, public http refused, LAN/loopback/link-local allowed |
 
 ## 9. Background survival (SessionService)
 

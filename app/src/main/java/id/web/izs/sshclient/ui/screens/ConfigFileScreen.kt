@@ -208,7 +208,7 @@ fun ConfigFileScreen(
         ScreenHeader("Config file", onBack)
         if (!importing) {
             Text(
-                "Config ${state.disk.configId.takeIf { it >= 0 } ?: "-"}, $viewLabel, " +
+                "Config ${state.loaded?.domain?.configSync?.configID?.takeIf { it >= 0 } ?: "-"}, $viewLabel, " +
                     "${yaml?.length ?: 0} characters, " +
                     "${viewProfiles?.let { "$it profiles" } ?: "no config loaded"}",
                 style = MaterialTheme.typography.bodySmall,

@@ -53,11 +53,11 @@ class SyncRepository(
     @Volatile private var preImportBackupYaml: String? = null
 
     /**
-     * Pre-overwrite sync-target snapshot ([ConfigDisk.host]/token/configId/
-     * lastRemoteChange) taken next to [preImportBackupYaml]. [downloadIntoLocal]
-     * retargets these at the cloud config; abort must put them back or the
-     * restored YAML and the poll target would disagree. Null when the op
-     * doesn't retarget (file import keeps the local target).
+     * Pre-overwrite sync-target snapshot (host/token/configID from YAML >
+     * configSync, plus the prefs stamp) taken next to [preImportBackupYaml].
+     * [downloadIntoLocal] retargets at the cloud config; abort must put the
+     * target back or the restored YAML and the poll target would disagree.
+     * Null when the op doesn't retarget (file import keeps the local target).
      */
     @Volatile private var preImportSyncTarget: SyncTarget? = null
 
@@ -142,7 +142,28 @@ class SyncRepository(
         } else {
             RawConfigStore.loadRaw(yamlStr)
         }
+        // Alpha cleanup: a prefs-stored sync target from older builds is
+        // dropped (never adopted) — YAML > configSync is the only source.
+        disk.dropLegacySyncTarget()
         decryptToLoaded(raw, forgiveStaleRemembered = true)
+    }
+
+    /**
+     * Persist the sync target ("Test and save"): writes YAML > configSync
+     * only — the single source of truth. Never touches separate prefs.
+     */
+    suspend fun setSyncTarget(hostRaw: String, token: String): Loaded = withContext(Dispatchers.IO) {
+        val host = RawConfigStore.normalizeHost(hostRaw)
+        require(token.isNotBlank()) { "Sync token is empty" }
+        val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
+        val raw = RawConfigStore.loadRaw(yamlStr)
+        val cur = RawConfigStore.syncTargetOf(raw)
+        RawConfigStore.setSyncTarget(
+            raw,
+            RawConfigStore.RawSyncTarget(host, token, if (cur.configId >= 0) cur.configId else -1L),
+        )
+        disk.saveYaml(RawConfigStore.dumpRaw(raw))
+        decryptToLoaded(raw)
     }
 
     suspend fun unlockWithPassphrase(passphrase: String): Loaded = withContext(Dispatchers.IO) {
@@ -324,11 +345,10 @@ class SyncRepository(
         val uploadDoc = RawConfigStore.buildUploadDoc(localRaw, remoteRaw, parts)
         val content = RawConfigStore.dumpRaw(uploadDoc)
         api.updateConfig(host, token, configId, content, appVersion)
-        // Refresh the stamp so autosync does not treat this as a new change
+        // Refresh the stamp so autosync does not treat this as a new change.
+        // The target itself already lives in YAML > configSync (written by
+        // setSyncTarget on "Test and save" / by downloadIntoLocal below).
         val meta = api.getConfig(host, token, configId)
-        disk.host = host
-        disk.token = token
-        disk.configId = configId
         disk.lastRemoteChange = meta.modifiedAt
         meta.modifiedAt
     }
@@ -371,21 +391,21 @@ class SyncRepository(
         }
         val parts = readParts(localRaw)
         val merged = RawConfigStore.mergeDownload(remoteRaw, localRaw, parts)
+        // Snapshot the PRE-download target first (abort restores it): the
+        // merged doc below retargets at the cloud config.
+        val preTarget = RawConfigStore.syncTargetOf(localRaw)
+        preImportSyncTarget = SyncTarget(preTarget.host, preTarget.token, preTarget.configId, disk.lastRemoteChange)
         // Make sure the local configSync points at the freshly downloaded config
         @Suppress("UNCHECKED_CAST")
         val cs = (merged[RawConfigStore.KEY_CONFIG_SYNC] as? LinkedHashMap<String, Any?>)
             ?: linkedMapOf<String, Any?>().also { merged[RawConfigStore.KEY_CONFIG_SYNC] = it }
-        disk.host = host
-        disk.token = token
-        disk.configId = configId
-        disk.lastRemoteChange = remote.modifiedAt
         cs["host"] = host
         cs["token"] = token
         cs["configID"] = configId
+        disk.lastRemoteChange = remote.modifiedAt
         // Snapshot for abortPendingImport(): cancelling before the first
         // unlock must just fail the import (restore this), not erase local.
         preImportBackupYaml = localYaml
-        preImportSyncTarget = SyncTarget(disk.host, disk.token, disk.configId, disk.lastRemoteChange)
         preImportPassphrase = rememberedPassphrase
         disk.saveYaml(RawConfigStore.dumpRaw(merged))
         maybeReencryptFreshShell(merged)
@@ -417,10 +437,17 @@ class SyncRepository(
         if (!doc.containsKey(RawConfigStore.KEY_VERSION)) doc[RawConfigStore.KEY_VERSION] = 1
         // Snapshot for abortPendingImport(): cancelling before the first
         // unlock must just fail the import (restore this), not erase local.
-        // File import never retargets sync, so snapshotting the current
-        // target makes its restore a no-op (and supersedes any older one).
+        // File import never retargets sync (local configSync is kept above),
+        // so snapshotting the current target makes its restore a no-op (and
+        // supersedes any older one).
         preImportBackupYaml = localYaml
-        preImportSyncTarget = SyncTarget(disk.host, disk.token, disk.configId, disk.lastRemoteChange)
+        if (!localYaml.isNullOrBlank()) {
+            val preTarget = RawConfigStore.syncTargetOf(RawConfigStore.loadRaw(localYaml))
+            preImportSyncTarget =
+                SyncTarget(preTarget.host, preTarget.token, preTarget.configId, disk.lastRemoteChange)
+        } else {
+            preImportSyncTarget = null
+        }
         preImportPassphrase = rememberedPassphrase
         disk.saveYaml(RawConfigStore.dumpRaw(doc))
         maybeReencryptFreshShell(doc)
@@ -444,10 +471,9 @@ class SyncRepository(
         val target = preImportSyncTarget
         val pass = preImportPassphrase
         settlePendingRewrite()
+        // The backup YAML carries the pre-import configSync, so restoring it
+        // restores the target too. Only the prefs stamp needs explicit care.
         if (target != null) {
-            disk.host = target.host
-            disk.token = target.token
-            disk.configId = target.configId
             disk.lastRemoteChange = target.lastRemoteChange
         }
         if (!pass.isNullOrEmpty()) rememberPassphrase(pass)
@@ -468,15 +494,17 @@ class SyncRepository(
      * @return config name when a download happened, else null.
      */
     suspend fun autoSyncTick(): String? = withContext(Dispatchers.IO) {
-        val host = disk.host ?: return@withContext null
-        val token = disk.token ?: return@withContext null
-        val id = disk.configId
-        if (host.isBlank() || token.isBlank() || id < 0 || !disk.auto) return@withContext null
+        if (!disk.auto) return@withContext null
         val localYaml = disk.loadYaml()
-        if (!localYaml.isNullOrBlank()) {
-            val localRaw = RawConfigStore.loadRaw(localYaml)
-            if (RawConfigStore.isEncrypted(localRaw) && !isVaultOpen()) return@withContext null
-        }
+        if (localYaml.isNullOrBlank()) return@withContext null
+        val localRaw = RawConfigStore.loadRaw(localYaml)
+        // Target from YAML (single source, readable while locked).
+        val target = RawConfigStore.syncTargetOf(localRaw)
+        val host = target.host
+        val token = target.token
+        val id = target.configId
+        if (host.isNullOrBlank() || token.isNullOrBlank() || id < 0) return@withContext null
+        if (RawConfigStore.isEncrypted(localRaw) && !isVaultOpen()) return@withContext null
         val list = try {
             api.getConfigs(host, token)
         } catch (e: Exception) {
