@@ -1,0 +1,11 @@
+# Native Dependabot: weekly PRs when GitHub Actions release new versions,
+# so runner-deprecation warnings (like the Node.js 20→24 migration) surface
+# as reviewable PRs instead of ambushing a release run.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ci)"

@@ -803,11 +803,14 @@ object RawConfigStore {
     )
 
     fun syncTargetOf(doc: Map<String, Any?>): RawSyncTarget {
-        val cs = doc[KEY_CONFIG_SYNC] as? Map<String, Any?>
+        // `is Map<*, *>` (not `as? Map<String, Any?>`): fully checkable, so
+        // no unchecked-cast warning and no @Suppress needed.
+        val cs = doc[KEY_CONFIG_SYNC]
+        if (cs !is Map<*, *>) return RawSyncTarget(null, null, -1L)
         return RawSyncTarget(
-            host = cs?.get("host")?.toString(),
-            token = cs?.get("token")?.toString(),
-            configId = (cs?.get("configID") as? Number)?.toLong() ?: -1L,
+            host = cs["host"]?.toString(),
+            token = cs["token"]?.toString(),
+            configId = (cs["configID"] as? Number)?.toLong() ?: -1L,
         )
     }
 

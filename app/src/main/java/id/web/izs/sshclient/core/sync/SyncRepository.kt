@@ -299,8 +299,11 @@ class SyncRepository(
                 RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                 RawConfigStore.KEY_ENCRYPTED to true,
             )
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
-                out[RawConfigStore.KEY_CONFIG_SYNC] = it
+            // `is Map<*, *>` instead of `as? Map<String, Any?>`: checkable,
+            // so no unchecked-cast warning and no @Suppress needed.
+            val carriedSync = raw[RawConfigStore.KEY_CONFIG_SYNC]
+            if (carriedSync is Map<*, *>) {
+                out[RawConfigStore.KEY_CONFIG_SYNC] = carriedSync
             }
             disk.saveYaml(RawConfigStore.dumpRaw(out))
             decryptToLoaded(out)
@@ -890,9 +893,12 @@ class SyncRepository(
                     RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                     RawConfigStore.KEY_ENCRYPTED to true,
                 )
-                (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
-                    out[RawConfigStore.KEY_CONFIG_SYNC] = it
-                }
+            // `is Map<*, *>` instead of `as? Map<String, Any?>`: checkable,
+            // so no unchecked-cast warning and no @Suppress needed.
+            val carriedSync = raw[RawConfigStore.KEY_CONFIG_SYNC]
+            if (carriedSync is Map<*, *>) {
+                out[RawConfigStore.KEY_CONFIG_SYNC] = carriedSync
+            }
             } else {
                 out = LinkedHashMap(raw)
                 @Suppress("UNCHECKED_CAST")

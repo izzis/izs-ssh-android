@@ -81,7 +81,11 @@ fun ConfigSyncScreen(
     // popping back with a locked config and no prompt.
     var showUnlock by remember { mutableStateOf(false) }
 
-    val connected = !yamlTarget?.host.isNullOrBlank() && !yamlTarget?.token.isNullOrBlank()
+    // NOTE: the second `yamlTarget` needs no `?.` — when the left side of
+    // `&&` is true, `yamlTarget?.host` was a non-blank string, so the
+    // compiler smart-casts yamlTarget to non-null here. Runtime-identical
+    // (null still short-circuits to false on the left side).
+    val connected = !yamlTarget?.host.isNullOrBlank() && !yamlTarget.token.isNullOrBlank()
     val syncId = yamlTarget?.configID ?: -1L
     val showHttpWarning = remember(host) {
         host.isNotBlank() && !RawConfigStore.isHttps(host.trim().trimEnd('/'))
