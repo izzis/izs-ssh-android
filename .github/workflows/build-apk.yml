@@ -1,0 +1,90 @@
+name: Build APK release
+
+# On-demand only: no push / pull_request triggers.
+# Run from: Actions tab -> "Build APK release" -> Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag, e.g. v1.0.0 (also becomes the GitHub Release)'
+        required: true
+      prerelease:
+        description: 'Mark as pre-release (beta/RC)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # needed to create the GitHub Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          TAG="${{ inputs.tag_name }}"
+          # v1.2.3 -> 1.2.3 for versionName; versionCode uses the run number
+          # so every release build is installable as an update.
+          VERSION_NAME="${TAG#v}"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "Building $TAG (versionName=$VERSION_NAME, versionCode=${{ github.run_number }})"
+
+      - name: Restore release keystore
+        run: |
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "::error::Missing secret ANDROID_KEYSTORE_BASE64. See Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/release.jks"
+          cat > "$GITHUB_WORKSPACE/keystore.properties" <<EOF
+          storeFile=release.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+          echo "Keystore restored."
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build signed release APK
+        run: >-
+          ./gradlew assembleRelease --stacktrace
+          -PversionNameOverride="${{ steps.version.outputs.version_name }}"
+          -PversionCodeOverride="${{ github.run_number }}"
+
+      - name: Rename APK with tag
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/izs-ssh-client-${{ inputs.tag_name }}.apk"
+          ls -lh dist/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: izs-ssh-client-${{ inputs.tag_name }}
+          path: dist/*.apk
+          retention-days: 90
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          # Auto changelog: diff of commits/PRs since the previous tag.
+          generate_release_notes: true
+          prerelease: ${{ inputs.prerelease }}
+          files: dist/*.apk

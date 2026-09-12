@@ -1,29 +1,23 @@
 # ARCHITECTURE — ssh-client-android
 
 Native Android SSH client (`id.web.izs.sshclient`, "izs SSH") with **Tabby
-Desktop Config Sync parity** plus a Termux-like interactive PTY terminal.
+terminal Config Sync parity** plus a Termux-like interactive PTY terminal.
 Single module (`:app`), Kotlin + Jetpack Compose, no WebView.
 
 Upstream references (behavioral parity, not code):
-Tabby Desktop `config.service.ts` / `vault.service.ts`
+Tabby terminal `config.service.ts` / `vault.service.ts`
 (`tabby-core`), `configSync.service.ts` (`tabby-settings`).
 
 ## 1. Design principles
 
-1. **Desktop parity first.** Vault crypto, secret URIs, sync merge rules and
-   lazy-unlock semantics mirror Tabby Desktop exactly (all covered by tests).
-2. **Lossless RAW.** The on-disk YAML document is the source of truth.
-   The domain model is a transient, defaulted *view*; uploads are rebuilt
+1. **Tabby parity, YAML-first.** Behavior (vault crypto, secret URIs, sync
+   merge rules, lazy-unlock semantics) mirrors Tabby terminal exactly (all
+   covered by tests). The on-disk YAML document is the source of truth:
+   the domain model is a transient, defaulted *view*; uploads are rebuilt
    from RAW so unknown/future keys survive round-trips byte-identical.
-3. **Secrets never touch disk.** The vault passphrase lives in RAM only
+2. **Secrets never touch disk.** The vault passphrase lives in RAM only
    (`VaultState`, inside `AppState`, inside `AppViewModel`). It is asked
    lazily — only when vault content is actually needed.
-4. **Terminal jumps, never slides.** Keyboard open/close moves the layout in
-   one discrete jump. No per-frame
-   animation tracking, no follow-up motion.
-5. **Cheap frames on weak phones.** The grid redraws only when emulator
-   output arrives; keyboard-animation frames skip the Canvas entirely;
-   text is laid out once per row, not per cell.
 
 ## 2. Module map
 
@@ -44,7 +38,7 @@ app/src/main/java/id/web/izs/sshclient/
   ui/
     AppForeground.kt              Process foreground counter (no extra deps)
     AppViewModel.kt               Rotation-safe holder of AppState (passphrase survives rotate)
-    SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/8,
+    SshSessionViewModel.kt        Multi-session registry: PTYs survive rotate+nav, reuseSession parity, cap 5/10,
                                     selected tab + hasActivity flag + observable hasShell (never branch UI on the plain shell field);
                                     per-session SftpTransferManager hosts (transfers survive back/dismiss/rotate,
                                     die only on close(); Back never reaches close());
@@ -172,7 +166,7 @@ app/src/main/java/id/web/izs/sshclient/
                           (suppressed; revisit on a DataStore+Tink migration)
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (32 files, 266 tests — §8)
+app/src/test/... (36 files, 299 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -192,7 +186,7 @@ closes a session (per-session `warnOnClose` dialog; the header status dot
 always confirms). Session hops use shallow navigate (`launchSingleTop` +
 `popUpTo("profiles")`) so the stack never grows `ssh/A → ssh/B → ssh/C`.
 
-## 4. Config Sync parity (Tabby Desktop)
+## 4. Config Sync parity (Tabby terminal)
 
 - **Decrypt only when needed** (`maybeDecryptConfig` parity): boot list,
   upload, and metadata never decrypt. The passphrase is requested for:
@@ -413,7 +407,7 @@ the IME:
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 266 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 299 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -449,6 +443,9 @@ the IME:
 | `SshAuthTest` | typed SshAuthFailed + friendly reason (MINA rejects-all server), no-credentials case |
 | `SessionKeepAliveTest` | label fallback, auto-retry gate, mirror exactness, notification text builders |
 | `SyncHostPolicyTest` | cleartext matrix: https always, public http refused, LAN/loopback/link-local allowed |
+| `PortForwardingTest` | forward validation + Local/Remote traffic proofs vs MINA, bind-conflict abort |
+| `SocksProxyTest` | SOCKS defaults/validation + live handshake-through-proxy vs fake SOCKS5 |
+| `AuthSelectionTest` | auth selection honored (stage proofs) + typed failover bypass vs MINA |
 
 ## 9. Background survival (SessionService)
 
@@ -609,3 +606,28 @@ forks real shells). The remaining enemy is plain background-process death
   (desktop only)"); a synced non-direct value stays visible/selected so it
   round-trips untouched.
 - Multi-window / font-choice polish, search-in-buffer.
+
+### Mobile scope: YAML features vs this device
+
+Guarantee first: every YAML value round-trips untouched (unknown keys ride
+the raw map) — scope differences below are connect-time only, never silent
+stripping. Editor marks non-working options "(desktop only)" instead of
+hiding them, so synced values stay manageable from the phone.
+
+Connects on-device: password, publicKey, Auto, SOCKS proxy (default 1080),
+Local/Remote port forwarding, keepalive interval, readyTimeout,
+reuseSession, custom algorithms, login scripts, per-profile warnOnClose.
+`keyboardInteractive` narrows to password + the failover prompt (no KI
+transport); typed failover passwords bypass the `auth` selection.
+
+Not yet (implementable, no platform blocker): keyboard-interactive
+transport + challenge UI, HTTP CONNECT proxy, jump-host chains
+(`connectVia` exists in sshj), Dynamic (device-side SOCKS listener),
+`skipBanner` filtering, `keepaliveCountMax` watchdog, `telnet` profile
+type (plain TCP + the existing emulator).
+
+Desktop-only (no mobile counterpart): `x11` (no X server), `agentForward`
+and `auth: agent` (no ssh-agent), `proxyCommand` (no helper binaries like
+`ssh -W` on stock Android), hotkeys/shortcuts (no physical keyboard),
+`options.input` nuances (input is the native IME pipe here — stored,
+applied per-platform).

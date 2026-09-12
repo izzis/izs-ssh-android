@@ -1,8 +1,29 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
 }
+
+// Release signing inputs, resolved once at configuration time (file scope —
+// NOT inside android{}: the Android DSL receiver shadows plain `java.*`
+// references and breaks script compilation).
+// keystore.properties is generated in CI from GitHub Secrets and never
+// committed; local builds without the file still work (release APK is then
+// left unsigned instead of failing the build).
+val keystoreProps = Properties()
+val keystorePropsFile = rootProject.file("keystore.properties")
+if (keystorePropsFile.exists()) {
+    FileInputStream(keystorePropsFile).use { stream -> keystoreProps.load(stream) }
+}
+// Optional overrides from CI: -PversionNameOverride=1.2.3 (tag v1.2.3
+// stripped of the leading 'v'), -PversionCodeOverride=5.
+val versionNameOverride = (findProperty("versionNameOverride") as String?)
+    ?.takeIf { it.isNotBlank() }
+val versionCodeOverride = (findProperty("versionCodeOverride") as String?)
+    ?.toIntOrNull()
 
 android {
     namespace = "id.web.izs.sshclient"
@@ -13,13 +34,30 @@ android {
         applicationId = "id.web.izs.sshclient"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = versionCodeOverride ?: 1
+        versionName = versionNameOverride ?: "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            if (keystoreProps.containsKey("storeFile")) {
+                storeFile = rootProject.file(keystoreProps["storeFile"] as String)
+                storePassword = keystoreProps["storePassword"] as String
+                keyAlias = keystoreProps["keyAlias"] as String
+                keyPassword = keystoreProps["keyPassword"] as String
+            }
+        }
     }
 
     buildTypes {
         release {
+            // Signed in CI (keystore.properties present). Locally without the
+            // file the config has no credentials — Gradle leaves the APK
+            // unsigned instead of failing the build.
+            if (keystoreProps.containsKey("storeFile")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

@@ -65,9 +65,9 @@ fun AboutScreen(onBack: () -> Unit) {
         )
         Text(
             "Unofficial Tabby-compatible client. It reads the config, vault, and sync format " +
-                "used by Tabby Desktop. No Tabby code is used. Not affiliated with or endorsed " +
+                "used by Tabby terminal. No Tabby code is used. Not affiliated with or endorsed " +
                 "by the Tabby Developers. " +
-                "Tabby Desktop is MIT licensed, Copyright (c) 2017 Tabby Developers.",
+                "Tabby is MIT licensed, Copyright (c) 2017 Tabby Developers.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
