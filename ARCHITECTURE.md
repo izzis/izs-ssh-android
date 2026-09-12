@@ -596,8 +596,16 @@ forks real shells). The remaining enemy is plain background-process death
   logging masks it by reshuffling recomposition timing). Shell presence is
   the observable `hasShell` flow, updated at every assignment site;
   composition branches on the flow, event handlers read the field fresh.
-- **Port forwarding:** open Local/Remote/Dynamic at connect (saved today).
-- **jumpHost / proxyCommand / SOCKS-HTTP:** saved to YAML via the
+- **Port forwarding:** Local + Remote rules open at connect (desktop
+  `addPortForward` parity — Local bind failure aborts the connect, Remote
+  rejection warns in-terminal and continues); Dynamic (SOCKS) stays
+  desktop-only with a clear error. Forward rules join the transport key so
+  different rules never silently share one transport.
+- **jumpHost / proxyCommand / HTTP proxy:** saved to YAML via the
   `connectionMode` dropdown (other-mode fields nulled on save, desktop
-  priority), but connect is direct-only — a "scheduled" stub.
+  priority), but connect shows a not-supported message. SOCKS proxy connects
+  on-device (desktop `newSocksProxy` parity, default port 1080). The dropdown
+  disables switching INTO still-unsupported modes from the phone ("…
+  (desktop only)"); a synced non-direct value stays visible/selected so it
+  round-trips untouched.
 - Multi-window / font-choice polish, search-in-buffer.

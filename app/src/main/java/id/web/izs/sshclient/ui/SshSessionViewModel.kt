@@ -443,6 +443,10 @@ class SshSessionViewModel : ViewModel() {
                 }
                 val sess: SshConnector.ShellSession
                 var sharedEntry: PooledTransport? = adopted
+                // Server-side Remote-forward rejections (fresh transports
+                // only) — surfaced below as an in-terminal service line,
+                // desktop emitServiceMessage parity.
+                var freshWarnings: List<String> = emptyList()
                 if (adopted != null) {
                     h.setStage("Reusing connection…")
                     sess = try {
@@ -460,6 +464,9 @@ class SshSessionViewModel : ViewModel() {
                         conn.connectTransport(
                             profile = profile,
                             password = attempt?.password ?: appState.passwordFor(profile),
+                            // A failover-prompt password is explicit user
+                            // intent: always attempt it, whatever `auth` says.
+                            passwordIsTyped = attempt != null,
                             keys = appState.keysFor(profile).map {
                                 SshConnector.KeyInput(pem = it.first, passphrase = it.second)
                             },
@@ -503,6 +510,7 @@ class SshSessionViewModel : ViewModel() {
                     }
                     sess.trustUpgrade = t.trustUpgrade
                     sess.trustUpgradeLine = t.trustUpgradeLine
+                    freshWarnings = t.forwards.warnings
                     authenticatedFresh = true
                     sess.trustUpgrade?.let { entry ->
                         viewModelScope.launch {
@@ -549,6 +557,19 @@ class SshSessionViewModel : ViewModel() {
                         h.bumpVersion()
                         noteOutput(sessionId)
                     }
+                }
+                // Remote forwards the server rejected: the session survived,
+                // so say so in the terminal (output has buffer capacity —
+                // tryEmit never suspends or drops here).
+                if (freshWarnings.isNotEmpty()) {
+                    sess.output.tryEmit(
+                        freshWarnings.joinToString(
+                            separator = "\r\n",
+                            prefix = "\r\n",
+                            postfix = "\r\n",
+                        ) { "[!] $it" },
+                    )
+                    h.bumpVersion()
                 }
             } catch (e: UnknownHostKeyException) {
                 h.setPrompt(e)

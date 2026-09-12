@@ -1,5 +1,6 @@
 package id.web.izs.sshclient
 
+import id.web.izs.sshclient.core.config.ForwardedPort
 import id.web.izs.sshclient.core.config.SshOptions
 import id.web.izs.sshclient.core.ssh.transportKeyOf
 import id.web.izs.sshclient.core.config.SshProfile
@@ -77,7 +78,7 @@ class SshSessionRegistryTest {
     @Test
     fun `transport key matches desktop multiplexer format`() {
         val base = SshOptions(host = "example.com", port = 22, user = "root")
-        assertEquals("example.com:22:root:::0::0", transportKeyOf(base))
+        assertEquals("example.com:22:root::::0::0:", transportKeyOf(base))
         // Port/user normalize exactly like connectTransport resolves them.
         assertEquals(
             transportKeyOf(base),
@@ -89,6 +90,27 @@ class SshSessionRegistryTest {
         assertNotEquals(
             transportKeyOf(base),
             transportKeyOf(base.copy(proxyCommand = "ssh -W %h:%p jump")),
+        )
+        assertNotEquals(
+            transportKeyOf(base),
+            transportKeyOf(base.copy(jumpHost = "ssh:jump:123")),
+        )
+        // Forward rules participate: same host, different forwards must
+        // never share one transport (the second tab's forwards would
+        // silently never open).
+        assertNotEquals(
+            transportKeyOf(base),
+            transportKeyOf(
+                base.copy(
+                    forwardedPorts = listOf(
+                        ForwardedPort("Local", "127.0.0.1", 8000, "127.0.0.1", 80, ""),
+                    ),
+                ),
+            ),
+        )
+        assertEquals(
+            transportKeyOf(base),
+            transportKeyOf(base.copy(forwardedPorts = emptyList())),
         )
     }
 }

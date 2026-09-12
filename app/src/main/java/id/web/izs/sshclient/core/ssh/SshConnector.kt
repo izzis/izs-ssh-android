@@ -26,10 +26,14 @@ import kotlin.concurrent.thread
  * login scripts (LoginScriptRunner), custom algorithms (per-connection sshj
  * config; desktop defaults take the plain path).
  * - agent auth: not supported on Android (no ssh-agent) -> clear message
- * - jumpHost / proxyCommand / socks-http proxy: parsed + preserved,
- *   but v1 connect shows a "scheduled for v2" message (never silently ignored)
- * - forwardedPorts / x11 / skipBanner: saved for desktop,
- *   not applied on mobile yet
+ * - jumpHost / proxyCommand / http proxy: parsed + preserved, but connect
+ *   shows a not-supported message (never silently ignored)
+ * - socksProxy: connects through the SOCKS proxy (desktop newSocksProxy
+ *   parity, default port 1080) via a proxy SocketFactory
+ * - forwardedPorts: Local + Remote open at connect (desktop addPortForward
+ *   parity — Local bind failure aborts the connect, Remote rejection warns
+ *   and continues); Dynamic is desktop-only with a clear message.
+ *   x11 / skipBanner stay saved-for-desktop.
  * - reuseSession: honored via transport sharing ([connectTransport] once per
  *   [transportKeyOf], [openShellOnTransport] per tab — desktop multiplexer
  *   parity). Every profile tap opens a new tab; true shares the TCP
@@ -71,8 +75,10 @@ class SshConnector {
         val client: SSHClient,
         var trustUpgrade: id.web.izs.sshclient.core.config.KnownHostEntry? = null,
         var trustUpgradeLine: String? = null,
+        val forwards: StartedForwards = StartedForwards.empty(),
     ) {
         fun close() {
+            try { forwards.close() } catch (_: Exception) { }
             try { client.disconnect() } catch (_: Exception) { }
             try { client.close() } catch (_: Exception) { }
         }
@@ -173,6 +179,7 @@ class SshConnector {
     suspend fun openShell(
         profile: SshProfile,
         password: String?,
+        passwordIsTyped: Boolean = false,
         keys: List<KeyInput>,
         keyPassphrases: List<String> = emptyList(),
         verifyHostKeys: Boolean,
@@ -184,8 +191,18 @@ class SshConnector {
         onStage: (String) -> Unit = {},
     ): ShellSession = withContext(Dispatchers.IO) {
         val t = connectTransport(
-            profile, password, keys, keyPassphrases, verifyHostKeys,
-            knownHosts, legacyKnownHostLines, oneTimeTrust, timeoutMs, cacheDir, onStage,
+            profile = profile,
+            password = password,
+            passwordIsTyped = passwordIsTyped,
+            keys = keys,
+            keyPassphrases = keyPassphrases,
+            verifyHostKeys = verifyHostKeys,
+            knownHosts = knownHosts,
+            legacyKnownHostLines = legacyKnownHostLines,
+            oneTimeTrust = oneTimeTrust,
+            timeoutMs = timeoutMs,
+            cacheDir = cacheDir,
+            onStage = onStage,
         )
         try {
             openShellOnTransport(t.client, profile, onStage).also {
@@ -208,6 +225,13 @@ class SshConnector {
     suspend fun connectTransport(
         profile: SshProfile,
         password: String?,
+        /**
+         * True when [password] was just typed into the auth-failover prompt
+         * (not read from storage). Explicit user intent always gets attempted
+         * — desktop prompt-password parity — even under an auth selection
+         * that would otherwise skip the password method.
+         */
+        passwordIsTyped: Boolean = false,
         keys: List<KeyInput>,
         keyPassphrases: List<String> = emptyList(),
         verifyHostKeys: Boolean,
@@ -220,13 +244,16 @@ class SshConnector {
     ): ConnectedTransport = withContext(Dispatchers.IO) {
         val o = profile.options
         if (!o.jumpHost.isNullOrBlank() || !o.proxyCommand.isNullOrBlank() ||
-            !o.socksProxyHost.isNullOrBlank() || !o.httpProxyHost.isNullOrBlank()
+            !o.httpProxyHost.isNullOrBlank()
         ) {
-            throw IllegalStateException("This profile uses a jump host or proxy, which is not supported on this device yet.")
+            throw IllegalStateException("This profile uses a jump host, proxy command, or HTTP proxy, which is not supported on this device yet.")
         }
         if (o.host.isBlank()) throw IllegalStateException("Enter a host name or IP address.")
         val port = if (o.port > 0) o.port else 22
         val user = o.user.ifBlank { "root" }
+        // SOCKS proxy (desktop socksProxy parity): the whole transport —
+        // handshake, auth, shells, forwards — rides the proxy socket.
+        val socksProxy = SocksProxy.resolveAddress(o.socksProxyHost, o.socksProxyPort)
         // Ciphers tab + host-key trust order: the per-connection config
         // carries custom algorithm lists AND the known-first/desktop-order
         // host-key offer (the config order is what the server sees — the
@@ -237,6 +264,10 @@ class SshConnector {
                 HostKeyTrust.knownTypes(knownHosts, o.host, port),
             ),
         )
+        if (socksProxy != null) {
+            onStage("Connecting via SOCKS proxy ${socksProxy.hostString}:${socksProxy.port}...")
+            client.socketFactory = SocksProxy.socketFactory(socksProxy)
+        }
         // Advanced tab: keepalive heartbeats (SSH_MSG_IGNORE, universally
         // safe). The desktop countMax has no sshj equivalent and stays
         // stored-only; the interval is honored (ms -> s, min 1).
@@ -265,7 +296,19 @@ class SshConnector {
                     throw IllegalStateException("Connect failed: ${e.message ?: e::class.simpleName}")
                 }
                 var lastErr = ""
-                if (!password.isNullOrBlank()) {
+                // Desktop auth-selection parity (ssh.ts init():163-262): an
+                // explicit `auth` restricts the methods tried — never silent
+                // Auto. Agent has no counterpart on Android (no ssh-agent).
+                // Keyboard-interactive has no transport here: it narrows to
+                // password only (desktop never tries keys for it either) and
+                // relies on the password failover prompt — no KI flow needed.
+                if (o.auth == "agent") {
+                    throw IllegalStateException("Agent auth is not available on this device — select Password or Private Key.")
+                }
+                val tryPassword = passwordIsTyped || o.auth.isNullOrBlank() ||
+                    o.auth == "password" || o.auth == "keyboardInteractive"
+                val tryKeys = o.auth.isNullOrBlank() || o.auth == "publicKey"
+                if (tryPassword && !password.isNullOrBlank()) {
                     onStage("Checking password...")
                     try {
                         client.authPassword(user, password)
@@ -273,7 +316,7 @@ class SshConnector {
                         lastErr = e.message ?: "password auth failed"
                     }
                 }
-                if (!client.isAuthenticated) {
+                if (!client.isAuthenticated && tryKeys) {
                     val usable = keys.filter { it.pem.isNotBlank() }
                     for ((i, k) in usable.withIndex()) {
                         onStage("Trying key ${i + 1} of ${usable.size}...")
@@ -282,6 +325,12 @@ class SshConnector {
                     }
                 }
                 if (!client.isAuthenticated) {
+                    if (o.auth == "publicKey" && keys.none { it.pem.isNotBlank() }) {
+                        throw SshAuthFailed("No private key saved for this profile")
+                    }
+                    if ((o.auth == "password" || o.auth == "keyboardInteractive") && password.isNullOrBlank()) {
+                        throw SshAuthFailed("No saved password for this profile")
+                    }
                     if (password.isNullOrBlank() && keys.isEmpty()) {
                         throw SshAuthFailed(
                             "No saved password or key for this profile",
@@ -296,10 +345,17 @@ class SshConnector {
                 } catch (_: Exception) {
                     // Best-effort: a dead keepalive must never fail the session.
                 }
+                // Port forwarding opens here — once per transport, so shared
+                // tabs reuse the same forwards (desktop multiplexer parity).
+                // Local bind failure / Dynamic rows throw and abort the
+                // connect; Remote rejections only warn (see PortForwarding).
+                val startedForwards =
+                    client.startPortForwards(resolveForwardSpecs(o.forwardedPorts), onStage)
                 return@withTimeout ConnectedTransport(
                     client,
                     verifier.trustUpgrade,
                     verifier.trustUpgradeLine,
+                    startedForwards,
                 )
             }
         } catch (e: Exception) {
@@ -519,24 +575,33 @@ class SshConnector {
 
 /**
  * Desktop multiplexer-key parity (`sshMultiplexer.service.ts`): transports
- * are shared per `host:port:user:proxy…` (plus the jump chain on desktop).
- * Jump/proxy connects throw on mobile v1, but the fields stay in the key so
- * sharing can never cross them once supported. Port/user are normalized
- * exactly like [SshConnector.connectTransport] resolves them.
+ * are shared per `host:port:user:proxy…` (desktop appends the recursive
+ * `$jumpchain`; jump profiles can't connect here yet, so the jump ID itself
+ * is enough to never share across them). Forward rules join the key too —
+ * desktop doesn't include them (a reused session silently skips the second
+ * profile's forwards); splitting is the honest choice, documented in
+ * ARCHITECTURE.md. Port/user are normalized exactly like
+ * [SshConnector.connectTransport] resolves them.
  *
  * Pure JVM — unit-tested.
  */
 fun transportKeyOf(o: id.web.izs.sshclient.core.config.SshOptions): String {
     val port = if (o.port > 0) o.port else 22
     val user = o.user.ifBlank { "root" }
+    val forwards = o.forwardedPorts.joinToString(";") {
+        "${it.type}/${it.host.ifBlank { "127.0.0.1" }}/${it.port}/" +
+            "${it.targetAddress.ifBlank { "127.0.0.1" }}/${it.targetPort}"
+    }
     return listOf(
         o.host,
         port.toString(),
         user,
         o.proxyCommand ?: "",
+        o.jumpHost ?: "",
         o.socksProxyHost ?: "",
         (o.socksProxyPort ?: 0).toString(),
         o.httpProxyHost ?: "",
         (o.httpProxyPort ?: 0).toString(),
+        forwards,
     ).joinToString(":")
 }

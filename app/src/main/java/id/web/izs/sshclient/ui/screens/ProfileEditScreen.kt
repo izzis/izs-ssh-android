@@ -804,7 +804,7 @@ private fun GeneralTab(
     }
     Text("Connection", style = MaterialTheme.typography.titleMedium)
     ConnectionDropdown(selected = connectionMode, onSelect = onConnectionMode)
-    if (connectionMode != "direct") {
+    if (connectionMode != "direct" && connectionMode != "socksProxy") {
         Text(
             "This connection type works on desktop. This device always connects directly.",
             style = MaterialTheme.typography.bodySmall,
@@ -944,14 +944,17 @@ private fun ColourSwatch(hex: String, isSelected: Boolean, onSelect: (String) ->
 private fun PortsTab(forwards: List<ForwardedPort>, onChange: (List<ForwardedPort>) -> Unit) {
     Text("Port forwarding", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Forward traffic between this device and the server. Forwarding is set up on desktop.",
+        "Local and Remote rules open when this device connects. " +
+            "Dynamic (SOCKS) stays desktop-only.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     for ((i, f) in forwards.withIndex()) {
         ForwardCard(
             f = f,
-            onUpdate = { onChange(forwards.toMutableList().also { it[i] = f }) },
+            // NOTE: the lambda must use its `updated` parameter — writing back
+            // the captured `f` makes every keystroke a no-op (fields uneditable).
+            onUpdate = { updated -> onChange(forwards.toMutableList().also { it[i] = updated }) },
             onRemove = { onChange(forwards.toMutableList().also { it.removeAt(i) }) },
         )
     }
@@ -1033,14 +1036,14 @@ private fun AdvancedTab(
     readyTimeoutText: String, onReadyTimeout: (String) -> Unit,
 ) {
     Text("Session", style = MaterialTheme.typography.titleMedium)
-    CheckRow("X11 forwarding", x11, onX11)
-    CheckRow("Forward SSH agent", agentForward, onAgentForward)
-    CheckRow("Skip banner", skipBanner, onSkipBanner)
+    CheckRow("X11 forwarding (desktop only)", x11, onX11)
+    CheckRow("Forward SSH agent (desktop only)", agentForward, onAgentForward)
+    CheckRow("Skip banner (desktop only)", skipBanner, onSkipBanner)
     CheckRow("Reuse session", reuseSession, onReuseSession)
     Text(
         "Reuse session shares one connection for all tabs of this profile. " +
-            "When off, every tab connects separately. The options above are " +
-            "stored for desktop and have no effect on this device.",
+            "When off, every tab connects separately. Options marked " +
+            "(desktop only) are stored for desktop and have no effect on this device.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1240,8 +1243,16 @@ private fun ConnectionDropdown(selected: String, onSelect: (String) -> Unit) {
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for ((value, title) in titles) {
+                // jumpHost / proxyCommand / httpProxy can't connect from this
+                // device (SOCKS can — it left the disabled list). They stay
+                // visible so values synced from desktop round-trip untouched,
+                // but switching INTO them from the phone is disabled — except
+                // the currently active mode, which must remain shown/selected
+                // or its value would look lost.
+                val enabled = value == "direct" || value == "socksProxy" || value == selected
                 DropdownMenuItem(
-                    text = { Text(title) },
+                    text = { Text(if (enabled) title else "$title (desktop only)") },
+                    enabled = enabled,
                     onClick = { onSelect(value); expanded = false },
                 )
             }
@@ -1292,8 +1303,8 @@ private fun GroupDropdown(
 @Composable
 private fun AuthDropdown(selected: String, onSelect: (String) -> Unit) {
     // Desktop parity (sshProfileSettings.component.pug:110-171): Auto is
-    // auth=null (try everything); the connect layer already tries password
-    // then keys regardless of this value.
+    // auth=null (try everything); an explicit choice restricts the methods
+    // at connect (agent errors clearly, interactive narrows to password).
     var expanded by remember { mutableStateOf(false) }
     val choices = listOf(
         "" to "Auto",
