@@ -377,7 +377,6 @@ fun TerminalScreen(
     var fontSp by remember { mutableStateOf(state.disk.terminalFontSp) }
     var ctrlSticky by remember { mutableStateOf(false) }
     var altSticky by remember { mutableStateOf(false) }
-    var copiedMsg by remember { mutableStateOf<String?>(null) }
     var showUnlock by remember { mutableStateOf(false) }
     var showCloseConfirm by remember { mutableStateOf(false) }
     // Battery-optimization exemption (background survival): offered once on
@@ -854,13 +853,6 @@ fun TerminalScreen(
             )
             } // ProfileChrome (tab ⋮ menus follow profile scheme)
         }
-        if (copiedMsg != null) {
-            Text(
-                copiedMsg!!,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-            )
-        }
         // Slim tappable transfer row: visible only while THIS session has
         // running transfers. Tap reopens the sheet; it never stops anything.
         if (sftpRunning.isNotEmpty()) {
@@ -905,13 +897,6 @@ fun TerminalScreen(
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
                 }
-            }
-        }
-        // Copy confirmations clear themselves; the next copy re-arms.
-        LaunchedEffect(copiedMsg) {
-            if (copiedMsg != null) {
-                delay(2500)
-                copiedMsg = null
             }
         }
         if (showNotifDialog) {
@@ -1222,7 +1207,6 @@ fun TerminalScreen(
                             scope.launch {
                                 clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("terminal", text)))
                             }
-                            copiedMsg = "Selection copied"
                         },
                         onPasteSelection = { text ->
                             // Bytes go straight out; the pipe is display-only

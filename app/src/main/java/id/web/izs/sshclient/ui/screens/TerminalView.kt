@@ -147,7 +147,9 @@ fun rememberTerminalFontFamily(font: TerminalFont): FontFamily {
  * above are compensated so the view stays on the same text.
  *
  * Text selection is born ONLY from a committed hold (word) or a
- * triple-tap (line) — plain drags never summon it. Two-stage hold: 300ms
+ * triple-tap (line) — plain drags never summon it, and neither do stolen
+ * system gestures (a back swipe lingering at the screen edge ends as
+ * "gone", never as a tap/release, so no phantom 1-char selection). Two-stage hold: 300ms
  * ticks haptically (release to commit the word, move to scroll); ~600ms
  * commits and extends the nearest endpoint until release, with edge-zone
  * auto-scroll. Summoning is vetoed once scrolled content moves. Endpoints
@@ -457,6 +459,12 @@ fun TerminalView(
         // real scroll travels far. Past this radius a hold becomes a scroll.
         // (Scroll-start itself is authoritative via userScrolled() below.)
         val holdSlopPx = with(density) { 24.dp.toPx() }
+        // System-gesture edge veto: Android back swipes start at the
+        // left/right screen edge and linger there (predictive-back
+        // preview). A hold born in that strip is a back gesture, not a
+        // word-select — summoning is vetoed for it (plain taps still
+        // focus). Genuine holds start further in.
+        val edgeVetoPx = with(density) { 24.dp.toPx() }
         val selNorm = remember(selAnchor, selFocus) { normEnds() }
         // Recomputed on output ticks too: the text under a live selection
         // can change while the user aims the handles.
@@ -605,8 +613,13 @@ fun TerminalView(
                 // live via State delegates / UpdatedState.
                 .pointerInput(Unit) {
                     // Selection is born ONLY from a committed hold (word) or a
-                    // triple-tap (line) — never from plain drags. Two-stage
-                    // hold: 300ms ticks haptically (keep holding to extend,
+                    // triple-tap (line) — never from plain drags, and never
+                    // from a stolen system gesture. Two guards: holds born in
+                    // the back-gesture edge strip cannot summon, and any
+                    // system-consumed change (ACTION_CANCEL claiming the
+                    // stream mid-linger) ends the gesture as "gone" — never a
+                    // tap, never a release. Two-stage hold: 300ms ticks
+                    // haptically (keep holding to extend,
                     // release to commit, move to scroll); ~600ms commits and
                     // extends the nearest endpoint until release. Summoning is
                     // vetoed the moment scrolled content actually moves.
@@ -615,6 +628,26 @@ fun TerminalView(
                     // gesture; nothing here ever consumes.
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        // Back-gesture guard, part 1 (origin): a press born
+                        // inside the system edge strip can never summon —
+                        // the finger is starting a back swipe, not a hold.
+                        // Taps from it still focus; only summoning is off.
+                        val summonAllowed = down.position.x > edgeVetoPx &&
+                            down.position.x < viewportW - edgeVetoPx
+                        if (!summonAllowed) {
+                            val slopHit = withTimeoutOrNull(300) {
+                                awaitTouchSlopOrCancellation(down.id) { _, _ -> }
+                            }
+                            if (slopHit == null) {
+                                val cur = currentEvent.changes.firstOrNull { it.id == down.id }
+                                // Genuine releases only: a system CANCEL that
+                                // stole the stream is consumed — never a tap.
+                                if (cur != null && !cur.pressed && !cur.isConsumed) {
+                                    handleTap(cur.position)
+                                }
+                            }
+                            return@awaitEachGesture
+                        }
                         // Scroll offsets at press time. During finger-down all
                         // programmatic snaps are frozen (touching gate), so ANY
                         // offset change below = the user scrolled — authoritative
@@ -651,7 +684,15 @@ fun TerminalView(
                         if (slopHit != null) return@awaitEachGesture
                         val cur = currentEvent.changes.firstOrNull { it.id == down.id }
                         if (cur == null || !cur.pressed) {
-                            if (cur != null) handleTap(cur.position)
+                            // Back-gesture guard, part 2 (stolen stream): a
+                            // system CANCEL (back/shade/home claiming the
+                            // gesture mid-linger) arrives consumed — it is a
+                            // stolen gesture, never a tap. Only a genuine,
+                            // unconsumed release taps (a vanished pointer is
+                            // likewise ignored, never counted).
+                            if (cur != null && !cur.pressed && !cur.isConsumed) {
+                                handleTap(cur.position)
+                            }
                             return@awaitEachGesture
                         }
                         // Held past 300ms: tick (the hold registered — keep
@@ -663,13 +704,17 @@ fun TerminalView(
                         hapticTick()
                         // "released" | "moved" | "gone" | "held" (second
                         // timeout = still holding = commit + extend below).
+                        // A consumed change = the system stole the stream
+                        // (ACTION_CANCEL): verdict "gone" — a stolen gesture
+                        // is never a release, so a back swipe held through
+                        // the preview can never summon a selection.
                         val stage2 = withTimeoutOrNull(300L) {
                             var verdict = "held"
                             var open = true
                             while (open) {
                                 val ev = awaitPointerEvent()
                                 val c = ev.changes.firstOrNull { it.id == down.id }
-                                if (c == null) {
+                                if (c == null || c.isConsumed) {
                                     verdict = "gone"
                                     open = false
                                 } else if (!c.pressed) {
@@ -796,9 +841,9 @@ fun TerminalView(
         // in the layout phase, so the bar tracks panning with zero
         // recomposition — scrolling stays pure GPU translation. The pill
         // carries an opaque container: transparent buttons vanish against
-        // terminal text. Paste sends the clipboard snapshot taken when the
-        // selection started, then clears (back to typing); Copy keeps the
-        // selection for adjusting.
+        // terminal text. Both buttons dismiss back to typing: Paste sends the
+        // clipboard snapshot taken when the selection started, Copy leaves
+        // the text on the clipboard.
         if (selecting && selNorm != null && (selText.isNotBlank() || pasteText.isNotEmpty())) {
             val (r0, _, r1, _) = selNorm
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -820,7 +865,13 @@ fun TerminalView(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     ) {
                         if (selText.isNotBlank()) {
-                            Button(onClick = { onCopyState.value(selText) }) { Text("Copy") }
+                            Button(
+                                onClick = {
+                                    onCopyState.value(selText)
+                                    clearSelection()
+                                    tapCount = 0
+                                },
+                            ) { Text("Copy") }
                         }
                         if (pasteText.isNotEmpty()) {
                             OutlinedButton(
