@@ -115,6 +115,7 @@ fun ColorSchemeSettingsScreen(
         runWrite {
             state.repo.updateTerminalSection { raw -> RawConfigStore.setTerminalColorScheme(raw, scheme) }
         }
+        state.notifySchemeChanged()
     }
 
     fun deleteCurrent() {
@@ -134,12 +135,14 @@ fun ColorSchemeSettingsScreen(
         source = v
         state.disk.colorSchemeSource =
             if (v == SchemeSource.LOCAL) ConfigDisk.SOURCE_LOCAL else ConfigDisk.SOURCE_SYNCED
+        state.notifySchemeChanged()
     }
 
     /** Device-only pick: instant pref write, no YAML, no vault, no spinner. */
     fun commitLocal(scheme: TerminalColorScheme?) {
         localSel = scheme
         state.disk.localColorSchemeJson = scheme?.toJsonString() ?: ""
+        state.notifySchemeChanged()
     }
 
     // Picker identity is by VALUE (data-class equals): a global object
@@ -172,8 +175,9 @@ fun ColorSchemeSettingsScreen(
         item(key = "header") { ScreenHeader("Colour scheme", onBack) }
         item(key = "blurb") {
             Text(
-                "Terminal colours only. The profile list and app theme keep " +
-                    "their own colours. Changes apply immediately, even to open sessions.",
+                "Terminal colours. With Settings > Appearance > Follow color scheme ON, " +
+                    "the app (top bar, dialogs, buttons, forms) follows the active scheme too. " +
+                    "Changes apply immediately, even to open sessions.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -27,14 +27,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -50,6 +54,7 @@ import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.AppViewModel
 import id.web.izs.sshclient.ui.resolveAppPalette
 import id.web.izs.sshclient.ui.rememberAppDarkTheme
+import id.web.izs.sshclient.ui.schemeToAppColorScheme
 import id.web.izs.sshclient.ui.SessionLimitReached
 import id.web.izs.sshclient.ui.SshSessionViewModel
 import id.web.izs.sshclient.ui.screens.AppearanceSettingsScreen
@@ -60,9 +65,12 @@ import id.web.izs.sshclient.ui.screens.ColorSchemeEditorScreen
 import id.web.izs.sshclient.ui.screens.ColorSchemeSettingsScreen
 import id.web.izs.sshclient.ui.screens.KeyboardLayoutScreen
 import id.web.izs.sshclient.core.config.IZS_DEFAULT_SCHEME
+import id.web.izs.sshclient.core.config.IZS_DEFAULT_LIGHT_SCHEME
 import id.web.izs.sshclient.core.config.SchemeSource
+import id.web.izs.sshclient.core.config.isFallbackScheme
 import id.web.izs.sshclient.core.config.parseSchemeJson
 import id.web.izs.sshclient.core.config.parseSchemeSource
+import id.web.izs.sshclient.core.config.resolveActiveScheme
 import id.web.izs.sshclient.core.config.toJsonString
 import id.web.izs.sshclient.ui.screens.CrashReportScreen
 import id.web.izs.sshclient.ui.screens.ProfileEditScreen
@@ -191,16 +199,48 @@ class MainActivity : ComponentActivity() {
                             appHolder.state = it
                             it.themeMode = disk.appTheme
                             it.paletteName = disk.appPalette
+                            it.followColorScheme = disk.followColorScheme
                         }
                 }
             }
             // App-chrome theme (Settings > Appearance, device-only): read
-            // as state so a change re-themes live. Dark preserves the
-            // previous always-dark look.
+            // as state so a change re-themes live. While followColorScheme
+            // is ON, colors derive from the active non-profile color scheme
+            // (same resolution as the terminal: synced YAML vs local device,
+            // no per-profile override); dark/light is automatic from the
+            // scheme luminance.
             val darkTheme = rememberAppDarkTheme(appState.themeMode)
             val palette = resolveAppPalette(appState.paletteName)
+            val appColorScheme = if (appState.followColorScheme) {
+                // schemeTick subscribes the root to scheme revisions (disk is
+                // not observable): changing the scheme re-themes live.
+                val schemeTick = appState.schemeVersion
+                val schemeSource = remember(schemeTick) { parseSchemeSource(appState.disk.colorSchemeSource) }
+                val deviceScheme = remember(schemeTick) { parseSchemeJson(appState.disk.localColorSchemeJson) }
+                val global = appState.loaded?.domain?.terminalColorScheme
+                val active =
+                    if (!darkTheme && isFallbackScheme(null, global, schemeSource, deviceScheme)) {
+                        IZS_DEFAULT_LIGHT_SCHEME
+                    } else {
+                        resolveActiveScheme(null, global, schemeSource, deviceScheme)
+                    }
+                schemeToAppColorScheme(active)
+            } else {
+                if (darkTheme) palette.dark else palette.light
+            }
+            // System status-bar icons (clock/wifi/battery/signal) follow the
+            // chrome background: dark on light schemes, light on dark ones —
+            // otherwise white icons vanish on a light background.
+            val useDarkSystemIcons = appColorScheme.background.luminance() > 0.5f
+            val rootView = LocalView.current
+            SideEffect {
+                WindowCompat.getInsetsController(window, rootView).apply {
+                    isAppearanceLightStatusBars = useDarkSystemIcons
+                    isAppearanceLightNavigationBars = useDarkSystemIcons
+                }
+            }
             MaterialTheme(
-                colorScheme = if (darkTheme) palette.dark else palette.light,
+                colorScheme = appColorScheme,
             ) {
                 var boot by remember { mutableStateOf<Boot>(Boot.Loading) }
                 var rebootCounter by remember { mutableStateOf(0) }
@@ -558,6 +598,7 @@ private fun AppNav(
                 deviceMode = isLocal,
                 onDeviceSave = { s ->
                     appState.disk.localColorSchemeJson = s.toJsonString()
+                    appState.notifySchemeChanged()
                 },
             )
         }

@@ -91,6 +91,7 @@ fun AppearanceSettingsScreen(
 ) {
     var theme by remember { mutableStateOf(state.disk.appTheme) }
     var palette by remember { mutableStateOf(state.disk.appPalette) }
+    var follow by remember { mutableStateOf(state.disk.followColorScheme) }
     var fontSp by remember { mutableFloatStateOf(state.disk.terminalFontSp) }
     val store = state.loaded?.store ?: emptyMap()
     var yamlFont by remember(state.loaded) {
@@ -131,6 +132,7 @@ fun AppearanceSettingsScreen(
             if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 theme = state.disk.appTheme
                 palette = state.disk.appPalette
+                follow = state.disk.followColorScheme
                 fontSp = state.disk.terminalFontSp
             }
         }
@@ -159,6 +161,12 @@ fun AppearanceSettingsScreen(
                 busy = false
             }
         }
+    }
+
+    fun commitFollow(v: Boolean) {
+        follow = v
+        state.disk.followColorScheme = v
+        state.followColorScheme = v
     }
 
     fun commitTheme(v: String) {
@@ -256,21 +264,43 @@ fun AppearanceSettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text("App theme", style = MaterialTheme.typography.titleMedium)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+                .clickable(enabled = !busy) { commitFollow(!follow) }
+                .padding(vertical = 4.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Follow color scheme",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "Top bar, dialogs, buttons and forms follow the active color scheme " +
+                        "(Tabby desktop parity). Dark/light is automatic; palettes below are ignored while on. " +
+                        "Inside a session whose profile sets its own scheme, the terminal top bar, " +
+                        "menus, SFTP and extra keys use that profile scheme; lists follow the active scheme.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = follow, enabled = !busy, onCheckedChange = { commitFollow(it) })
+        }
         RadioRow(
             selected = theme == ConfigDisk.THEME_SYSTEM,
-            enabled = !busy,
+            enabled = !busy && !follow,
             label = "System (follows the phone theme)",
             onClick = { commitTheme(ConfigDisk.THEME_SYSTEM) },
         )
         RadioRow(
             selected = theme == ConfigDisk.THEME_DARK,
-            enabled = !busy,
+            enabled = !busy && !follow,
             label = "Dark",
             onClick = { commitTheme(ConfigDisk.THEME_DARK) },
         )
         RadioRow(
             selected = theme == ConfigDisk.THEME_LIGHT,
-            enabled = !busy,
+            enabled = !busy && !follow,
             label = "Light",
             onClick = { commitTheme(ConfigDisk.THEME_LIGHT) },
         )
@@ -287,12 +317,12 @@ fun AppearanceSettingsScreen(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
-                    .clickable(enabled = !busy) { commitPalette(p.id) }
+                    .clickable(enabled = !busy && !follow) { commitPalette(p.id) }
                     .padding(vertical = 4.dp),
             ) {
                 RadioButton(
                     selected = palette == p.id,
-                    enabled = !busy,
+                    enabled = !busy && !follow,
                     onClick = { commitPalette(p.id) },
                 )
                 // Swatch: dark primary + light primary side by side, so
@@ -308,7 +338,7 @@ fun AppearanceSettingsScreen(
                 Text(
                     p.name,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (!busy) MaterialTheme.colorScheme.onSurface
+                    color = if (!busy && !follow) MaterialTheme.colorScheme.onSurface
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

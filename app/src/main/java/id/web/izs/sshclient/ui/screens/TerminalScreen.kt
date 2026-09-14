@@ -73,6 +73,8 @@ import id.web.izs.sshclient.ui.AuthPrompt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.focus.FocusRequester
@@ -121,6 +123,8 @@ import id.web.izs.sshclient.core.term.stepBytes
 import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.SshSessionViewModel
 import id.web.izs.sshclient.ui.rememberAppDarkTheme
+import id.web.izs.sshclient.ui.schemeToAppColorScheme
+import androidx.compose.material3.ColorScheme
 import id.web.izs.sshclient.ui.components.SessionTabDrawerContent
 import id.web.izs.sshclient.ui.components.SessionTabStrip
 import id.web.izs.sshclient.ui.components.TabDrawerFrame
@@ -308,6 +312,29 @@ fun TerminalScreen(
     // and the app surface below. The top bar keeps the themed surface.
     val stageBg = remember(displayScheme) {
         schemeColorArgb(displayScheme.background)?.let { Color(it) } ?: Color.Black
+    }
+    // Selected tab melts into the grid (desktop tab-header.active parity):
+    // same background as the stage, foreground from the scheme.
+    val stageFg = remember(displayScheme) {
+        schemeColorArgb(displayScheme.foreground)?.let { Color(it) } ?: Color.White
+    }
+    // The tab bar always stands apart from the terminal: lifted slightly
+    // off the scheme background (8% lighter when dark, 7% darker when
+    // light) — so even a pure black/white scheme keeps a hairline gap.
+    // The selected tab stays = terminal background (melts into the grid).
+    val tabBarBg = remember(stageBg, stageFg) {
+        if (stageBg.luminance() < 0.5f) Color.White.copy(alpha = 0.08f).compositeOver(stageBg)
+        else Color.Black.copy(alpha = 0.07f).compositeOver(stageBg)
+    }
+    // Per-profile local chrome (follow toggle ON + the profile sets its own
+    // scheme): top bar, tab strips/menus, SFTP, extra keys, command box.
+    // Shared app + profile lists follow the active non-profile scheme.
+    val profileColors: ColorScheme? = remember(state.followColorScheme, profile.terminalColorScheme) {
+        if (state.followColorScheme && profile.terminalColorScheme != null) {
+            schemeToAppColorScheme(profile.terminalColorScheme)
+        } else {
+            null
+        }
     }
     // Terminal font (`terminal.font` YAML, Settings > Appearance): resolved
     // live so returning from Settings applies instantly. SYSTEM renders
@@ -676,6 +703,7 @@ fun TerminalScreen(
         // active tab's ⋮ (or a floating ⋮ when tabs are off). System Back
         // still leaves via the BackHandler above, sessions stay alive.
         if (!hideHeader) {
+        ProfileChrome(profileColors) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -686,11 +714,19 @@ fun TerminalScreen(
                 // Drawer mode: the arrow becomes the hamburger that opens
                 // the tab drawer on the YAML side. System Back still = home.
                 IconButton(onClick = { drawerOpen = true }) {
-                    Icon(Icons.Filled.Menu, contentDescription = "Open tabs")
+                    Icon(
+                        Icons.Filled.Menu,
+                        contentDescription = "Open tabs",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             } else {
                 IconButton(onClick = { onBack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back. Session stays connected.")
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back. Session stays connected.",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }            // Status dot sits on the NAME row so user@host below gets the
             // full width (green = connected, amber = connecting, red =
@@ -700,6 +736,7 @@ fun TerminalScreen(
                     Text(
                         profile.name,
                         style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -743,11 +780,16 @@ fun TerminalScreen(
                 Icon(
                     if (boxMode) Icons.Filled.Terminal else Icons.Filled.Keyboard,
                     contentDescription = if (boxMode) "Switch to direct typing" else "Switch to command box",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Box {
                 IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "Terminal options")
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "Terminal options",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     SessionOptionsItems(
@@ -767,10 +809,13 @@ fun TerminalScreen(
                     )
                 }
             }
+        } // ProfileChrome (per-profile, minimal)
         } // if (!hideHeader)
         }
         // tabsLocation=top: strip under the header, above everything else.
+        // Profile-scoped: tab ⋮ menus inherit the session profile scheme.
         if (tabLoc == TabLocation.TOP) {
+            ProfileChrome(profileColors) {
             SessionTabStrip(
                 sessions = tabs,
                 selectedId = sessionId,
@@ -784,6 +829,11 @@ fun TerminalScreen(
                 tabMenuFor = tabMenuFor,
                 onOptionsOpen = { tabMenuFor = it },
                 onOptionsDismiss = { tabMenuFor = null },
+                containerColor = tabBarBg,
+                selectedTabColor = stageBg,
+                selectedTabContent = stageFg,
+                unselectedTabContent = stageFg.copy(alpha = 0.6f),
+                squareMergeBottom = true,
                 optionsContent = {
                     SessionOptionsItems(
                         hasShell = hasShell,
@@ -802,6 +852,7 @@ fun TerminalScreen(
                     )
                 },
             )
+            } // ProfileChrome (tab ⋮ menus follow profile scheme)
         }
         if (copiedMsg != null) {
             Text(
@@ -1194,8 +1245,9 @@ fun TerminalScreen(
                 }
                 // tabsLocation=bottom: strip between the grid and the extra
                 // keys — a layout sibling, so the grid shrinks instead of
-                // sliding behind it.
+                // sliding behind it. Profile-scoped like the top strip.
                 if (tabLoc == TabLocation.BOTTOM) {
+                    ProfileChrome(profileColors) {
                     SessionTabStrip(
                         sessions = tabs,
                         selectedId = sessionId,
@@ -1209,6 +1261,11 @@ fun TerminalScreen(
                         tabMenuFor = tabMenuFor,
                         onOptionsOpen = { tabMenuFor = it },
                         onOptionsDismiss = { tabMenuFor = null },
+                        containerColor = tabBarBg,
+                        selectedTabColor = stageBg,
+                        selectedTabContent = stageFg,
+                        unselectedTabContent = stageFg.copy(alpha = 0.6f),
+                        squareMergeTop = true,
                         optionsContent = {
                             SessionOptionsItems(
                                 hasShell = hasShell,
@@ -1227,46 +1284,34 @@ fun TerminalScreen(
                             )
                         },
                     )
+                    } // ProfileChrome (tab ⋮ menus follow profile scheme)
                 }
                 // Docked extra-keys bar (user-editable layout, same composable
                 // as the editor preview): layout sibling below the grid, so
-                // the grid can never slide behind it.
+                // the grid can never slide behind it. Profile-scoped like the
+                // top bar: background + key labels follow the session profile
+                // scheme, not the global app theme.
                 if (!boxMode && showKeys) {
-                    ExtraKeysBar(
-                        layout = keyLayout,
-                        enabled = hasShell,
-                        ctrlActive = ctrlSticky,
-                        altActive = altSticky,
-                        onSendSteps = { sendKeySteps(it) },
-                        onToggleCtrl = { ctrlSticky = !ctrlSticky },
-                        onToggleAlt = { altSticky = !altSticky },
-                        modifier = Modifier.onSizeChanged { dockedBarH = it.height.toFloat() },
-                    )
+                    ProfileChrome(profileColors) {
+                        ExtraKeysBar(
+                            layout = keyLayout,
+                            enabled = hasShell,
+                            ctrlActive = ctrlSticky,
+                            altActive = altSticky,
+                            onSendSteps = { sendKeySteps(it) },
+                            onToggleCtrl = { ctrlSticky = !ctrlSticky },
+                            onToggleAlt = { altSticky = !altSticky },
+                            modifier = Modifier.onSizeChanged { dockedBarH = it.height.toFloat() },
+                        )
+                    }
                 }
                 if (boxMode) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth()
-                            .onSizeChanged { dockedBarH = it.height.toFloat() },
-                        shape = RectangleShape,
-                        color = Color.Black,
-                    ) {
-                        Column {
-                            HorizontalDivider(thickness = 1.dp, color = Color.White.copy(alpha = 0.1f))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                            ) {
-                        OutlinedTextField(
-                            value = boxInput,
-                            onValueChange = { boxInput = it },
-                            label = { Text("$ ") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            enabled = hasShell,
-                        )
-                        IconButton(
-                            enabled = hasShell && boxInput.isNotBlank(),
-                            onClick = {
+                    ProfileChrome(profileColors) {
+                        BoxModeBar(
+                            boxInput = boxInput,
+                            onInput = { boxInput = it },
+                            hasShell = hasShell,
+                            onSend = {
                                 val line = boxInput
                                 boxInput = ""
                                 scope.launch {
@@ -1277,14 +1322,11 @@ fun TerminalScreen(
                                     }
                                 }
                             },
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                            }
-                        }
+                            onDocked = { dockedBarH = it },
+                        )
                     }
                 }
             }
-        }
         }
         if (!boxMode) {
             // Hidden pipe: a 1dp state-based field under the platform
@@ -1352,11 +1394,13 @@ fun TerminalScreen(
     }
 
     if (showSftp) {
-        SftpSheet(
-            sessionViewModel = sessionViewModel,
-            sessionId = sessionId,
-            onDismiss = { showSftp = false },
-        )
+        ProfileChrome(profileColors) {
+            SftpSheet(
+                sessionViewModel = sessionViewModel,
+                sessionId = sessionId,
+                onDismiss = { showSftp = false },
+            )
+        }
     }
 
     if (showCloseConfirm) {        AlertDialog(
@@ -1458,11 +1502,13 @@ fun TerminalScreen(
         )
         } // Column — full-bleed stage
         // Floating ⋮ (hidden header + tabs off only): the single surviving
-        // chrome, opening the shared session menu. Drag it to park it in
-        // any corner (bottom parks above the extra keys); the anchor
+        // chrome, opening the shared session menu. Profile-scoped so the
+        // button + menu follow the session profile scheme. Drag it to park
+        // it in any corner (bottom parks above the extra keys); the anchor
         // persists in ConfigDisk across restarts. Taps still open the
         // menu — only post-slop drags are consumed.
         if (hideHeader && tabLoc == TabLocation.OFF) {
+            ProfileChrome(profileColors) {
             var fabBottom by remember { mutableStateOf(state.disk.fabAtBottom) }
             var fabLeft by remember { mutableStateOf(state.disk.fabAtLeft) }
             var fabDragX by remember { mutableFloatStateOf(0f) }
@@ -1535,6 +1581,7 @@ fun TerminalScreen(
                     }
                 }
             }
+            } // ProfileChrome (floating ⋮ follows profile scheme)
         }
     } // options Box overlay
     } // TabDrawerFrame
@@ -1560,6 +1607,8 @@ fun TerminalScreen(
     }
 
     if (showNewTabSheet) {
+        // Profile lists follow the active non-profile scheme (root theme) —
+        // deliberately outside ProfileChrome (that one is for session chrome).
         NewTabSheet(
             state = state,
             onPick = { pid ->
@@ -1620,6 +1669,68 @@ fun TerminalScreen(
             onConnect = { pw, remember -> doConnectWithPassword(pw, remember) },
             onCancel = { sessionViewModel.cancelAuthPrompt(sessionId, state) },
         )
+    }
+}
+
+/**
+ * Nested per-profile session chrome (follow toggle ON + the profile sets its
+ * own scheme): null = follow the shared theme (no nesting). Non-null = this
+ * session's chrome (top bar, tab ⋮ menus, SFTP, extra keys, command box)
+ * uses the profile colors; outer lists/screens keep the non-profile scheme.
+ */
+@Composable
+private fun ProfileChrome(
+    colors: ColorScheme?,
+    content: @Composable () -> Unit,
+) {
+    if (colors != null) MaterialTheme(colorScheme = colors) { content() } else content()
+}
+
+/**
+ * Command-box bar (boxMode): input + send over the terminal. Reads theme
+ * colors explicitly so it follows ProfileChrome (session profile scheme)
+ * instead of the ambient root content colors.
+ */
+@Composable
+private fun BoxModeBar(
+    boxInput: String,
+    onInput: (String) -> Unit,
+    hasShell: Boolean,
+    onSend: () -> Unit,
+    onDocked: (Float) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth()
+            .onSizeChanged { onDocked(it.height.toFloat()) },
+        shape = RectangleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column {
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            ) {
+                OutlinedTextField(
+                    value = boxInput,
+                    onValueChange = onInput,
+                    label = { Text("$ ") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    enabled = hasShell,
+                )
+                IconButton(
+                    enabled = hasShell && boxInput.isNotBlank(),
+                    onClick = onSend,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 

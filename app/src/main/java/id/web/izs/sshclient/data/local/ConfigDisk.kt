@@ -291,6 +291,16 @@ class ConfigDisk(context: Context) {
         set(v) = prefs().edit().putString(KEY_APP_PALETTE, v).apply()
 
     /**
+     * Match the app appearance to the active color scheme (Settings >
+     * Appearance, Tabby desktop "Follow the color scheme" parity).
+     * Device-only, never synced. Defaults to false so existing installs
+     * see no sudden visual change (opt-in).
+     */
+    var followColorScheme: Boolean
+        get() = prefs().getBoolean(KEY_FOLLOW_SCHEME, false)
+        set(v) = prefs().edit().putBoolean(KEY_FOLLOW_SCHEME, v).apply()
+
+    /**
      * Tab-location source priority (Settings > Window). "follow" (default) =
      * the synced `appearance.tabsLocation` YAML wins; "local" = this device's
      * own [localTabLocation] wins and YAML is ignored for display. Local
@@ -447,6 +457,7 @@ class ConfigDisk(context: Context) {
         const val THEME_LIGHT = "light"
         const val KEY_APP_PALETTE = "appearance.appPalette"
         const val PALETTE_IZS = "izs"
+        const val KEY_FOLLOW_SCHEME = "appearance.followColorScheme"
         /** Hard ceiling for [maxSessions]: 10 sockets + histories is the most a phone should hold. */
         const val MAX_SESSIONS_HARD_MAX = 10
 

@@ -120,6 +120,16 @@ fun SessionTabItem(
     onOptionsOpen: () -> Unit = {},
     onOptionsDismiss: () -> Unit = {},
     optionsContent: @Composable ColumnScope.() -> Unit = {},
+    // Desktop tab-header parity: the SELECTED tab shares the terminal
+    // background so it melts into the grid (no seam bar). Nulls = legacy
+    // M3 look (drawer keeps it).
+    selectedContainer: Color? = null,
+    selectedContent: Color? = null,
+    unselectedContent: Color? = null,
+    // Merge edge toward the grid: square corners on that side so the box
+    // color flows into the terminal (top strip = square bottom).
+    squareBottom: Boolean = false,
+    squareTop: Boolean = false,
 ) {
     val status by handle.status.collectAsState()
     val activity by handle.activity.collectAsState()
@@ -133,14 +143,21 @@ fun SessionTabItem(
             else Modifier.width(IntrinsicSize.Max),
         ),
     ) {
-        // Rounded tab box: the tint, the tap target, and the profile
-        // colorbar share one 8.dp clip, so the bar hugs the box bottom
-        // instead of floating below it as a detached line.
+        // Tabby tab-header parity: rounded on the outer side, square on
+        // the merge edge so the selected box flows into the terminal.
+        // Unselected tabs are boxless (transparent, dimmed text).
+        val boxShape = when {
+            selected && squareBottom ->
+                RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
+            selected && squareTop ->
+                RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
+            else -> RoundedCornerShape(8.dp)
+        }
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(boxShape)
                 .background(
-                    if (selected) MaterialTheme.colorScheme.secondaryContainer
+                    if (selected) selectedContainer ?: MaterialTheme.colorScheme.secondaryContainer
                     else Color.Transparent,
                 )
                 .clickable { onSelect(handle.sessionId) },
@@ -157,8 +174,8 @@ fun SessionTabItem(
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
-                        else MaterialTheme.colorScheme.onSurface,
+                        color = if (selected) selectedContent ?: MaterialTheme.colorScheme.onSecondaryContainer
+                        else unselectedContent ?: MaterialTheme.colorScheme.onSurface,
                         modifier = if (fillMaxWidth) Modifier.weight(1f) else Modifier.widthIn(max = 140.dp),
                     )
                     // ⋮ and × sit in their own tight cluster (2.dp): the row-wide
@@ -238,12 +255,29 @@ fun SessionTabStrip(
     onOptionsOpen: (String) -> Unit = {},
     onOptionsDismiss: () -> Unit = {},
     optionsContent: @Composable ColumnScope.() -> Unit = {},
+    // Seamless mode (terminal strips): selected tab in terminal colors,
+    // unselected tabs boxless (transparent, dimmed text). Null container =
+    // legacy surface band.
+    containerColor: Color? = null,
+    selectedTabColor: Color? = null,
+    selectedTabContent: Color? = null,
+    unselectedTabContent: Color? = null,
+    squareMergeBottom: Boolean = false,
+    squareMergeTop: Boolean = false,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, modifier = modifier.fillMaxWidth()) {
+    Surface(color = containerColor ?: MaterialTheme.colorScheme.surface, modifier = modifier.fillMaxWidth()) {
+        // Merge edge flush with the grid: no padding on that side, so the
+        // selected box (square on the merge edge) touches the terminal
+        // with no band/bar between. Unselected tabs keep the legacy look.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.horizontalScroll(scroll).padding(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.horizontalScroll(scroll).padding(
+                start = 8.dp,
+                end = 8.dp,
+                top = if (squareMergeTop) 0.dp else 2.dp,
+                bottom = if (squareMergeBottom) 0.dp else 2.dp,
+            ),
         ) {
             for (h in sessions) {
                 key(h.sessionId) {
@@ -261,6 +295,11 @@ fun SessionTabStrip(
                         onOptionsOpen = { onOptionsOpen(h.sessionId) },
                         onOptionsDismiss = onOptionsDismiss,
                         optionsContent = optionsContent,
+                        selectedContainer = selectedTabColor,
+                        selectedContent = selectedTabContent,
+                        unselectedContent = unselectedTabContent,
+                        squareBottom = squareMergeBottom,
+                        squareTop = squareMergeTop,
                     )
                     if (h.sessionId == selectedId) {
                         LaunchedEffect(h.sessionId) {
@@ -399,7 +438,7 @@ fun TabDrawerFrame(
         ) {
             Box(
                 Modifier.fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.32f))
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,

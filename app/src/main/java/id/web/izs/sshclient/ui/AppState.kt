@@ -40,6 +40,24 @@ class AppState(
      * MainActivity alongside [themeMode].
      */
     var paletteName by mutableStateOf(ConfigDisk.PALETTE_IZS)
+    /**
+     * Match the app appearance to the color scheme ([ConfigDisk.followColorScheme]
+     * mirror): observable so a change re-themes live. Initialized from disk
+     * in MainActivity.
+     */
+    var followColorScheme by mutableStateOf(false)
+    /**
+     * Color-scheme display revision (Settings > Color scheme): disk writes
+     * (source/local) are not observable, so every scheme commit bumps this
+     * for the theme root (MainActivity) to recompose immediately — no
+     * off/on toggle needed. YAML writes already go through adopt(loaded).
+     */
+    var schemeVersion by mutableStateOf(0)
+        private set
+
+    fun notifySchemeChanged() {
+        schemeVersion++
+    }
     var loading by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)

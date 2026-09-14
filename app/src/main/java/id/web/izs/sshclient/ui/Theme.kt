@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import id.web.izs.sshclient.data.local.ConfigDisk
 
 /**
@@ -237,6 +238,153 @@ val AppPalettes = listOf(
 /** Resolves a palette id; unknown garbage falls back to Izs. */
 fun resolveAppPalette(id: String?): AppPalette =
     AppPalettes.find { it.id == id } ?: AppPalettes.first()
+
+/**
+ * Match the app appearance to the color scheme (Tabby desktop "Follow the
+ * color scheme" parity: `themes.service.ts applyThemeVariables`).
+ *
+ * Agreed rules:
+ * - Source = the active non-profile color scheme (synced YAML vs local
+ *   device, same resolution as the terminal — no per-profile override).
+ * - Dark/light is automatic from luminance (`bg < fg` = dark); the App
+ *   theme System/Dark/Light setting is ignored while the toggle is ON.
+ * - Full-style: background/surface + container ramp + primary/error come
+ *   from the scheme, so the top bar (`surface`), dialogs/menus
+ *   (`surfaceContainerHigh`), buttons (`primary`) and forms
+ *   (`surfaceContainerHighest` + focused `primary`) follow automatically —
+ *   no per-screen hardcoded colors.
+ */
+fun isSchemeDark(scheme: id.web.izs.sshclient.core.config.TerminalColorScheme): Boolean {
+    val bg = id.web.izs.sshclient.core.config.schemeColorArgb(scheme.background)?.let { Color(it) }
+        ?: return true
+    val fg = id.web.izs.sshclient.core.config.schemeColorArgb(scheme.foreground)?.let { Color(it) }
+        ?: return true
+    return bg.luminance() < fg.luminance()
+}
+
+private fun mix(a: Color, b: Color, ratio: Float): Color {
+    val r = ratio.coerceIn(0f, 1f)
+    return Color(
+        red = a.red + (b.red - a.red) * r,
+        green = a.green + (b.green - a.green) * r,
+        blue = a.blue + (b.blue - a.blue) * r,
+        alpha = a.alpha + (b.alpha - a.alpha) * r,
+    )
+}
+
+private fun onColorFor(container: Color): Color =
+    if (container.luminance() > 0.5f) Color(0xFF1D1E23) else Color.White
+
+fun schemeToAppColorScheme(
+    scheme: id.web.izs.sshclient.core.config.TerminalColorScheme,
+): ColorScheme {
+    val bg = id.web.izs.sshclient.core.config.schemeColorArgb(scheme.background)?.let { Color(it) }
+        ?: return IzsDarkColors
+    val fg = id.web.izs.sshclient.core.config.schemeColorArgb(scheme.foreground)?.let { Color(it) }
+        ?: return IzsDarkColors
+    val dark = bg.luminance() < fg.luminance()
+    fun slot(i: Int, fallback: Color): Color =
+        scheme.colors.getOrNull(i)?.let { id.web.izs.sshclient.core.config.schemeColorArgb(it) }
+            ?.let { Color(it) } ?: fallback
+
+    // accentIndex=4 ala desktop; danger=colors[1].
+    val accent = slot(4, if (dark) Color(0xFFA8C7FA) else Color(0xFF0B57D0))
+    val error = slot(1, Color(0xFFB00020))
+    val tertiary = slot(2, if (dark) Color(0xFF8BD5A6) else Color(0xFF146C2E))
+    // Desktop-style secondary: less(bg) — stays neutral, off the bg.
+    val secondary = mix(bg, fg, if (dark) 0.55f else 0.45f)
+
+    val primaryContainer = mix(accent, bg, if (dark) 0.55f else 0.7f)
+    val secondaryContainer = mix(secondary, bg, if (dark) 0.5f else 0.7f)
+    val tertiaryContainer = mix(tertiary, bg, if (dark) 0.55f else 0.7f)
+    val errorContainer = mix(error, bg, if (dark) 0.55f else 0.75f)
+
+    val surfaceVariant = mix(bg, fg, 0.10f)
+    val outline = mix(bg, fg, 0.30f)
+    val outlineVariant = mix(bg, fg, 0.14f)
+    // Elevation ramp follows M3 (dark: brighter when higher, light: darker).
+    val lowest = if (dark) mix(bg, Color.Black, 0.25f) else bg
+    val low = if (dark) mix(bg, Color.Black, 0.10f) else mix(bg, Color.Black, 0.03f)
+    val container = if (dark) mix(bg, fg, 0.06f) else mix(bg, Color.Black, 0.05f)
+    val high = if (dark) mix(bg, fg, 0.12f) else mix(bg, Color.Black, 0.08f)
+    val highest = if (dark) mix(bg, fg, 0.18f) else mix(bg, Color.Black, 0.11f)
+
+    return if (dark) {
+        darkColorScheme(
+            background = bg,
+            onBackground = fg,
+            surface = bg,
+            onSurface = fg,
+            surfaceVariant = surfaceVariant,
+            onSurfaceVariant = mix(fg, bg, 0.30f),
+            surfaceContainerLowest = lowest,
+            surfaceContainerLow = low,
+            surfaceContainer = container,
+            surfaceContainerHigh = high,
+            surfaceContainerHighest = highest,
+            surfaceTint = accent,
+            primary = accent,
+            onPrimary = onColorFor(accent),
+            primaryContainer = primaryContainer,
+            onPrimaryContainer = onColorFor(primaryContainer),
+            secondary = secondary,
+            onSecondary = onColorFor(secondary),
+            secondaryContainer = secondaryContainer,
+            onSecondaryContainer = onColorFor(secondaryContainer),
+            tertiary = tertiary,
+            onTertiary = onColorFor(tertiary),
+            tertiaryContainer = tertiaryContainer,
+            onTertiaryContainer = onColorFor(tertiaryContainer),
+            error = error,
+            onError = onColorFor(error),
+            errorContainer = errorContainer,
+            onErrorContainer = onColorFor(errorContainer),
+            outline = outline,
+            outlineVariant = outlineVariant,
+            inverseSurface = fg,
+            inverseOnSurface = bg,
+            inversePrimary = accent,
+            scrim = Color.Black,
+        )
+    } else {
+        lightColorScheme(
+            background = bg,
+            onBackground = fg,
+            surface = bg,
+            onSurface = fg,
+            surfaceVariant = surfaceVariant,
+            onSurfaceVariant = mix(fg, bg, 0.30f),
+            surfaceContainerLowest = lowest,
+            surfaceContainerLow = low,
+            surfaceContainer = container,
+            surfaceContainerHigh = high,
+            surfaceContainerHighest = highest,
+            surfaceTint = accent,
+            primary = accent,
+            onPrimary = onColorFor(accent),
+            primaryContainer = primaryContainer,
+            onPrimaryContainer = onColorFor(primaryContainer),
+            secondary = secondary,
+            onSecondary = onColorFor(secondary),
+            secondaryContainer = secondaryContainer,
+            onSecondaryContainer = onColorFor(secondaryContainer),
+            tertiary = tertiary,
+            onTertiary = onColorFor(tertiary),
+            tertiaryContainer = tertiaryContainer,
+            onTertiaryContainer = onColorFor(tertiaryContainer),
+            error = error,
+            onError = onColorFor(error),
+            errorContainer = errorContainer,
+            onErrorContainer = onColorFor(errorContainer),
+            outline = outline,
+            outlineVariant = outlineVariant,
+            inverseSurface = fg,
+            inverseOnSurface = bg,
+            inversePrimary = accent,
+            scrim = Color.Black,
+        )
+    }
+}
 
 /**
  * Effective dark mode for an app-theme pref value (System/Dark/Light).
