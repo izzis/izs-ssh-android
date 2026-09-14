@@ -8,6 +8,7 @@ Tabby profiles, unlock the vault once, and ssh from your phone.
 Unofficial, independent project — not affiliated with or endorsed by the
 Tabby Developers. MIT licensed, see [LICENSE](LICENSE).
 Design doc: [ARCHITECTURE.md](ARCHITECTURE.md).
+Release flow: [RELEASE.md](RELEASE.md).
 
 ## Features
 
@@ -26,7 +27,10 @@ Design doc: [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Port forwarding** — Local/Remote rules open at connect (desktop parity);
   Dynamic (SOCKS) stays desktop-only with a clear message.
 - **Appearance** — app theme + palettes, terminal font/cursor, 100+ color
-  schemes with per-profile overrides.
+  schemes with per-profile overrides, Follow color scheme (whole app
+  theme derived from the active scheme).
+- **Updates** — manual update check against GitHub Releases from About
+  (sideloaded builds get no store updates; no background polling).
 - **Background survival** — foreground service with per-host notification,
   auto-retry once after a kill.
 
@@ -67,17 +71,3 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 Zero-warning policy: main + test sourcesets must compile with 0 warnings.
 Fix the cause first; `@Suppress` is a last resort and must carry a comment
 saying why it is safe and what would remove it.
-
-## Release build (on demand)
-
-APKs are built manually via GitHub Actions — never per commit:
-
-1. `Actions` tab → **Build APK release** → `Run workflow`.
-2. Enter the tag (e.g. `v1.0.0`) — it becomes the GitHub Release, the
-   `versionName`, and the APK filename, with auto-generated changelog.
-3. Download from the run's artifacts or the `Releases` page.
-
-Signing key lives in `Settings → Secrets and variables → Actions`
-(`ANDROID_KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
-`KEY_PASSWORD`). The local `release.jks` + `keystore.properties` are
-gitignored — back them up, losing the key means no more Play updates.

@@ -1,7 +1,7 @@
 # ARCHITECTURE — ssh-client-android
 
 Native Android SSH client (`id.web.izs.sshclient`, "izs SSH") with **Tabby
-terminal Config Sync parity** plus a Termux-like interactive PTY terminal.
+terminal ([Eugeny/tabby](https://github.com/Eugeny/tabby)) Config Sync parity** plus a Termux-like interactive PTY terminal.
 Single module (`:app`), Kotlin + Jetpack Compose, no WebView.
 
 Upstream references (behavioral parity, not code):
@@ -45,10 +45,16 @@ app/src/main/java/id/web/izs/sshclient/
                                     background mirror (serviceSync/lostListener, single auto-retry per transport death)
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
     Theme.kt                      AppPalettes (Izs/Ocean/Forest/Sunset/Grape dark+light;
-                                  shared Izs surfaces) + resolveAppPalette; terminal
-                                  stage + key bar excluded by design)
+                                  shared Izs surfaces) + resolveAppPalette;
+                                  Follow color scheme (`schemeToAppColorScheme`:
+                                  full M3 theme from the active non-profile
+                                  scheme, dark/light auto from luminance;
+                                  opt-in, device-only)
     screens/
       ScreenHeader.kt           Shared sub-screen top bar (back arrow + title)
+      AboutScreen.kt              Version + email feedback + source-code link +
+                                  manual GitHub Releases update check (manual
+                                  only, no background polling)
       ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only)
       ProfileListScreen.kt        Home: single LazyColumn (header + Active + Recent +
                                   sticky search + profiles share one scroll, so long
@@ -73,7 +79,12 @@ app/src/main/java/id/web/izs/sshclient/
                                    unlock-routed deferred vault save),
                                    hide-terminal-header mode (options to active-tab ⋮;
                                    floating ⋮ when tabs are off — draggable to any
-                                   corner, anchor persisted in ConfigDisk)
+                                    corner, anchor persisted in ConfigDisk);
+                                    per-profile session chrome via nested
+                                    ProfileChrome (top bar, tab strips/menus,
+                                    SFTP, extra keys, command box — lists stay
+                                    on the shared scheme); Copy stays silent
+                                    (no banner)
       SftpSheet.kt                SFTP browser + transfers as a bottom sheet over the terminal
                                    (half by position via SheetState initial Partial, list
                                    fills sheet height so loads never balloon it, draggable
@@ -81,9 +92,16 @@ app/src/main/java/id/web/izs/sshclient/
                                    same-name Overwrite/Keep-both/Cancel dialog (dir frozen
                                    at pick time), per-item Cancel, Clear finished.
                                    UI-only: dismiss/back touches no transfer.
-      TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells
+      TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells;
+                                  hold/triple-tap selection with back-gesture
+                                  guards + dismissing Copy/Paste pill
       TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance)
       AppearanceSettingsScreen.kt App theme (device-only) + terminal font/cursor (YAML) + font size + live preview
+                                  + Follow-color-scheme toggle (disables
+                                  theme/palette while on)
+      ColorSchemeSettingsScreen.kt Global/local scheme source + editor entry;
+                                  commits bump `AppState.schemeVersion` for a
+                                  live re-theme
       WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right;
                                    New-tab mode (profile list vs quick-pick sheet, device-only pref);
                                    Hide-terminal-header toggle (device-only pref, whole-row tap)
@@ -340,8 +358,11 @@ the IME:
 
 ## 7. UI conventions
 
-- English-only UI strings/comments; dark-only theme (`IzsDarkColors`,
-  terminal follows the active scheme background, themed surfaces, black docked key bars).
+- English-only UI strings/comments; app theme (System/Dark/Light) +
+  palettes + Follow color scheme (`Theme.schemeToAppColorScheme`: the full
+  M3 theme derives from the active non-profile scheme, dark/light
+  automatic from luminance; session chrome follows the profile scheme via
+  a nested `ProfileChrome`, lists follow the shared scheme).
 - All sub-screens share `ScreenHeader` (back arrow + title); the terminal
   header matches it (themed surface) with a status dot on the name row —
   green = connected, amber = connecting, red = disconnected. The dot always
@@ -381,20 +402,22 @@ the IME:
   password / key i-of-n / shell / login scripts) instead of a spinner, with
   Cancel at the far right aborting the in-flight job (quiet, never a failure).
 - Text selection: born ONLY from a committed hold (word) or a triple-tap
-  (line). Two-stage hold: 300ms ticks haptically (release = commit word,
-  move = scroll); ~600ms commits and extends the nearest endpoint until
-  release. Summoning is vetoed once scrolled content moves (24dp drift
-  backstop for clamped edges). Endpoints also move via immediate handle
-  drags (press-on-handle locks scroll at down); edge-zone auto-scroll. Endpoints move via immediate handle drags (a press on a
-  handle locks scroll at down, so no second hold is needed; dragging into
-  the edge zone auto-scrolls).
-  Scroll stays on even while selecting (it locks only for an armed endpoint
-  drag); tap clears. Copy/Paste float above the selection in an opaque
-  pill (below when no room; Paste sends the clipboard to the session,
-  mirrors it into the input buffer so backspace keeps working, and refocuses
-  the keyboard).
-  While selecting, user scrolling is off, output-follow freezes, tap clears;
-  absolute rows are scroll-stable so handles track the text (a history
+  (line) — never from plain drags, and never from a stolen system
+  gesture. Two guards: holds born in the back-gesture edge strip (24dp)
+  cannot summon, and a system-consumed stream (ACTION_CANCEL claiming a
+  lingering gesture) ends as "gone" — never a tap, never a release — so a
+  back swipe leaves no phantom selection. Two-stage hold: 300ms ticks
+  haptically (release = commit word, move = scroll); ~600ms commits and
+  extends the nearest endpoint until release. Summoning is vetoed once
+  scrolled content moves (24dp drift backstop for clamped edges).
+  Endpoints also move via immediate handle drags (a press on a handle
+  locks scroll at down, so no second hold is needed; dragging into the
+  edge zone auto-scrolls). Scroll stays on even while selecting (it locks
+  only for an armed endpoint drag); output-follow freezes; tap clears.
+  Copy/Paste float above the selection in an opaque pill (below when no
+  room); both dismiss back to typing (Copy stays silent — no banner).
+  Paste sends the clipboard to the session and refocuses the keyboard.
+  Absolute rows are scroll-stable so handles track the text (a history
   shrink, resize, font change, or alt-buffer switch drops the selection).
 - **Sync target (YAML-only):** host/token/configID live ONLY in YAML >
   `configSync` (outer shell, readable while locked — desktop parity) and are
@@ -450,9 +473,9 @@ the IME:
 ## 9. Background survival (SessionService)
 
 sshj runs as threads inside our own process — no forked children, so
-Android 12's phantom-process killer does not apply (unlike Termux, which
-forks real shells). The remaining enemy is plain background-process death
-(Doze, App Standby, OEM task killers), countered in four layers:
+Android 12's phantom-process killer does not apply. The remaining enemy
+is plain background-process death (Doze, App Standby, OEM task killers),
+countered in four layers:
 
 1. **Foreground-service anchor** (`core/session/SessionService`,
    `specialUse` + subtype property for API 34+/targetSdk 36; sideloaded so
@@ -585,8 +608,9 @@ forks real shells). The remaining enemy is plain background-process death
   `terminal.schemeSource`/`localScheme`): device picks apply instantly
   (plain pref); device edits apply instantly and upsert the shared pool
   (vault-aware). Terminal-content only;
-  `selectionForeground`/`cursorAccent` stored-but-unused;
-  `lightColorScheme`/`colorSchemeMode` ignored (dark-only app).
+   `selectionForeground`/`cursorAccent` stored-but-unused;
+   `lightColorScheme`/`colorSchemeMode` ignored (single-scheme app: the
+   active scheme drives both terminal and app chrome, light or dark).
 - **Compose staleness lesson (phantom-Disconnected):** never branch UI on the
   plain `shell` field — the branch group can keep evaluating a stale null
   forever (green dot + Disconnected + dead Reconnect on a live session;

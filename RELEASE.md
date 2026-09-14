@@ -34,8 +34,10 @@ keep working; the release APK is then left unsigned instead of failing).
 ## Cutting a release
 
 1. Make sure `main` is green: `./gradlew :app:testDebugUnitTest`.
-2. Push the commits to release. No version edits are needed in code:
-   `versionName` comes from the tag, `versionCode` from the run number.
+2. Push the commits to release. Bump the `versionName` fallback in
+   `app/build.gradle.kts` to the new tag (dev-build display only, so a
+   local build's About + update check stay truthful; the release version
+   itself still comes from the tag, never from code).
 3. Open GitHub → **Actions** → **Build APK release** → **Run workflow**,
    enter the `tag_name` (e.g. `v1.0.0`, no spaces), tick `prerelease`
    for betas/RCs only. CLI equivalent:
@@ -52,9 +54,16 @@ keep working; the release APK is then left unsigned instead of failing).
 ## Fixing a bad release
 
 - Bad APK, good commit: delete just the release and re-run —
-  `gh release delete v1.0.0 --yes` removes the Release and the remote tag
-  together. Never reuse a tag for different contents without deleting it
-  first.
+  ```bash
+  gh release delete v1.0.0 --cleanup-tag --yes
+  ```
+  `--cleanup-tag` is required: without it only the Release is removed and
+  the remote tag stays behind (re-running then reuses the stale tag).
+  Never reuse a tag for different contents without deleting it first.
+- Orphaned tag only (release already deleted without `--cleanup-tag`):
+  ```bash
+  git push origin :v1.0.0
+  ```
 - Bad commit: fix it, rewrite history if the repo is still private,
   delete the release/tag as above, and re-run.
 - Do not add `push` triggers to `.github/workflows/build-apk.yml` —
