@@ -1089,7 +1089,7 @@ fun TerminalScreen(
                 }
             }
         }
-        BoxWithConstraints(
+        Box(
             modifier = Modifier.weight(1f).fillMaxWidth()
                 .background(stageBg)
                 .pointerInput(tabLoc, drawerOpen) {
@@ -1103,10 +1103,10 @@ fun TerminalScreen(
                     // leftward for RIGHT.
                     if (!tabLoc.isDrawer || drawerOpen) return@pointerInput
                     val rightward = tabLoc == TabLocation.LEFT
-                    val edgePx = with(density) { 32.dp.toPx() }
+                    val edgePx = with(dockDensity) { 32.dp.toPx() }
                     val minX = edgePx
                     val maxX = size.width - edgePx
-                    val vMin = with(density) { 500.dp.toPx() }
+                    val vMin = with(dockDensity) { 500.dp.toPx() }
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         if (down.position.x < minX || down.position.x > maxX) return@awaitEachGesture
@@ -1140,13 +1140,9 @@ fun TerminalScreen(
             val tick = emuVersion
             val density = LocalDensity.current
             val (charW, lineH) = rememberTerminalCell(fontSp, fontFamily)
-            val availW = with(density) { maxWidth.toPx() }
-            val availH = with(density) { maxHeight.toPx() }
             // Screen-protector edges: keep the outer columns visible.
             val sidePad = 6.dp
             val sidePadPx = with(density) { sidePad.toPx() }
-            val wantCols = ((availW - sidePadPx * 2) / charW).toInt().coerceIn(20, 256)
-            val wantRows = (availH / lineH).toInt().coerceIn(8, 64)
 
             suspend fun applySize(c: Int, r: Int) {
                 emulator.resize(c, r)
@@ -1157,38 +1153,49 @@ fun TerminalScreen(
                     }
                 } catch (_: Exception) { }
             }
-            // Refit at SETTLE, never per-frame. Sizes stream every animation
-            // frame while the keyboard slides; reflowing per frame (buffer
-            // rebuild + full Canvas redraw + window-change packet) pegged
-            // the CPU and froze scrolling until settle. Layout (dock height,
-            // viewport, scroll) still tracks live — only the expensive
-            // reflow waits for 150ms quiet.
-            val wantSize = wantCols to wantRows
-            val latestWant by rememberUpdatedState(wantSize)
-            LaunchedEffect(wantSize) {
-                if (sizedOnce) delay(150)
-                val (c, r) = latestWant
-                if (c == emulator.cols && r == emulator.rows) {
-                    sizedOnce = true
-                    return@LaunchedEffect
-                }
-                applySize(c, r)
-                sizedOnce = true
-            }
-            LaunchedEffect(status) {
-                // Fresh shells start at 80x24: correct the server at once.
-                // Keyed on status (shell itself is not observable): fires on
-                // connect and on rotate-while-connected via refit above.
-                if (status != "connected") return@LaunchedEffect
-                val s = handle.shell ?: return@LaunchedEffect
-                try {
-                    withContext(Dispatchers.IO) {
-                        s.resize(emulator.cols, emulator.rows, (emulator.cols * charW).toInt(), (emulator.rows * lineH).toInt())
-                    }
-                } catch (_: Exception) { }
-            }
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                // Fullscreen sizing (vim/htop): the PTY size MUST come from
+                // the terminal viewport only — never from the outer box that
+                // also holds the bottom tab strip + extra-keys bar. The old
+                // code measured the outer BoxWithConstraints, so the server
+                // rendered more rows than visible: the bottom rows hid behind
+                // the strip/keys (scroll to see bottom = lose the top).
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    val gridDensity = LocalDensity.current
+                    val availW = with(gridDensity) { maxWidth.toPx() }
+                    val availH = with(gridDensity) { maxHeight.toPx() }
+                    val wantCols = ((availW - sidePadPx * 2) / charW).toInt().coerceIn(20, 256)
+                    val wantRows = (availH / lineH).toInt().coerceIn(8, 64)
+                    // Refit at SETTLE, never per-frame. Sizes stream every animation
+                    // frame while the keyboard slides; reflowing per frame (buffer
+                    // rebuild + full Canvas redraw + window-change packet) pegged
+                    // the CPU and froze scrolling until settle. Layout (dock height,
+                    // viewport, scroll) still tracks live — only the expensive
+                    // reflow waits for 150ms quiet.
+                    val wantSize = wantCols to wantRows
+                    val latestWant by rememberUpdatedState(wantSize)
+                    LaunchedEffect(wantSize) {
+                        if (sizedOnce) delay(150)
+                        val (c, r) = latestWant
+                        if (c == emulator.cols && r == emulator.rows) {
+                            sizedOnce = true
+                            return@LaunchedEffect
+                        }
+                        applySize(c, r)
+                        sizedOnce = true
+                    }
+                    LaunchedEffect(status) {
+                        // Fresh shells start at 80x24: correct the server at once.
+                        // Keyed on status (shell itself is not observable): fires on
+                        // connect and on rotate-while-connected via refit above.
+                        if (status != "connected") return@LaunchedEffect
+                        val s = handle.shell ?: return@LaunchedEffect
+                        try {
+                            withContext(Dispatchers.IO) {
+                                s.resize(emulator.cols, emulator.rows, (emulator.cols * charW).toInt(), (emulator.rows * lineH).toInt())
+                            }
+                        } catch (_: Exception) { }
+                    }
                     TerminalView(
                         emulator = emulator,
                         version = tick,
