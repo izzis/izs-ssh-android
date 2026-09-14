@@ -167,6 +167,66 @@ class TerminalEmulatorTest {
     }
 
     @Test
+    fun `vim exit key-modifier reset leaves no residue`() {
+        // vim resets xterm key-modifier options on exit (`ESC[>4;m`). The
+        // parser used to abort at `>` and print `4;m` next to the prompt.
+        val t = term()
+        t.feed("user@host:~$ ")
+        t.feed("$esc[>4;m")
+        // rowText trims trailing blanks; with the bug this read
+        // "user@host:~$ 4;m".
+        assertEquals("user@host:~$", rowText(t, 0))
+    }
+
+    @Test
+    fun `xterm private and query sequences are swallowed`() {
+        val t = term()
+        t.feed("AB")
+        // Key-modifier set, kitty keyboard query, DECRQM (intermediates).
+        t.feed("$esc[>4;1m$esc[?u$esc[?2026\$p$esc[=1l")
+        assertEquals("AB", rowText(t, 0))
+        // Cursor was not restored/moved by the prefixed `u`.
+        assertEquals(2, t.cursorX)
+        assertEquals(0, t.cursorY)
+    }
+
+    @Test
+    fun `dcs string is swallowed not printed`() {
+        val t = term()
+        t.feed("OK${esc}P+q2828${esc}\\!")
+        assertEquals("OK!", rowText(t, 0))
+    }
+
+    @Test
+    fun `dec private set loops all params and swallows non-mode finals`() {
+        val t = term()
+        // Termux doCsiQuestionMark loops i over every arg: 1049 goes
+        // alt-buffer, 25 hides the cursor in the SAME sequence.
+        t.feed("$esc[?1049;25h")
+        assertTrue(t.altActive)
+        // Non-mode `?` finals never run their plain namesake: no scroll
+        // margin set, no cursor save emitted/moved, kitty `u` ignored.
+        val t2 = term()
+        t2.feed("AB")
+        t2.feed("$esc[?1;2r$esc[?999s$esc[?2026\$p$esc[?1u")
+        assertEquals("AB", rowText(t2, 0))
+        // Cursor untouched (still after "AB": column 2), margins reset.
+        assertEquals(2, t2.cursorX)
+        // And exiting the alt buffer restores the primary grid.
+        t.feed("$esc[?1049l")
+        assertFalse(t.altActive)
+    }
+
+    @Test
+    fun `sgr colon sub-params do not reset`() {
+        val t = term()
+        t.feed("$esc[31m$esc[4:3mX")
+        // `4:3` (curly underline) is unsupported but must not wipe the red.
+        assertEquals(0xFFCD0000.toInt(), t.cellAt(0, 0).fg)
+        assertEquals("X", rowText(t, 0))
+    }
+
+    @Test
     fun `version bumps per feed`() {
         val t = term()
         val v0 = t.version

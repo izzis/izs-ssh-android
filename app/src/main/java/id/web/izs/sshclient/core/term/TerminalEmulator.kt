@@ -9,7 +9,10 @@ package id.web.izs.sshclient.core.term
  * bold, inverse), cursor moves (A-H, E-G, d, s/u, M), erase (J/K/X),
  * insert/delete lines/chars (L/M/P/@), scroll (S/T) + margins (r),
  * wrap (with pending-wrap), show/hide cursor (?25), alt buffer (?1049).
- * Ignored: OSC title, charsets, scroll-region origin mode, wide chars
+ * Swallowed (never printed): OSC title, xterm-private CSI (`>`, `=`, `<`
+ * prefixes, e.g. vim's `ESC[>4;m` key-modifier reset on exit), kitty/DECRQM
+ * queries with intermediate bytes, DCS/SOS/PM/APC strings.
+ * Ignored: charsets, scroll-region origin mode, wide chars
  * (treated as single cells), visual bell, bracketed paste, mouse.
  */
 class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
@@ -308,11 +311,12 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
 
     // ---- input ----
 
-    private enum class State { GROUND, ESC, ESC_SKIP, CSI, OSC, OSC_ESC }
+    private enum class State { GROUND, ESC, ESC_SKIP, CSI, OSC, OSC_ESC, STR_SKIP, STR_ESC }
 
     private var state = State.GROUND
     private var csiParams = StringBuilder()
-    private var csiPrivate = false
+    /** CSI private-marker prefix (`?`, `>`, `=`, `<`), null for plain sequences. */
+    private var csiPrefix: Char? = null
 
     fun feed(s: String) {
         if (s.isEmpty()) return
@@ -346,9 +350,13 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                 '[' -> {
                     state = State.CSI
                     csiParams = StringBuilder()
-                    csiPrivate = false
+                    csiPrefix = null
                 }
                 ']' -> state = State.OSC
+                // DCS/SOS/PM/APC: skip the whole string until ST (ESC \ or
+                // BEL) — vim's XTGETTCAP queries live here and must never
+                // reach the grid as literal text.
+                'P', 'X', '^', '_' -> state = State.STR_SKIP
                 '(', ')', '#' -> state = State.ESC_SKIP
                 'M' -> {
                     state = State.GROUND
@@ -371,13 +379,24 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                 else -> state = State.GROUND
             }
             State.CSI -> when {
-                c == '?' && csiParams.isEmpty() -> csiPrivate = true
-                c in '0'..'9' || c == ';' -> csiParams.append(c)
                 c in '@'..'~' -> {
                     state = State.GROUND
                     dispatchCsi(c)
                 }
-                else -> state = State.GROUND
+                c == '\u001B' -> state = State.ESC
+                c < ' ' -> state = State.GROUND
+                // Private markers (DEC `?`, xterm `>`/`=`, ANSI `<`): recorded
+                // once up front. The old code only knew `?` and ABORTED on
+                // `>`, so vim's exit-time `ESC[>4;m` (reset key-modifier
+                // options) fell back to GROUND mid-sequence and printed
+                // `4;m` as literal text next to the fresh shell prompt.
+                (c == '?' || c == '>' || c == '=' || c == '<') &&
+                    csiParams.isEmpty() && csiPrefix == null -> csiPrefix = c
+                c in '0'..'9' || c == ';' || c == ':' -> csiParams.append(c)
+                // Any other param/intermediate byte (space, `$`, `"`, ...):
+                // swallowed, staying in CSI until the final byte. Aborting
+                // here is what leaked sequence tails as text.
+                else -> Unit
             }
             State.OSC -> when {
                 c == '\u0007' -> state = State.GROUND
@@ -385,16 +404,46 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
             }
             State.ESC_SKIP -> state = State.GROUND
             State.OSC_ESC -> state = State.GROUND
+            State.STR_SKIP -> when {
+                c == '\u0007' -> state = State.GROUND
+                c == '\u001B' -> state = State.STR_ESC
+            }
+            State.STR_ESC -> when (c) {
+                '\\' -> state = State.GROUND
+                else -> state = State.STR_SKIP
+            }
         }
     }
 
+    // `;` separates params, `:` sub-params (Termux parseArg treats both
+    // as separators). Sub-param detail is dropped — the leading codes are
+    // what drive the grid.
     private fun params(default: Int): List<Int> {
         if (csiParams.isEmpty()) return listOf(default)
-        return csiParams.toString().split(';').map { it.toIntOrNull() ?: default }
+        return csiParams.toString().split(';', ':').map { it.toIntOrNull() ?: default }
     }
 
     private fun dispatchCsi(final: Char) {
         wrapPending = false
+        // xterm-private markers (`>`, `=`, `<`: key-modifier options, kitty
+        // keyboard, window ops) are swallowed whole — they carry no grid
+        // meaning here and must never print (Termux: UNSUPPORTED_PARAMETER
+        // state + `(ignored) CSI > MODIFY RESOURCE` for `> m`).
+        if (csiPrefix == '>' || csiPrefix == '=' || csiPrefix == '<') return
+        // DEC private (`?`): only h/l (all params, like Termux's
+        // doCsiQuestionMark loop) and selective erase J/K (no protected
+        // cells here, so identical to plain erase). Everything else —
+        // cursor moves, margins, DECRQM `$`, save/recall `s`/`r`, kitty
+        // `u` — is swallowed, never executed as its plain namesake.
+        if (csiPrefix == '?') {
+            when (final) {
+                'h' -> for (code in params(0)) setPrivate(code, true)
+                'l' -> for (code in params(0)) setPrivate(code, false)
+                'J' -> eraseDisplay(params(0)[0])
+                'K' -> eraseLine(params(0)[0])
+            }
+            return
+        }
         val p = params(1)
         fun n(i: Int) = p.getOrElse(i) { 1 }.coerceAtLeast(1)
         when (final) {
@@ -416,20 +465,8 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                 cursorX = (n(1) - 1).coerceIn(0, cols - 1)
             }
             'd' -> cursorY = (n(0) - 1).coerceIn(topMargin, bottomMargin)
-            'J' -> when (params(0)[0]) {
-                0 -> eraseRange(cursorX, cursorY, cols - 1, rows - 1)
-                1 -> eraseRange(0, 0, cursorX, cursorY)
-                2 -> clearGrid()
-                3 -> {
-                    clearGrid()
-                    history.clear()
-                }
-            }
-            'K' -> when (params(0)[0]) {
-                0 -> eraseRange(cursorX, cursorY, cols - 1, cursorY)
-                1 -> eraseRange(0, cursorY, cursorX, cursorY)
-                2 -> eraseRange(0, cursorY, cols - 1, cursorY)
-            }
+            'J' -> eraseDisplay(params(0)[0])
+            'K' -> eraseLine(params(0)[0])
             'X' -> {
                 val count = n(0)
                 for (i in 0 until count) {
@@ -440,7 +477,7 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
             'S' -> repeat(n(0)) { scrollUp() }
             'T' -> repeat(n(0)) { scrollDown() }
             'L' -> repeat(n(0)) { insertLines() }
-            'M' -> if (csiPrivate) Unit else repeat(n(0)) { deleteLines() }
+            'M' -> repeat(n(0)) { deleteLines() }
             'P' -> repeat(1) {
                 val count = n(0)
                 val row = grid[cursorY]
@@ -477,9 +514,33 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                     bottomMargin = rows - 1
                 }
             }
-            'm' -> sgr(if (csiParams.isEmpty()) listOf(0) else csiParams.toString().split(';').map { it.toIntOrNull() ?: 0 })
-            'h' -> if (csiPrivate) setPrivate(params(0)[0], true)
-            'l' -> if (csiPrivate) setPrivate(params(0)[0], false)
+            // `:` splits too (`4:3m` curly underline — Termux skips the
+            // sub-param, keeping the leading code): without it
+            // `toIntOrNull` failed and the whole group reset to 0.
+            'm' -> sgr(
+                if (csiParams.isEmpty()) listOf(0)
+                else csiParams.toString().split(';', ':').map { it.toIntOrNull() ?: 0 },
+            )
+        }
+    }
+
+    private fun eraseDisplay(mode: Int) {
+        when (mode) {
+            0 -> eraseRange(cursorX, cursorY, cols - 1, rows - 1)
+            1 -> eraseRange(0, 0, cursorX, cursorY)
+            2 -> clearGrid()
+            3 -> {
+                clearGrid()
+                history.clear()
+            }
+        }
+    }
+
+    private fun eraseLine(mode: Int) {
+        when (mode) {
+            0 -> eraseRange(cursorX, cursorY, cols - 1, cursorY)
+            1 -> eraseRange(0, cursorY, cursorX, cursorY)
+            2 -> eraseRange(0, cursorY, cols - 1, cursorY)
         }
     }
 
