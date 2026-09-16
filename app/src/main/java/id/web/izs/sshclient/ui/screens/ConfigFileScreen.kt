@@ -14,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -204,8 +203,12 @@ fun ConfigFileScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ScreenHeader("Config file", onBack)
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("Config file", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         if (!importing) {
             Text(
                 "Config ${state.loaded?.domain?.configSync?.configID?.takeIf { it >= 0 } ?: "-"}, $viewLabel, " +
@@ -270,7 +273,6 @@ fun ConfigFileScreen(
         }
         importError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         importInfo?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        if (busy) CircularProgressIndicator()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             if (!importing) {
                 OutlinedButton(
@@ -297,6 +299,7 @@ fun ConfigFileScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Cancel") }
             }
+        }
         }
     }
 

@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -185,19 +185,12 @@ fun WindowSettingsScreen(
         Text("Terminal header", style = MaterialTheme.typography.titleMedium)
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.clickable {
+            modifier = Modifier.fillMaxWidth().clickable {
                 hideHeader = !hideHeader
                 state.disk.hideTerminalHeader = hideHeader
             },
         ) {
-            Checkbox(
-                checked = hideHeader,
-                // Row handles the toggle (tap anywhere): null keeps the
-                // box from double-firing while staying in sync.
-                onCheckedChange = null,
-            )
-            Column {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text("Hide terminal header")
                 Text(
                     "Session options move to the menu on the active tab " +
@@ -206,6 +199,10 @@ fun WindowSettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Switch(
+                checked = hideHeader,
+                onCheckedChange = { hideHeader = it; state.disk.hideTerminalHeader = it },
+            )
         }
         Text(
             "Stored only on this device. It is never synced.",

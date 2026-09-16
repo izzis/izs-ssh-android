@@ -15,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -107,11 +106,12 @@ fun TerminalSettingsScreen(
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ScreenHeader("Terminal", onBack)
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("Terminal", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         Text("Extra keys", style = MaterialTheme.typography.titleMedium)
         Text(
             "The button bar below the terminal: labels, sequences, and popups.",
@@ -280,6 +280,6 @@ fun TerminalSettingsScreen(
             ) { Icon(Icons.Filled.Add, contentDescription = "Increase") }
         }
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        if (busy) CircularProgressIndicator()
+        }
     }
 }

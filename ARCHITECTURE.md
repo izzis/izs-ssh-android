@@ -51,77 +51,78 @@ app/src/main/java/id/web/izs/sshclient/
                                   scheme, dark/light auto from luminance;
                                   opt-in, device-only)
     screens/
-      ScreenHeader.kt           Shared sub-screen top bar (back arrow + title)
-      AboutScreen.kt              Version + email feedback + source-code link +
-                                  manual GitHub Releases update check (manual
-                                  only, no background polling)
-      ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only)
-      ProfileListScreen.kt        Home: single LazyColumn (header + Active + Recent +
-                                  sticky search + profiles share one scroll, so long
-                                  Active/Recent never squeezes the profile viewport);
-                                  Active always expanded with Close all, Recent
-                                  collapsible with per-row History icons + Clear,
-                                  identity-colour stripe per profile row,
-                                  exit-with-confirm top-bar button
-      NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
-                                  profiles, desktop-selector parity; half by
-                                  default, draggable to full)
-      ProfileEditScreen.kt        Tabbed editor (General + colour picker (FlowRow swatch
-                                   grid — fixed chunked rows clipped the rightmost
-                                   swatch into an oval on narrow phones) / Ports /
-                                   Advanced / Ciphers / Colours (terminal-scheme
-                                   override: Use-global + scheme search) / Login),
-                                   desktop-only options labeled, new profile + new group
-      TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
-                                   warn-on-close + host-key trust dialogs, ⋮ menu SFTP entry,
-                                   slim background-transfer indicator row (tap reopens the sheet),
-                                   auth-failover `Password for user@host` dialog (remember checkbox,
-                                   unlock-routed deferred vault save),
-                                   hide-terminal-header mode (options to active-tab ⋮;
-                                   floating ⋮ when tabs are off — draggable to any
-                                    corner, anchor persisted in ConfigDisk);
-                                    per-profile session chrome via nested
-                                    ProfileChrome (top bar, tab strips/menus,
-                                    SFTP, extra keys, command box — lists stay
-                                    on the shared scheme); Copy stays silent
-                                    (no banner)
-      SftpSheet.kt                SFTP browser + transfers as a bottom sheet over the terminal
-                                   (half by position via SheetState initial Partial, list
-                                   fills sheet height so loads never balloon it, draggable
-                                   to full): SAF Save-as/Choose-file, DISPLAY_NAME lookup,
-                                   same-name Overwrite/Keep-both/Cancel dialog (dir frozen
-                                   at pick time), per-item Cancel, Clear finished.
-                                   UI-only: dismiss/back touches no transfer.
-      TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells;
-                                  hold/triple-tap selection with back-gesture
-                                  guards + dismissing Copy/Paste pill
-      TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance)
-      AppearanceSettingsScreen.kt App theme (device-only) + terminal font/cursor (YAML) + font size + live preview
-                                  + Follow-color-scheme toggle (disables
-                                  theme/palette while on)
-      ColorSchemeSettingsScreen.kt Global/local scheme source + editor entry;
-                                  commits bump `AppState.schemeVersion` for a
-                                  live re-theme
-      WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right;
-                                   New-tab mode (profile list vs quick-pick sheet, device-only pref);
-                                   Hide-terminal-header toggle (device-only pref, whole-row tap)
-      SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll, slim 32dp buttons,
-                                   tight ⋮/× cluster, desktop `.colorbar` profile-colour bar
-                                   sealed inside the rounded tab box; strip scrolls
-                                   horizontally = unbounded width, so items bind
-                                   `IntrinsicSize.Max` or fillMaxWidth underlines
-                                   collapse to 0) + side drawer frame (left/right, no RTL mirror) +
-                                   single status dot + primary activity underline (cleared on select) + pinned Profile-list/Settings footer
-                                   (drawer ⋮ menu hides its own Settings/Profile-list copies)
-      ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`)
-      VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
-      SetVaultPassphraseDialog.kt Set/change vault passphrase
-      VaultSettingsScreen.kt      Vault management (set/change/erase, encrypt-config toggle)
-      SshSettingsScreen.kt        SSH defaults: host-key verification + warn-on-close
-                                  + background keep-awake toggle (device-only)
-                                  (desktop Settings > SSH parity; live-save, plaintext only)
-      SettingsScreen.kt           Sidebar mirroring desktop Settings sections
-      CrashReportScreen.kt        Shows last crash trace with copy button
+       ScreenHeader.kt           Shared sub-screen top bar (back arrow + title + trailing busy spinner for YAML writes); header is sticky outside the scrolling column so the spinner does not jitter content
+       AboutScreen.kt              Version + email feedback + source-code link +
+                                   manual GitHub Releases update check (manual
+                                   only, no background polling)
+       ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only, sticky header with busy spinner + centered busy dialog for list/transfer ops)
+       ProfileListScreen.kt        Home: single LazyColumn (header + Active + Recent +
+                                   sticky search + profiles share one scroll, so long
+                                   Active/Recent never squeezes the profile viewport);
+                                   Active always expanded with Close all, Recent
+                                   collapsible with per-row History icons + Clear,
+                                   identity-colour stripe per profile row,
+                                   exit-with-confirm top-bar button
+       NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
+                                   profiles, desktop-selector parity; half by
+                                   default, draggable to full)
+       ProfileEditScreen.kt        Tabbed editor (General + colour picker (FlowRow swatch
+                                    grid — fixed chunked rows clipped the rightmost
+                                    swatch into an oval on narrow phones) / Ports /
+                                    Advanced / Ciphers / Colours (terminal-scheme
+                                    override: Use-global + scheme search) / Login),
+                                    desktop-only options labeled, new profile + new group; sticky header with busy spinner
+       TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
+                                    warn-on-close + host-key trust dialogs, ⋮ menu SFTP entry,
+                                    slim background-transfer indicator row (tap reopens the sheet),
+                                    auth-failover `Password for user@host` dialog (remember checkbox,
+                                    unlock-routed deferred vault save),
+                                    hide-terminal-header mode (options to active-tab ⋮;
+                                    floating ⋮ when tabs are off — draggable to any
+                                     corner, anchor persisted in ConfigDisk);
+                                     per-profile session chrome via nested
+                                     ProfileChrome (top bar, tab strips/menus,
+                                     SFTP, extra keys, command box — lists stay
+                                     on the shared scheme); Copy stays silent
+                                     (no banner)
+       SftpSheet.kt                SFTP browser + transfers as a bottom sheet over the terminal
+                                    (half by position via SheetState initial Partial, list
+                                    fills sheet height so loads never balloon it, draggable
+                                    to full): SAF Save-as/Choose-file, DISPLAY_NAME lookup,
+                                    same-name Overwrite/Keep-both/Cancel dialog (dir frozen
+                                    at pick time), per-item Cancel, Clear finished.
+                                    UI-only: dismiss/back touches no transfer.
+       TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells;
+                                   hold/triple-tap selection with back-gesture
+                                   guards + dismissing Copy/Paste pill
+       TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance) + recent profiles (synced YAML); sticky header with busy spinner
+       AppearanceSettingsScreen.kt App theme (device-only) + terminal font/cursor (YAML) + font size + live preview
+                                   + Follow-color-scheme toggle (disables
+                                   theme/palette while on); sticky header with busy spinner
+       ColorSchemeSettingsScreen.kt Global/local scheme source + editor entry (sticky header with busy spinner);
+                                   commits bump `AppState.schemeVersion` for a
+                                   live re-theme
+       ColorSchemeEditorScreen.kt  22-slot editor (sticky header with busy spinner)
+       WindowSettingsScreen.kt     appearance.tabsLocation: Follow-synced vs This-device-only source priority + Off/Top/Bottom/Left/Right;
+                                    New-tab mode (profile list vs quick-pick sheet, device-only pref);
+                                    Hide-terminal-header toggle (device-only pref, whole-row tap)
+       SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll, slim 32dp buttons,
+                                    tight ⋮/× cluster, desktop `.colorbar` profile-colour bar
+                                    sealed inside the rounded tab box; strip scrolls
+                                    horizontally = unbounded width, so items bind
+                                    `IntrinsicSize.Max` or fillMaxWidth underlines
+                                    collapse to 0) + side drawer frame (left/right, no RTL mirror) +
+                                    single status dot + primary activity underline (cleared on select) + pinned Profile-list/Settings footer
+                                    (drawer ⋮ menu hides its own Settings/Profile-list copies)
+       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`, sticky header with busy spinner)
+       VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
+       SetVaultPassphraseDialog.kt Set/change vault passphrase
+       VaultSettingsScreen.kt      Vault management (set/change/erase, encrypt-config toggle, sticky header with busy spinner)
+       SshSettingsScreen.kt        SSH defaults: host-key verification + warn-on-close
+                                   + background keep-awake toggle (device-only)
+                                   (desktop Settings > SSH parity; live-save, vault-aware; sticky header with busy spinner)
+       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
+       CrashReportScreen.kt        Shows last crash trace with copy button
   core/
     config/
       TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options, SshGlobals
@@ -363,15 +364,15 @@ the IME:
   M3 theme derives from the active non-profile scheme, dark/light
   automatic from luminance; session chrome follows the profile scheme via
   a nested `ProfileChrome`, lists follow the shared scheme).
-- All sub-screens share `ScreenHeader` (back arrow + title); the terminal
-  header matches it (themed surface) with a status dot on the name row —
+- All sub-screens share `ScreenHeader` (back arrow + title + trailing 20dp busy spinner when a YAML write is in flight — encrypted vault re-encrypt can take seconds on large configs; the header is sticky outside the scrolling column so the spinner does not jitter content); the terminal
   green = connected, amber = connecting, red = disconnected. The dot always
   asks before disconnecting (it is a 32dp invisible tap target — an instant
   silent kill reads exactly like a dropped session); the power button honors
   `warnOnClose` like desktop — and full-width `user@host:port` below.
   Settings > Window can hide the header (device-only): its options move to
   the ⋮ on the active tab, or a floating ⋮ when tabs are off (draggable to
-  any corner, anchor in ConfigDisk).
+   any corner, anchor in ConfigDisk).
+- Settings toggle parity: desktop `toggle` (`terminalSettingsTab.pug`, `sshSettingsTab.pug`, `sshProfileSettings.pug` Advanced, `configSyncSettingsTab.pug`) → `Switch` pill on the right (`Row(fillMaxWidth.clickable){ Text(weight1f.padding(end=12.dp)) + Switch }`); desktop `checkbox` (ciphers, remember password) → `Checkbox`.
 - Home Recent section (desktop `recentProfiles` parity, per-row History icons
   like the desktop selector, default card colour): header lives outside the
   card (title + Clear + collapse), collapsible, sized by

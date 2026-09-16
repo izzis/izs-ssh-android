@@ -1,17 +1,19 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -101,8 +103,12 @@ fun VaultSettingsScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ScreenHeader("Vault", onBack)
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("Vault", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         if (vault == null) {
             Icon(
                 Icons.Filled.Key,
@@ -151,8 +157,13 @@ fun VaultSettingsScreen(
                 onClick = { requireUnlock(Pending.Erase) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Erase the Vault") }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) {
+                    requireUnlock(if (!encrypted) Pending.EncryptOn else Pending.EncryptOff)
+                },
+            ) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Encrypt config file")
                     Text(
                         "Stores the entire configuration in the vault",
@@ -169,9 +180,9 @@ fun VaultSettingsScreen(
                 )
             }
         }
-        if (busy) CircularProgressIndicator()
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
     }
 
     if (showSetPass) {

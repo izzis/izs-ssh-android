@@ -22,7 +22,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -239,11 +238,12 @@ fun ColorSchemeEditorScreen(
         }, andBack = true)
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ScreenHeader("Edit colour scheme", onBack)
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("Edit colour scheme", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         Text(
             if (deviceMode) "Edits the scheme on this device. Saving also adds it to your custom schemes."
             else "Edits the current scheme. Rename and save to keep the old version " +
@@ -311,7 +311,7 @@ fun ColorSchemeEditorScreen(
             ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
         }
         msg?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (busy) CircularProgressIndicator()
+        }
     }
 
     editingSlot?.let { slot ->

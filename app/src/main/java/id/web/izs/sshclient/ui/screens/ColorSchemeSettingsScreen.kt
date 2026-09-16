@@ -9,8 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -168,11 +169,12 @@ fun ColorSchemeSettingsScreen(
         val q = query.trim().lowercase()
         if (q.isEmpty()) all else all.filter { it.name.lowercase().contains(q) }
     }
-    LazyColumn(
-        Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item(key = "header") { ScreenHeader("Colour scheme", onBack) }
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("Colour scheme", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        LazyColumn(
+            Modifier.weight(1f).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         item(key = "blurb") {
             Text(
                 "Terminal colours. With Settings > Appearance > Follow color scheme ON, " +
@@ -372,8 +374,6 @@ fun ColorSchemeSettingsScreen(
         msg?.let { m ->
             item(key = "msg") { Text(m, color = MaterialTheme.colorScheme.error) }
         }
-        if (busy) {
-            item(key = "busy") { CircularProgressIndicator() }
         }
     }
 

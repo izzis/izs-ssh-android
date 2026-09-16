@@ -1,5 +1,6 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +15,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -164,11 +165,12 @@ fun ConfigSyncScreen(
             }
         }
     }
-    Column(
-        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ScreenHeader("Config Sync", onBack)
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("Config Sync", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         Text(
             "Current config: ${syncId.takeIf { it >= 0 } ?: "-"}, " +
                 "updated ${state.disk.lastRemoteChange.ifBlank { "-" }}",
@@ -299,9 +301,11 @@ fun ConfigSyncScreen(
             onClick = { confirmUndo = true },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Undo last download") }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = auto, onCheckedChange = { auto = it })
-            Column(Modifier.weight(1f)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { auto = !auto },
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text("Sync automatically")
                 Text(
                     "Upload changes and check for updates every minute.",
@@ -309,19 +313,29 @@ fun ConfigSyncScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Switch(checked = auto, onCheckedChange = { auto = it })
         }
         Text("Synced parts:", style = MaterialTheme.typography.titleSmall)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = pHotkeys, onCheckedChange = { pHotkeys = it })
-            Text("Sync hotkeys")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { pHotkeys = !pHotkeys },
+        ) {
+            Text("Sync hotkeys", modifier = Modifier.weight(1f).padding(end = 12.dp))
+            Switch(checked = pHotkeys, onCheckedChange = { pHotkeys = it })
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = pAppearance, onCheckedChange = { pAppearance = it })
-            Text("Sync window settings")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { pAppearance = !pAppearance },
+        ) {
+            Text("Sync window settings", modifier = Modifier.weight(1f).padding(end = 12.dp))
+            Switch(checked = pAppearance, onCheckedChange = { pAppearance = it })
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = pVault, onCheckedChange = { pVault = it })
-            Text("Sync Vault")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { pVault = !pVault },
+        ) {
+            Text("Sync Vault", modifier = Modifier.weight(1f).padding(end = 12.dp))
+            Switch(checked = pVault, onCheckedChange = { pVault = it })
         }
         Button(
             enabled = !busy,
@@ -433,6 +447,7 @@ fun ConfigSyncScreen(
             },
             dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
         )
+        }
     }
 
     // Busy overlay as a window Dialog: always centered on screen (the old

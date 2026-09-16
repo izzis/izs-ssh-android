@@ -26,6 +26,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -188,16 +189,20 @@ fun ProfileEditScreen(
     var msg by remember { mutableStateOf<String?>(null) }
 
     if (!isNew && original == null) {
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ScreenHeader("Edit profile", onBack)
-            Text("Profile not found", color = MaterialTheme.colorScheme.error)
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader("Edit profile", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+            Column(Modifier.weight(1f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Profile not found", color = MaterialTheme.colorScheme.error)
+            }
         }
         return
     }
     if (!isNew && original?.type != "ssh") {
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ScreenHeader("Edit profile", onBack)
-            Text("Only SSH profiles can be edited on this device.")
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader("Edit profile", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+            Column(Modifier.weight(1f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Only SSH profiles can be edited on this device.")
+            }
         }
         return
     }
@@ -365,7 +370,8 @@ fun ProfileEditScreen(
         ScreenHeader(
             if (isNew) "New profile" else "Edit profile",
             onBack,
-            Modifier.padding(top = 8.dp),
+            busy = busy,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
         )
         PrimaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 16.dp) {
             EDIT_TABS.forEachIndexed { i, title ->
@@ -1075,9 +1081,12 @@ private fun AdvancedTab(
 
 @Composable
 private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Checkbox(checked = checked, onCheckedChange = onChange)
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clickable { onChange(!checked) },
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(end = 12.dp))
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
@@ -1196,23 +1205,29 @@ private fun ScriptsTab(scriptsList: List<LoginScript>, onChange: (List<LoginScri
                 label = { Text("Send") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
             )
             Row(modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Checkbox(
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).clickable { onChange(scriptsList.toMutableList().also { it[i] = s.copy(isRegex = !s.isRegex) }) },
+                ) {
+                    Text("Regex", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(end = 12.dp))
+                    Switch(
                         checked = s.isRegex,
                         onCheckedChange = { v ->
                             onChange(scriptsList.toMutableList().also { it[i] = s.copy(isRegex = v) })
                         },
                     )
-                    Text("Regex", style = MaterialTheme.typography.bodyMedium)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Checkbox(
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).clickable { onChange(scriptsList.toMutableList().also { it[i] = s.copy(optional = !s.optional) }) },
+                ) {
+                    Text("Optional", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(end = 12.dp))
+                    Switch(
                         checked = s.optional,
                         onCheckedChange = { v ->
                             onChange(scriptsList.toMutableList().also { it[i] = s.copy(optional = v) })
                         },
                     )
-                    Text("Optional", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -1405,13 +1420,7 @@ private fun UseSavedKeyDialog(
                                 picked = if (k.ref in picked) picked - k.ref else picked + k.ref
                             },
                         ) {
-                            Checkbox(
-                                checked = k.ref in picked,
-                                onCheckedChange = { on ->
-                                    picked = if (on) picked + k.ref else picked - k.ref
-                                },
-                            )
-                            Column(Modifier.weight(1f)) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                                 Text(
                                     k.description.ifBlank { "saved key" },
                                     style = MaterialTheme.typography.bodyMedium,
@@ -1422,6 +1431,12 @@ private fun UseSavedKeyDialog(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            Switch(
+                                checked = k.ref in picked,
+                                onCheckedChange = { on ->
+                                    picked = if (on) picked + k.ref else picked - k.ref
+                                },
+                            )
                         }
                     }
                 }

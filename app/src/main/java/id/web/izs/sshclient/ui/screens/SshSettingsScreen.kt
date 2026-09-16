@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -109,8 +111,12 @@ fun SshSettingsScreen(
 
     val editable = !busy && !lockedForEdit
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ScreenHeader("SSH", onBack)
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("SSH", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         if (encrypted) {
             Text(
                 if (lockedForEdit) "This config is encrypted. Unlock with the vault passphrase to change SSH options."
@@ -123,15 +129,9 @@ fun SshSettingsScreen(
         // row click is the single toggle source, same as Window settings).
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.clickable(enabled = editable) { requestToggle("verify") },
+            modifier = Modifier.fillMaxWidth().clickable(enabled = editable) { requestToggle("verify") },
         ) {
-            Checkbox(
-                checked = verify,
-                onCheckedChange = null,
-                enabled = editable,
-            )
-            Column {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text("Verify host keys when connecting")
                 Text(
                     "New or changed keys ask first and show the fingerprint. " +
@@ -140,18 +140,17 @@ fun SshSettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Switch(
+                checked = verify,
+                onCheckedChange = { requestToggle("verify") },
+                enabled = editable,
+            )
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.clickable(enabled = editable) { requestToggle("warn") },
+            modifier = Modifier.fillMaxWidth().clickable(enabled = editable) { requestToggle("warn") },
         ) {
-            Checkbox(
-                checked = warn,
-                onCheckedChange = null,
-                enabled = editable,
-            )
-            Column {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text("Warn when closing active connections")
                 Text(
                     "Ask before disconnecting a live session. A profile with " +
@@ -160,6 +159,11 @@ fun SshSettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Switch(
+                checked = warn,
+                onCheckedChange = { requestToggle("warn") },
+                enabled = editable,
+            )
         }
         // Background keep-alive (device-only pref, instant — not part of the
         // synced YAML above, so it stays enabled on encrypted configs too).
@@ -191,17 +195,12 @@ fun SshSettingsScreen(
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.clickable {
+            modifier = Modifier.fillMaxWidth().clickable {
                 keepAwake = !keepAwake
                 state.disk.keepAwake = keepAwake
             },
         ) {
-            Checkbox(
-                checked = keepAwake,
-                onCheckedChange = null,
-            )
-            Column {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text("Keep CPU awake during sessions")
                 Text(
                     "Active only while sessions are connected. Uses more battery. " +
@@ -210,10 +209,17 @@ fun SshSettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Switch(
+                checked = keepAwake,
+                onCheckedChange = {
+                    keepAwake = it
+                    state.disk.keepAwake = it
+                },
+            )
         }
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (busy) CircularProgressIndicator()
+        }
     }
     if (showUnlock) {
         VaultUnlockDialog(

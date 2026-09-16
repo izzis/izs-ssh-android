@@ -20,7 +20,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -252,11 +251,12 @@ fun AppearanceSettingsScreen(
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ScreenHeader("Appearance", onBack)
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("Appearance", onBack, busy = busy, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         Text(
             "App theme plus terminal font and cursor. The terminal " +
                 "colors are under Settings > Color scheme.",
@@ -270,7 +270,7 @@ fun AppearanceSettingsScreen(
                 .clickable(enabled = !busy) { commitFollow(!follow) }
                 .padding(vertical = 4.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                 Text(
                     "Follow color scheme",
                     style = MaterialTheme.typography.bodyMedium,
@@ -439,7 +439,7 @@ fun AppearanceSettingsScreen(
             Text(
                 "Blink",
                 style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(end = 12.dp),
             )
             Switch(checked = blink, enabled = !busy, onCheckedChange = { commitBlink(it) })
         }
@@ -449,7 +449,7 @@ fun AppearanceSettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        if (busy) CircularProgressIndicator()
+        }
     }
     if (showUnlock) {
         VaultUnlockDialog(
