@@ -133,7 +133,7 @@ private fun paletteLight(
 val AppPalettes = listOf(
     AppPalette(
         id = "izs",
-        name = "Izs (default)",
+        name = "Grape",
         dark = IzsDarkColors,
         light = IzsLightColors,
     ),
@@ -207,30 +207,6 @@ val AppPalettes = listOf(
             secondaryContainer = Color(0xFFFBDECB),
             tertiary = Color(0xFF7A5900),
             tertiaryContainer = Color(0xFFFFE0A6),
-        ),
-    ),
-    AppPalette(
-        id = "grape",
-        name = "Grape",
-        dark = paletteDark(
-            primary = Color(0xFFD0BCFF),
-            onPrimary = Color(0xFF381E72),
-            primaryContainer = Color(0xFF4F378B),
-            onPrimaryContainer = Color(0xFFEADDFF),
-            secondary = Color(0xFFCCC2DC),
-            secondaryContainer = Color(0xFF4A4458),
-            tertiary = Color(0xFFEFB8C8),
-            tertiaryContainer = Color(0xFF633B48),
-        ),
-        light = paletteLight(
-            primary = Color(0xFF6750A4),
-            onPrimary = Color(0xFFFFFFFF),
-            primaryContainer = Color(0xFFEADDFF),
-            onPrimaryContainer = Color(0xFF21005D),
-            secondary = Color(0xFF625B71),
-            secondaryContainer = Color(0xFFE8DEF8),
-            tertiary = Color(0xFF7D5260),
-            tertiaryContainer = Color(0xFFFFD8E4),
         ),
     ),
 )

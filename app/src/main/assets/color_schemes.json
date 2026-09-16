@@ -2,14 +2,14 @@
  {
   "name": "Izs Default",
   "foreground": "#e8e8e8",
-  "background": "#000000",
+  "background": "#1d1e23",
   "cursor": "#e8e8e8",
   "colors": [
    "#000000",
    "#cd0000",
    "#00cd00",
    "#cdcd00",
-   "#0000ee",
+   "#d0bcff",
    "#cd00cd",
    "#00cdcd",
    "#e5e5e5",

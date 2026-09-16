@@ -44,7 +44,7 @@ app/src/main/java/id/web/izs/sshclient/
                                     die only on close(); Back never reaches close());
                                     background mirror (serviceSync/lostListener, single auto-retry per transport death)
     AppState.kt                   Session state: Loaded, unlock(), profile/secret selectors
-    Theme.kt                      AppPalettes (Izs/Ocean/Forest/Sunset/Grape dark+light;
+    Theme.kt                      AppPalettes (Grape/Ocean/Forest/Sunset dark+light;
                                   shared Izs surfaces) + resolveAppPalette;
                                   Follow color scheme (`schemeToAppColorScheme`:
                                   full M3 theme from the active non-profile
@@ -571,8 +571,7 @@ countered in four layers:
   sheet, not just home).
 - **Appearance (done):** `AppearanceSettingsScreen` — app theme
   (System/Dark/Light, device-only `ConfigDisk appearance.appTheme`) +
-  app color palettes (`ui/Theme.kt AppPalettes`: Izs/Ocean/Forest/Sunset/
-  Grape, device-only `appearance.appPalette`, terminal untouched),
+  app color palettes (`ui/Theme.kt AppPalettes`: Grape/Ocean/Forest/Sunset, device-only `appearance.appPalette`, terminal untouched),
   terminal font (system monospace or bundled Source Code Pro,
   `terminal.font` YAML), font size (device-only, moved from Terminal),
   cursor style + blink (`terminal.cursor`/`cursorBlink` YAML, live on

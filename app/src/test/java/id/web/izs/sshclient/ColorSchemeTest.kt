@@ -80,7 +80,7 @@ class ColorSchemeTest {
         // Atom class: bright slot invisible on background.
         val atom = IZS_DEFAULT_SCHEME.copy(
             name = "Atomlike",
-            colors = IZS_DEFAULT_SCHEME.colors.toMutableList().also { it[8] = "#000000" },
+            colors = IZS_DEFAULT_SCHEME.colors.toMutableList().also { it[8] = "#1d1e23" },
         )
         assertTrue(schemeReadabilityIssues(atom).any { it.contains("color8") })
         // color0 black-on-black is exempt (universal xterm convention).

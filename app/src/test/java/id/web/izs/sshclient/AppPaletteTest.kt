@@ -10,13 +10,15 @@ class AppPaletteTest {
 
     @Test fun resolve_knownIds() {
         assertEquals("ocean", resolveAppPalette("ocean").id)
-        assertEquals("grape", resolveAppPalette("grape").id)
+        assertEquals("izs", resolveAppPalette("izs").id)
     }
 
     @Test fun resolve_unknownFallsBackToIzs() {
         assertEquals("izs", resolveAppPalette(null).id)
         assertEquals("izs", resolveAppPalette("").id)
         assertEquals("izs", resolveAppPalette("midnight-ultra").id)
+        // Removed "grape" palette id resolves to the default like garbage.
+        assertEquals("izs", resolveAppPalette("grape").id)
     }
 
     @Test fun palettes_idsUniqueAndHaveBothModes() {

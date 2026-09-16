@@ -21,9 +21,8 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
 
     companion object {
         const val FG = 0xFFE8E8E8.toInt()
-        // Pure black: blends the grid with the full-bleed page background
-        // (matching the xterm black theme).
-        const val BG = 0xFF000000.toInt()
+        // Matches the app background so the grid blends with lists/settings.
+        const val BG = 0xFF1D1E23.toInt()
         const val MAX_HISTORY = 2000
 
         /**
@@ -33,7 +32,7 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
          */
         private val STD_DEFAULT = intArrayOf(
             0xFF000000.toInt(), 0xFFCD0000.toInt(), 0xFF00CD00.toInt(), 0xFFCDCD00.toInt(),
-            0xFF0000EE.toInt(), 0xFFCD00CD.toInt(), 0xFF00CDCD.toInt(), 0xFFE5E5E5.toInt(),
+            0xFFD0BCFF.toInt(), 0xFFCD00CD.toInt(), 0xFF00CDCD.toInt(), 0xFFE5E5E5.toInt(),
             0xFF7F7F7F.toInt(), 0xFFFF0000.toInt(), 0xFF00FF00.toInt(), 0xFFFFFF00.toInt(),
             0xFF5C5CFF.toInt(), 0xFFFF00FF.toInt(), 0xFF00FFFF.toInt(), 0xFFFFFFFF.toInt(),
         )
