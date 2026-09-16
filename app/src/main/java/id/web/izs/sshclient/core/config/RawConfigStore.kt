@@ -230,6 +230,64 @@ object RawConfigStore {
     }
 
     /**
+     * Clipboard parity (tabby-terminal/src/config.ts + terminalSettingsTab
+     * Clipboard section). `copyOnSelect`/`copyAsHTML` are intentionally NOT
+     * synced.
+     *
+     * Desktop defaults: bracketedPaste=true, warnOnMultilinePaste=true,
+     * replaceNewlinesWithSpacesOnPaste=false, trimWhitespaceOnPaste=true.
+     * Absent key = default (minimal YAML). Setters follow desktop
+     * ConfigProxy parity: writing a value equal to the default REMOVES the
+     * key — and the `terminal` map itself when left empty.
+     */
+    const val DEFAULT_BRACKETED_PASTE = true
+    const val DEFAULT_WARN_ON_MULTILINE_PASTE = true
+    const val DEFAULT_REPLACE_NEWLINES_WITH_SPACES_ON_PASTE = false
+    const val DEFAULT_TRIM_WHITESPACE_ON_PASTE = true
+
+    @Suppress("UNCHECKED_CAST")
+    private fun terminalMap(doc: Map<String, Any?>): Map<String, Any?>? =
+        doc[KEY_TERMINAL] as? Map<String, Any?>
+
+    @Suppress("UNCHECKED_CAST")
+    private fun mutableTerminalMap(doc: MutableMap<String, Any?>): LinkedHashMap<String, Any?> =
+        LinkedHashMap(terminalMap(doc) ?: emptyMap())
+
+    private fun putTerminalKey(doc: MutableMap<String, Any?>, key: String, value: Any?, isDefault: Boolean) {
+        val term = mutableTerminalMap(doc)
+        if (isDefault) term.remove(key) else term[key] = value
+        if (term.isEmpty()) doc.remove(KEY_TERMINAL) else doc[KEY_TERMINAL] = term
+    }
+
+    fun terminalBracketedPaste(doc: Map<String, Any?>): Boolean =
+        terminalMap(doc)?.get("bracketedPaste") as? Boolean ?: DEFAULT_BRACKETED_PASTE
+
+    fun setTerminalBracketedPaste(doc: MutableMap<String, Any?>, v: Boolean) =
+        putTerminalKey(doc, "bracketedPaste", v, v == DEFAULT_BRACKETED_PASTE)
+
+    fun terminalWarnOnMultilinePaste(doc: Map<String, Any?>): Boolean =
+        terminalMap(doc)?.get("warnOnMultilinePaste") as? Boolean ?: DEFAULT_WARN_ON_MULTILINE_PASTE
+
+    fun setTerminalWarnOnMultilinePaste(doc: MutableMap<String, Any?>, v: Boolean) =
+        putTerminalKey(doc, "warnOnMultilinePaste", v, v == DEFAULT_WARN_ON_MULTILINE_PASTE)
+
+    fun terminalReplaceNewlinesWithSpacesOnPaste(doc: Map<String, Any?>): Boolean =
+        terminalMap(doc)?.get("replaceNewlinesWithSpacesOnPaste") as? Boolean
+            ?: DEFAULT_REPLACE_NEWLINES_WITH_SPACES_ON_PASTE
+
+    fun setTerminalReplaceNewlinesWithSpacesOnPaste(doc: MutableMap<String, Any?>, v: Boolean) =
+        putTerminalKey(
+            doc, "replaceNewlinesWithSpacesOnPaste", v,
+            v == DEFAULT_REPLACE_NEWLINES_WITH_SPACES_ON_PASTE,
+        )
+
+    fun terminalTrimWhitespaceOnPaste(doc: Map<String, Any?>): Boolean =
+        terminalMap(doc)?.get("trimWhitespaceOnPaste") as? Boolean ?: DEFAULT_TRIM_WHITESPACE_ON_PASTE
+
+    fun setTerminalTrimWhitespaceOnPaste(doc: MutableMap<String, Any?>, v: Boolean) =
+        putTerminalKey(doc, "trimWhitespaceOnPaste", v, v == DEFAULT_TRIM_WHITESPACE_ON_PASTE)
+
+    /**
      * `appearance.tabsLocation` read WITHOUT desktop-default fallback.
      * Desktop resolves absent → `top` (configDefaults.yaml); on the phone
      * absent means OFF (the current list-based UX, no tab chrome) — a

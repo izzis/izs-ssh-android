@@ -530,6 +530,9 @@ class SshSessionViewModel : ViewModel() {
                     sess.onClosed = { releaseTransport(tkey, entry) }
                 }
                 sess.onDied = { onTransportDeath(sessionId, sess, sess.client) }
+                // Fresh PTY: stale modes (bracketed paste, mouse) must not
+                // leak from a previous session (frontend.resetTerminalModes).
+                h.emulator.resetTerminalModes()
                 h.shell = sess
                 h.setStatus("connected")
                 // A live shell re-arms the one-shot auto-retry bookkeeping.

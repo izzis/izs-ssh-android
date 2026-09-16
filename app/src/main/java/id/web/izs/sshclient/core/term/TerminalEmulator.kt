@@ -12,8 +12,11 @@ package id.web.izs.sshclient.core.term
  * Swallowed (never printed): OSC title, xterm-private CSI (`>`, `=`, `<`
  * prefixes, e.g. vim's `ESC[>4;m` key-modifier reset on exit), kitty/DECRQM
  * queries with intermediate bytes, DCS/SOS/PM/APC strings.
+ * Tracked (never printed, never acted on visually): bracketed-paste mode
+ * (`?2004`, xtermFrontend.supportsBracketedPaste parity) and mouse modes
+ * (`?1000/1002/1003/1006`, resetTerminalModes parity).
  * Ignored: charsets, scroll-region origin mode, wide chars
- * (treated as single cells), visual bell, bracketed paste, mouse.
+ * (treated as single cells), visual bell, mouse reporting itself.
  */
 class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
 
@@ -188,6 +191,13 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     private var bottomMargin = rows - 1
     private var savedX = 0
     private var savedY = 0
+    /**
+     * Bracketed-paste mode (`CSI ? 2004 h/l`, xtermFrontend parity).
+     * The shell enables this when its line editor supports bracketed
+     * paste; [supportsBracketedPaste] mirrors
+     * `xterm.modes.bracketedPasteMode`.
+     */
+    private var bracketedPasteMode = false
 
     /** Bumped per feed() call; the UI recomposes the Canvas on change. */
     var version: Long = 0L
@@ -543,10 +553,27 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         }
     }
 
+    /** xtermFrontend.supportsBracketedPaste parity: shell opted into ?2004. */
+    fun supportsBracketedPaste(): Boolean = bracketedPasteMode
+
+    /** frontend.isAlternateScreenActive parity (multiline-paste warn gate). */
+    fun isAlternateScreenActive(): Boolean = altActive
+
+    /**
+     * frontend.resetTerminalModes parity: called on a fresh shell so stale
+     * modes (mouse tracking, bracketed paste) never leak across sessions.
+     * Mouse modes are tracked-nowhere (reporting is unsupported), so this
+     * only clears the bracketed-paste flag.
+     */
+    fun resetTerminalModes() {
+        bracketedPasteMode = false
+    }
+
     private fun setPrivate(code: Int, on: Boolean) {
         when (code) {
             25 -> showCursor = on
             7 -> wrapEnabled = on
+            2004 -> bracketedPasteMode = on
             1049 -> if (on) {
                 savedX = cursorX
                 savedY = cursorY
@@ -706,6 +733,7 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         inverse = false
         wrapEnabled = true
         wrapPending = false
+        bracketedPasteMode = false
         topMargin = 0
         bottomMargin = rows - 1
         altActive = false

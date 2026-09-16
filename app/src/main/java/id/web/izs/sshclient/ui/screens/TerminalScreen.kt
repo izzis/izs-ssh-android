@@ -136,6 +136,43 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
+ * Pure half of the desktop BaseTerminalTab.paste funnel (unit-tested):
+ * newline fold, replace-newlines, and the single-trailing-newline strip.
+ * [isMultiline] drives the warn-dialog gate in [TerminalScreen].
+ */
+internal data class PastePrepared(val data: String, val isMultiline: Boolean)
+
+internal fun preparePaste(raw: String, replaceNewlines: Boolean, trim: Boolean): PastePrepared {
+    // 0. Fold to CR (Termux parity: text.replaceAll("\r?\n", "\r")).
+    var data = raw.replace("\r\n", "\r").replace("\n", "\r")
+    // 1. Replace line breaks with spaces (single-line terminals).
+    if (replaceNewlines) {
+        data = data.replace(Regex("[\\r\\n]+"), " ")
+    }
+    // 2. Single trailing newline strip, desktop-exact
+    // (baseTerminalTab checks '\n' only — after the fold above none is
+    // left, so a lone trailing '\r' still counts as multiline below and
+    // shows the dialog, exactly like desktop).
+    if (trim && data.indexOf('\n') == data.length - 1) {
+        data = data.dropLast(1)
+    }
+    if (data.isEmpty()) return PastePrepared("", false)
+    return PastePrepared(data, data.any { it == '\r' || it == '\n' })
+}
+
+/**
+ * Pure step-4 trim of the paste funnel (unit-tested): trailing whitespace
+ * always, leading whitespace only for single-line pastes.
+ */
+internal fun trimPasted(data: String): String {
+    var out = data.trimEnd('\r', '\n', ' ', '\t')
+    if (out.none { it == '\r' || it == '\n' }) {
+        out = out.trimStart(' ', '\t')
+    }
+    return out
+}
+
+/**
  * A real interactive SSH shell: xterm-256color PTY + VT100 emulator grid.
  * Direct typing is primary (soft keyboard streams raw keystrokes, so vim
  * and htop work); the old command box stays as an option via the toggle.
@@ -240,6 +277,11 @@ fun TerminalScreen(
     fun tabColorOf(h: id.web.izs.sshclient.ui.SshSessionHandle): String? =
         liveProfiles.find { it.id == h.profileId }?.color ?: h.profileSnapshot.color
     var closeTarget by remember { mutableStateOf<String?>(null) }
+    // Clipboard paste (desktop BaseTerminalTab.paste parity): pending dialog
+    // when `warnOnMultilinePaste` fires for a multiline paste outside the
+    // alternate screen. Preview is `data.take(1000)` like desktop.
+    var pendingPasteData by remember { mutableStateOf<String?>(null) }
+    var pendingPastePreview by remember { mutableStateOf("") }
     // New-tab mode (Settings > Window, device-only): "sheet" opens the
     // quick-pick bottom sheet over this session, "list" goes home.
     var showNewTabSheet by remember { mutableStateOf(false) }
@@ -497,6 +539,70 @@ fun TerminalScreen(
         sendRaw(seq)
         ctrlSticky = false
         altSticky = false
+    }
+
+    /**
+     * Desktop BaseTerminalTab.paste parity (tabby-terminal
+     * baseTerminalTab.component.ts): newline fold, replace-newlines,
+     * single-trailing-newline strip, multiline warn outside the alt screen
+     * (even a single line with a trailing newline warns, like desktop),
+     * trim on the non-warn path, bracketed wrap when the shell opted into
+     * ?2004. The dialog-confirmed data goes out as-is (no trim), desktop-exact.
+     */
+    fun paste(raw: String) {
+        if (handle.shell == null) return
+        val store = state.loaded?.store ?: emptyMap()
+        val doBracketed = RawConfigStore.terminalBracketedPaste(store)
+        val doWarn = RawConfigStore.terminalWarnOnMultilinePaste(store)
+        val doReplace = RawConfigStore.terminalReplaceNewlinesWithSpacesOnPaste(store)
+        val doTrim = RawConfigStore.terminalTrimWhitespaceOnPaste(store)
+        val prepared = preparePaste(raw, doReplace, doTrim)
+        if (prepared.data.isEmpty()) return
+        // 3. Warn multiline (outside the alt screen only, desktop parity).
+        val isAlt = emulator.isAlternateScreenActive()
+        if (!isAlt && prepared.isMultiline && doWarn) {
+            pendingPasteData = prepared.data
+            // Preview only: CR renders as a space in Compose Text, so show
+            // LF like desktop's detail slice.
+            pendingPastePreview = prepared.data.replace("\r\n", "\n").replace("\r", "\n").take(1000)
+            return
+        }
+        // 4. Trim (non-warn path trims here, desktop parity: the `else`
+        // branch — skipped for multiline+warn and inside the alt screen).
+        var data = prepared.data
+        if (doTrim && !isAlt && !(prepared.isMultiline && doWarn)) {
+            data = trimPasted(data)
+        }
+        if (data.isEmpty()) return
+        // 5. Bracketed wrap (desktop: config + frontend.supportsBracketedPaste).
+        if (doBracketed && emulator.supportsBracketedPaste()) {
+            data = "\u001B[200~$data\u001B[201~"
+        }
+        if (!boxMode) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+        sendRaw(data)
+    }
+
+    fun confirmPendingPaste() {
+        val data = pendingPasteData ?: return
+        pendingPasteData = null
+        pendingPastePreview = ""
+        if (handle.shell == null || data.isEmpty()) return
+        val store = state.loaded?.store ?: emptyMap()
+        val doBracketed = RawConfigStore.terminalBracketedPaste(store)
+        // Desktop-exact: the confirmed data goes out as-is (only the
+        // step-2 strip applied in preparePaste) — no step-4 trim here.
+        var out = data
+        if (doBracketed && emulator.supportsBracketedPaste()) {
+            out = "\u001B[200~$out\u001B[201~"
+        }
+        if (!boxMode) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+        sendRaw(out)
     }
 
     /**
@@ -1216,19 +1322,9 @@ fun TerminalScreen(
                             }
                         },
                         onPasteSelection = { text ->
-                            // Bytes go straight out; the pipe is display-only
-                            // (see SshInputPipe), so there is nothing to keep
-                            // in sync here.
-                            // The Paste tap steals focus onto the button, so
-                            // hand it straight back — otherwise typing and
-                            // backspace need an extra terminal tap first.
-                            if (handle.shell != null) {
-                                if (!boxMode) {
-                                    focusRequester.requestFocus()
-                                    keyboard?.show()
-                                }
-                                sendRaw(text)
-                            }
+                            // Desktop parity: same funnel as BaseTerminalTab.paste
+                            // (newline fold, replace, trim, warn, bracketed).
+                            paste(text)
                         },
                         sidePadPx = sidePadPx,
                         modifier = Modifier.fillMaxSize(),
@@ -1331,7 +1427,18 @@ fun TerminalScreen(
                 SshInputInterceptor(
                     view,
                     onCommitText = { text, submitted ->
-                        if (text.isNotEmpty()) sendCooked(text)
+                        if (text.isNotEmpty()) {
+                            // Keyboard-driven paste (GBoard/SwiftKey
+                            // clipboard): a commit carrying line breaks or
+                            // ESC is a paste, not typing — route it through
+                            // the desktop paste funnel (fold, replace, trim,
+                            // warn, bracketed). Plain typing commits stay on
+                            // sendCooked: routing those would trim meaningful
+                            // spaces (GBoard's trailing auto-space) and
+                            // misfire the multiline dialog.
+                            if (text.any { it == '\r' || it == '\n' || it == '\u001B' }) paste(text)
+                            else sendCooked(text)
+                        }
                         if (submitted) resetImeLine()
                     },
                     onDelete = { n -> repeat(n) { sendRaw(DEL) } },
@@ -1405,6 +1512,46 @@ fun TerminalScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showCloseConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Desktop BaseTerminalTab.paste parity: "Paste multiple lines?" warning
+    // (detail = data.slice(0,1000), Paste/Cancel), shown outside the alt
+    // screen only. Pending data already holds the folded/pre-trimmed text.
+    if (pendingPasteData != null) {
+        AlertDialog(
+            onDismissRequest = {
+                pendingPasteData = null
+                pendingPastePreview = ""
+            },
+            title = { Text("Paste multiple lines?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("You are about to paste multiple lines. Continue?")
+                    if (pendingPastePreview.isNotEmpty()) {
+                        androidx.compose.foundation.layout.Box(
+                            Modifier.background(
+                                MaterialTheme.colorScheme.surfaceContainerHighest,
+                                androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                            ).padding(8.dp),
+                        ) {
+                            Text(
+                                pendingPastePreview,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmPendingPaste() }) { Text("Paste") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    pendingPasteData = null
+                    pendingPastePreview = ""
+                }) { Text("Cancel") }
             },
         )
     }

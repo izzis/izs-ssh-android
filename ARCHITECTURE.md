@@ -95,7 +95,7 @@ app/src/main/java/id/web/izs/sshclient/
        TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells;
                                    hold/triple-tap selection with back-gesture
                                    guards + dismissing Copy/Paste pill
-       TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance) + recent profiles (synced YAML); sticky header with busy spinner
+       TerminalSettingsScreen.kt   Scrollback + macro delay + sessions (font size moved to Appearance) + recent profiles (synced YAML) + Clipboard 4 toggles (bracketed/warn/replace/trim, synced YAML); sticky header with busy spinner
        AppearanceSettingsScreen.kt App theme (device-only) + terminal font/cursor (YAML) + font size + live preview
                                    + Follow-color-scheme toggle (disables
                                    theme/palette while on); sticky header with busy spinner
@@ -130,7 +130,8 @@ app/src/main/java/id/web/izs/sshclient/
       SshDefaults.kt      Transient defaults applied on the domain view only
       ConfigMigrator.kt   Legacy migrations (name-based groups -> ids, jump hosts)
       RawConfigStore.kt   RAW YAML document ops (update/delete profile, secrets JSON,
-                          terminal.showRecentProfiles + appearance.tabsLocation read/write — desktop-owned keys, never invented)
+                          terminal.showRecentProfiles + appearance.tabsLocation + 4 clipboard keys (bracketed/warn/replace/trim,
+                          delete-on-default + empty-map prune) read/write — desktop-owned keys, never invented)
       ProfileColor.kt     Identity-color palette + hex normalize/parse (pure JVM)
     vault/
       VaultCrypto.kt      PBKDF2-HmacSHA512 x100k/salt8 -> AES-256-CBC/iv16 (pure JVM)
@@ -417,9 +418,33 @@ the IME:
   only for an armed endpoint drag); output-follow freezes; tap clears.
   Copy/Paste float above the selection in an opaque pill (below when no
   room); both dismiss back to typing (Copy stays silent — no banner).
-  Paste sends the clipboard to the session and refocuses the keyboard.
-  Absolute rows are scroll-stable so handles track the text (a history
-  shrink, resize, font change, or alt-buffer switch drops the selection).
+  Copy is always plaintext (grid chars, no ANSI/HTML — `copyAsHTML` is not
+  synced). Paste goes through the desktop funnel (`paste()`: newline fold,
+  replace-newlines, single-trailing strip, multiline warn dialog outside
+  the alt screen, bracketed `ESC[200~…ESC[201~` wrap when the shell enabled
+  `?2004`) and refocuses the keyboard. Keyboard-driven paste (IME commit
+  with line breaks/ESC) is routed to the same funnel; plain typing commits
+  stay direct so auto-spaces survive. Absolute rows are scroll-stable so
+  handles track the text (a history shrink, resize, font change, or
+  alt-buffer switch drops the selection).
+- **Clipboard parity (desktop Settings > Terminal > Clipboard):** 4 synced
+  keys under `terminal.*`, absent = default, delete-on-default (ConfigProxy
+  parity). `copyOnSelect`/`copyAsHTML` are intentionally NOT synced.
+  | Key | Default |
+  |---|---|
+  | `bracketedPaste` | `true` |
+  | `warnOnMultilinePaste` | `true` |
+  | `replaceNewlinesWithSpacesOnPaste` | `false` |
+  | `trimWhitespaceOnPaste` | `true` |
+  Shell side: `TerminalEmulator` tracks `?2004` (`supportsBracketedPaste`,
+  cleared by `resetTerminalModes()` on every fresh shell + full `reset()`),
+  `isAlternateScreenActive()` gates the warn dialog. Server-emitted standout
+  (e.g. a shell highlighting the bracketed-pasted region) renders faithfully
+  like desktop xterm — a white block over pasted text is shell bytes, not an
+  app selection bug (app selection is the purple overlay, cleared by tap).
+  Alt-screen tracking covers `?1049` only (pre-existing gap: `?1047`-only apps
+  are rare and undetected; `?1048` needs no handling — cursor save/restore
+  only, never switches buffers).
 - **Sync target (YAML-only):** host/token/configID live ONLY in YAML >
   `configSync` (outer shell, readable while locked — desktop parity) and are
   RAM-mirrored after load; no prefs duplicate exists. "Test and save" writes
@@ -431,7 +456,7 @@ the IME:
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 299 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 324 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -470,6 +495,7 @@ the IME:
 | `PortForwardingTest` | forward validation + Local/Remote traffic proofs vs MINA, bind-conflict abort |
 | `SocksProxyTest` | SOCKS defaults/validation + live handshake-through-proxy vs fake SOCKS5 |
 | `AuthSelectionTest` | auth selection honored (stage proofs) + typed failover bypass vs MINA |
+| `ClipboardParityTest` | 4 clipboard keys (defaults/delete-on-default/prune) + `?2004`/`?1049` tracking + paste funnel (fold/replace/strip/trim) |
 
 ## 9. Background survival (SessionService)
 

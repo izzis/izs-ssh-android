@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -65,6 +67,22 @@ fun TerminalSettingsScreen(
     var maxRecent by remember(state.loaded) {
         mutableIntStateOf(RawConfigStore.showRecentProfiles(state.loaded?.store ?: emptyMap()))
     }
+    // Clipboard parity (tabby-terminal Settings > Terminal > Clipboard):
+    // bracketedPaste, warnOnMultilinePaste, replaceNewlinesWithSpacesOnPaste,
+    // trimWhitespaceOnPaste. copyOnSelect/copyAsHTML are NOT synced.
+    // Absent = default.
+    var bracketed by remember(state.loaded) {
+        mutableStateOf(RawConfigStore.terminalBracketedPaste(state.loaded?.store ?: emptyMap()))
+    }
+    var warnPaste by remember(state.loaded) {
+        mutableStateOf(RawConfigStore.terminalWarnOnMultilinePaste(state.loaded?.store ?: emptyMap()))
+    }
+    var replaceNl by remember(state.loaded) {
+        mutableStateOf(RawConfigStore.terminalReplaceNewlinesWithSpacesOnPaste(state.loaded?.store ?: emptyMap()))
+    }
+    var trimPaste by remember(state.loaded) {
+        mutableStateOf(RawConfigStore.terminalTrimWhitespaceOnPaste(state.loaded?.store ?: emptyMap()))
+    }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -81,6 +99,31 @@ fun TerminalSettingsScreen(
         stepDelayMs = c
         delayText = c.toString()
         state.disk.macroStepDelayMs = c
+    }
+
+    // Desktop parity (ngModelChange=config.save()): applies live, no Save
+    // button. Writing a default removes the key (minimal YAML, absent =
+    // default); on failure the toggle reverts and the error shows.
+    fun commitClipboard(
+        next: Boolean,
+        apply: (LinkedHashMap<String, Any?>, Boolean) -> Unit,
+        setUi: (Boolean) -> Unit,
+    ) {
+        val old = !next
+        setUi(next)
+        msg = null
+        scope.launch {
+            busy = true
+            try {
+                state.repo.updateLocalRaw { raw -> apply(raw, next) }
+                state.refresh()
+            } catch (e: Exception) {
+                setUi(old)
+                msg = "Couldn't save: ${e.message}"
+            } finally {
+                busy = false
+            }
+        }
     }
 
     // Desktop parity (ngModelChange=config.save()): applies live, no Save
@@ -279,6 +322,61 @@ fun TerminalSettingsScreen(
                 enabled = !encrypted && !busy,
             ) { Icon(Icons.Filled.Add, contentDescription = "Increase") }
         }
+        Text("Clipboard", style = MaterialTheme.typography.titleMedium)
+        if (encrypted) {
+            Text(
+                "These settings are read-only for encrypted configs. Edit them on desktop.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        @Composable
+        fun ClipRow(
+            title: String,
+            desc: String,
+            checked: Boolean,
+            onToggle: (Boolean) -> Unit,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+                    .clickable(enabled = !encrypted && !busy) { onToggle(!checked) },
+            ) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(title)
+                    Text(
+                        desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = checked,
+                    onCheckedChange = onToggle,
+                    enabled = !encrypted && !busy,
+                )
+            }
+        }
+        ClipRow(
+            "Bracketed paste (requires shell support)",
+            "Prevents accidental execution of pasted commands",
+            bracketed,
+        ) { commitClipboard(it, RawConfigStore::setTerminalBracketedPaste) { v -> bracketed = v } }
+        ClipRow(
+            "Warn on multi-line paste",
+            "Show a confirmation box when pasting multiple lines",
+            warnPaste,
+        ) { commitClipboard(it, RawConfigStore::setTerminalWarnOnMultilinePaste) { v -> warnPaste = v } }
+        ClipRow(
+            "Replace line breaks with spaces",
+            "Flatten pasted text into a single line for terminals that do not support multiline paste",
+            replaceNl,
+        ) { commitClipboard(it, RawConfigStore::setTerminalReplaceNewlinesWithSpacesOnPaste) { v -> replaceNl = v } }
+        ClipRow(
+            "Trim whitespace and newlines",
+            "Remove whitespace and newlines around the copied text",
+            trimPaste,
+        ) { commitClipboard(it, RawConfigStore::setTerminalTrimWhitespaceOnPaste) { v -> trimPaste = v } }
         msg?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
     }
