@@ -32,6 +32,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          # The action defaults to `tools platform-tools`, but Google removed
+          # the obsolete `tools` package from the SDK repository (fails the
+          # whole step). platform-tools is all we add — platforms/build-tools
+          # come preinstalled on the runner.
+          packages: platform-tools
 
       - name: Derive version from tag
         id: version
