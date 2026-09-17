@@ -330,10 +330,10 @@ resize: measured grid -> settle-debounced (150ms) emulator.resize +
   6dp side padding keeps edge columns clear of screen protectors.
 - **Connect honors the profile:** login scripts (`LoginScriptRunner`:
   unconditional at session-ready, then per-chunk expect/regex/optional
-  matching, desktop quirk-for-quirk), keepalive interval as
-  `KEEP_ALIVE` (SSH_MSG_IGNORE) heartbeats (`countMax` stored-only, no sshj
-  equivalent), custom algorithms via per-connection `DefaultConfig` (desktop
-  defaults take the plain `SSHClient()` path — zero behavior change).
+  matching, desktop quirk-for-quirk), keepalive interval + countMax as
+  `KEEP_ALIVE` (SSH_MSG_IGNORE heartbeats; the provider is fixed on the
+  `Config` before `SSHClient()` is built — sshj freezes it into the
+  connection at construction), custom algorithms via per-connection `DefaultConfig`.
   `warnOnClose` = per-profile override ?? global `ssh.warnOnClose`
   (default off); the confirm dialog guards live sessions only.
 
@@ -666,16 +666,17 @@ stripping. Editor marks non-working options "(desktop only)" instead of
 hiding them, so synced values stay manageable from the phone.
 
 Connects on-device: password, publicKey, Auto, SOCKS proxy (default 1080),
-Local/Remote port forwarding, keepalive interval, readyTimeout,
-reuseSession, custom algorithms, login scripts, per-profile warnOnClose.
+Local/Remote port forwarding, keepalive interval + countMax watchdog,
+readyTimeout, reuseSession, custom algorithms, login scripts, per-profile
+warnOnClose.
 `keyboardInteractive` narrows to password + the failover prompt (no KI
 transport); typed failover passwords bypass the `auth` selection.
 
 Not yet (implementable, no platform blocker): keyboard-interactive
 transport + challenge UI, HTTP CONNECT proxy, jump-host chains
 (`connectVia` exists in sshj), Dynamic (device-side SOCKS listener),
-`skipBanner` filtering, `keepaliveCountMax` watchdog, `telnet` profile
-type (plain TCP + the existing emulator).
+`skipBanner` filtering, `telnet` profile type (plain TCP + the existing
+emulator).
 
 Desktop-only (no mobile counterpart): `x11` (no X server), `agentForward`
 and `auth: agent` (no ssh-agent), `proxyCommand` (no helper binaries like

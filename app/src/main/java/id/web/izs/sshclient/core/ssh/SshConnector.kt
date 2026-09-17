@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import net.schmizz.keepalive.KeepAliveProvider
+import net.schmizz.keepalive.KeepAliveRunner
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
@@ -22,7 +23,8 @@ import kotlin.concurrent.thread
  * Koneksi SSH v1 via sshj 0.40.0 (aktif maintained, ed25519 + KEX modern).
  *
  * Honored profile options: host/port/user/auth (+vault secrets), readyTimeout,
- * keepaliveInterval (SSH_MSG_IGNORE heartbeats; countMax stored-only),
+ * keepaliveInterval + keepaliveCountMax (SSH_MSG_IGNORE heartbeats, the
+ * transport drops after countMax unanswered — ServerAliveCountMax parity),
  * login scripts (LoginScriptRunner), custom algorithms (per-connection sshj
  * config; desktop defaults take the plain path).
  * - agent auth: not supported on Android (no ssh-agent) -> clear message
@@ -262,16 +264,22 @@ class SshConnector {
             SshAlgorithmFactories.configFor(
                 o.algorithms,
                 HostKeyTrust.knownTypes(knownHosts, o.host, port),
-            ),
+            ).apply {
+                // The provider MUST be chosen here: SSHClient freezes it
+                // into the connection at construction, so assigning it
+                // afterwards (on client.transport.config) silently keeps
+                // the DefaultConfig HEARTBEAT instead. KEEP_ALIVE is a
+                // KeepAliveRunner: SSH_MSG_IGNORE heartbeats plus the
+                // desktop keepaliveCountMax watchdog (drops the transport
+                // after that many unanswered heartbeats).
+                keepAliveProvider = KeepAliveProvider.KEEP_ALIVE
+            },
         )
         if (socksProxy != null) {
             onStage("Connecting via SOCKS proxy ${socksProxy.hostString}:${socksProxy.port}...")
             client.socketFactory = SocksProxy.socketFactory(socksProxy)
         }
-        // Advanced tab: keepalive heartbeats (SSH_MSG_IGNORE, universally
-        // safe). The desktop countMax has no sshj equivalent and stays
-        // stored-only; the interval is honored (ms -> s, min 1).
-        client.transport.config.keepAliveProvider = KeepAliveProvider.KEEP_ALIVE
+        // (Keepalive provider is fixed at construction above.)
         try {
             withTimeout(timeoutMs.coerceIn(5_000, 120_000)) {
                 onStage("Preparing secure connection...")
@@ -341,6 +349,7 @@ class SshConnector {
                 try {
                     val keepAlive = client.connection.keepAlive
                     keepAlive.keepAliveInterval = (o.keepaliveInterval / 1000).toInt().coerceAtLeast(1)
+                    (keepAlive as? KeepAliveRunner)?.maxAliveCount = o.keepaliveCountMax.coerceAtLeast(1)
                     if (!keepAlive.isAlive) keepAlive.start()
                 } catch (_: Exception) {
                     // Best-effort: a dead keepalive must never fail the session.
