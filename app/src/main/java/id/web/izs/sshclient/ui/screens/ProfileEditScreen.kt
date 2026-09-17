@@ -602,7 +602,6 @@ fun ProfileEditScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongParameterList")
 private fun GeneralTab(
     name: String, onName: (String) -> Unit,
     groups: List<id.web.izs.sshclient.core.config.ProfileGroup>,
@@ -1031,7 +1030,6 @@ private fun ForwardCard(f: ForwardedPort, onUpdate: (ForwardedPort) -> Unit, onR
 }
 
 @Composable
-@Suppress("LongParameterList")
 private fun AdvancedTab(
     x11: Boolean, onX11: (Boolean) -> Unit,
     agentForward: Boolean, onAgentForward: (Boolean) -> Unit,

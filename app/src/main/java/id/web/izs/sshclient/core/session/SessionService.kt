@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import id.web.izs.sshclient.MainActivity
 import id.web.izs.sshclient.data.local.ConfigDisk
 
@@ -73,12 +74,15 @@ class SessionService : Service() {
         }
         ensureChannel(this)
         val notification = buildSessionsNotification(this, labels)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID_SESSIONS, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            @Suppress("DEPRECATION")
-            startForeground(NOTIF_ID_SESSIONS, notification)
-        }
+        // ServiceCompat routes to the 3-arg startForeground (with the
+        // SPECIAL_USE type) on Q+ and the legacy 2-arg below — one call,
+        // no version branch, no deprecation warning.
+        ServiceCompat.startForeground(
+            this,
+            NOTIF_ID_SESSIONS,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+        )
         applyWakeLock(true)
     }
 

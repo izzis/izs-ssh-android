@@ -50,15 +50,14 @@ object RawConfigStore {
         return Yaml(opts)
     }
 
-    @Suppress("UNCHECKED_CAST")
     fun loadRaw(yamlStr: String): LinkedHashMap<String, Any?> {
         if (yamlStr.isBlank()) return linkedMapOf(KEY_VERSION to ConfigMigrator.LATEST_VERSION)
         val loaded = yaml().load<Any>(yamlStr)
         return when (loaded) {
-            is LinkedHashMap<*, *> -> loaded as LinkedHashMap<String, Any?>
-            is Map<*, *> -> LinkedHashMap<String, Any?>().also { m ->
-                loaded.forEach { (k, v) -> m[k.toString()] = v }
-            }
+            // `is Map<*, *>` is fully checkable; asMutableStringMap copies
+            // with string keys (dynamic YAML maps: keys are strings by construction).
+            is Map<*, *> -> loaded.asMutableStringMap()
+                ?: linkedMapOf(KEY_VERSION to ConfigMigrator.LATEST_VERSION)
             else -> linkedMapOf(KEY_VERSION to ConfigMigrator.LATEST_VERSION)
         }
     }
@@ -76,7 +75,6 @@ object RawConfigStore {
      *
      * @throws IllegalArgumentException with a UI-ready message.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun parseImport(text: String): LinkedHashMap<String, Any?> {
         require(text.isNotBlank()) { "Paste a YAML config first" }
         val loaded: Any? = try {
@@ -86,10 +84,8 @@ object RawConfigStore {
             throw IllegalArgumentException("Invalid YAML${if (first.isNullOrBlank()) "" else ": $first"}")
         }
         val doc: LinkedHashMap<String, Any?> = when (loaded) {
-            is LinkedHashMap<*, *> -> loaded as LinkedHashMap<String, Any?>
-            is Map<*, *> -> LinkedHashMap<String, Any?>().also { m ->
-                loaded.forEach { (k, v) -> m[k.toString()] = v }
-            }
+            is Map<*, *> -> loaded.asMutableStringMap()
+                ?: throw IllegalArgumentException("Not a Tabby config (top level must be a mapping)")
             else -> throw IllegalArgumentException("Not a Tabby config (top level must be a mapping)")
         }
         if (isEncrypted(doc) && storedVault(doc) != null) return doc
@@ -105,9 +101,8 @@ object RawConfigStore {
      * Read from [SyncRepository.Loaded.store] (decrypted merged view when
      * unlocked, outer raw otherwise) — never from the defaulted Domain view.
      */
-    @Suppress("UNCHECKED_CAST")
     fun showRecentProfiles(doc: Map<String, Any?>): Int {
-        val n = ((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("showRecentProfiles") as? Number)
+        val n = ((doc[KEY_TERMINAL].asStringMap())?.get("showRecentProfiles") as? Number)
             ?.toInt() ?: return DEFAULT_SHOW_RECENT_PROFILES
         return n.coerceAtLeast(0)
     }
@@ -117,10 +112,9 @@ object RawConfigStore {
      * Like desktop (`ngModelChange=config.save()`), an explicit set is
      * persisted even when it equals the default.
      */
-    @Suppress("UNCHECKED_CAST")
     fun setShowRecentProfiles(doc: MutableMap<String, Any?>, v: Int) {
         val term = LinkedHashMap(
-            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+            (doc[KEY_TERMINAL].asStringMap()) ?: emptyMap(),
         )
         term["showRecentProfiles"] = v.coerceIn(0, MAX_SHOW_RECENT_PROFILES)
         doc[KEY_TERMINAL] = term
@@ -131,19 +125,17 @@ object RawConfigStore {
      * parity). Null when absent/unparseable — render falls back to
      * [IZS_DEFAULT_SCHEME]. `lightColorScheme` is ignored (dark-only app).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun terminalColorSchemeRaw(doc: Map<String, Any?>): TerminalColorScheme? =
-        parseTerminalColorScheme((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("colorScheme"))
+        parseTerminalColorScheme((doc[KEY_TERMINAL].asStringMap())?.get("colorScheme"))
 
     /**
      * Explicit user set: writes the full scheme object (desktop stores
      * objects inline, never name refs). Null REMOVES the key — and the
      * `terminal` map itself when left empty — restoring absent = default.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun setTerminalColorScheme(doc: MutableMap<String, Any?>, scheme: TerminalColorScheme?) {
         val term = LinkedHashMap(
-            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+            (doc[KEY_TERMINAL].asStringMap()) ?: emptyMap(),
         )
         if (scheme == null) term.remove("colorScheme") else term["colorScheme"] = scheme.toRawMap()
         if (term.isEmpty()) doc.remove(KEY_TERMINAL) else doc[KEY_TERMINAL] = term
@@ -153,16 +145,14 @@ object RawConfigStore {
      * `terminal.customColorSchemes` read (desktop parity). Unparseable
      * entries are skipped, never fatal.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun customColorSchemesRaw(doc: Map<String, Any?>): List<TerminalColorScheme> =
-        (((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("customColorSchemes") as? List<*>)
+        (((doc[KEY_TERMINAL].asStringMap())?.get("customColorSchemes") as? List<*>)
             ?: emptyList<Any>()).mapNotNull { parseTerminalColorScheme(it) }
 
     /** Explicit user set (custom scheme editor). Empty list removes the key. */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun setCustomColorSchemes(doc: MutableMap<String, Any?>, schemes: List<TerminalColorScheme>) {
         val term = LinkedHashMap(
-            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+            (doc[KEY_TERMINAL].asStringMap()) ?: emptyMap(),
         )
         if (schemes.isEmpty()) term.remove("customColorSchemes")
         else term["customColorSchemes"] = schemes.map { it.toRawMap() }
@@ -173,18 +163,16 @@ object RawConfigStore {
      * `terminal.font` read (desktop parity). Null when absent/non-string —
      * absent means the desktop default; resolve with [resolveTerminalFont].
      */
-    @Suppress("UNCHECKED_CAST")
     fun terminalFontName(doc: Map<String, Any?>): String? =
-        (doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("font") as? String
+        (doc[KEY_TERMINAL].asStringMap())?.get("font") as? String
 
     /**
      * Explicit user set (Appearance > Font). Null REMOVES the key — and the
      * `terminal` map itself when left empty — restoring absent = default.
      */
-    @Suppress("UNCHECKED_CAST")
     fun setTerminalFont(doc: MutableMap<String, Any?>, name: String?) {
         val term = LinkedHashMap(
-            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+            (doc[KEY_TERMINAL].asStringMap()) ?: emptyMap(),
         )
         if (name == null) term.remove("font") else term["font"] = name
         if (term.isEmpty()) doc.remove(KEY_TERMINAL) else doc[KEY_TERMINAL] = term
@@ -194,18 +182,16 @@ object RawConfigStore {
      * `terminal.cursor` read with desktop-default fallback (block).
      * Unknown garbage resolves to BLOCK via [parseTerminalCursor].
      */
-    @Suppress("UNCHECKED_CAST")
     fun terminalCursor(doc: Map<String, Any?>): TerminalCursor =
-        parseTerminalCursor((doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("cursor") as? String)
+        parseTerminalCursor((doc[KEY_TERMINAL].asStringMap())?.get("cursor") as? String)
 
     /**
      * Explicit user set (Appearance > Cursor): persisted even when it
      * equals the default (showRecentProfiles parity).
      */
-    @Suppress("UNCHECKED_CAST")
     fun setTerminalCursor(doc: MutableMap<String, Any?>, cursor: TerminalCursor) {
         val term = LinkedHashMap(
-            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+            (doc[KEY_TERMINAL].asStringMap()) ?: emptyMap(),
         )
         term["cursor"] = terminalCursorYamlName(cursor)
         doc[KEY_TERMINAL] = term
@@ -215,15 +201,13 @@ object RawConfigStore {
      * `terminal.cursorBlink` read with desktop-default fallback (true).
      * Non-boolean garbage falls back to the default, never fatal.
      */
-    @Suppress("UNCHECKED_CAST")
     fun terminalCursorBlink(doc: Map<String, Any?>): Boolean =
-        (doc[KEY_TERMINAL] as? Map<String, Any?>)?.get("cursorBlink") as? Boolean ?: true
+        (doc[KEY_TERMINAL].asStringMap())?.get("cursorBlink") as? Boolean ?: true
 
     /** Explicit user set (Appearance > Cursor blink). */
-    @Suppress("UNCHECKED_CAST")
     fun setTerminalCursorBlink(doc: MutableMap<String, Any?>, blink: Boolean) {
         val term = LinkedHashMap(
-            (doc[KEY_TERMINAL] as? Map<String, Any?>) ?: emptyMap(),
+            (doc[KEY_TERMINAL].asStringMap()) ?: emptyMap(),
         )
         term["cursorBlink"] = blink
         doc[KEY_TERMINAL] = term
@@ -245,11 +229,9 @@ object RawConfigStore {
     const val DEFAULT_REPLACE_NEWLINES_WITH_SPACES_ON_PASTE = false
     const val DEFAULT_TRIM_WHITESPACE_ON_PASTE = true
 
-    @Suppress("UNCHECKED_CAST")
     private fun terminalMap(doc: Map<String, Any?>): Map<String, Any?>? =
-        doc[KEY_TERMINAL] as? Map<String, Any?>
+        doc[KEY_TERMINAL].asStringMap()
 
-    @Suppress("UNCHECKED_CAST")
     private fun mutableTerminalMap(doc: MutableMap<String, Any?>): LinkedHashMap<String, Any?> =
         LinkedHashMap(terminalMap(doc) ?: emptyMap())
 
@@ -296,19 +278,17 @@ object RawConfigStore {
      * (or null when absent/non-string); use [resolveTabLocation] to map it.
      * Read from [SyncRepository.Loaded.store], like [showRecentProfiles].
      */
-    @Suppress("UNCHECKED_CAST")
     fun tabsLocationRaw(doc: Map<String, Any?>): String? =
-        (doc[KEY_APPEARANCE] as? Map<String, Any?>)?.get("tabsLocation") as? String
+        (doc[KEY_APPEARANCE].asStringMap())?.get("tabsLocation") as? String
 
     /**
      * Explicit user set (Window settings): writes the desktop-owned
      * `appearance.tabsLocation` key. `null` (Off) REMOVES the key — and the
      * `appearance` map itself when left empty — restoring absent = Off.
      */
-    @Suppress("UNCHECKED_CAST")
     fun setTabsLocation(doc: MutableMap<String, Any?>, v: TabLocation?) {
         val app = LinkedHashMap(
-            (doc[KEY_APPEARANCE] as? Map<String, Any?>) ?: emptyMap(),
+            (doc[KEY_APPEARANCE].asStringMap()) ?: emptyMap(),
         )
         if (v == null || v == TabLocation.OFF) app.remove("tabsLocation")
         else app["tabsLocation"] = v.yamlValue
@@ -319,10 +299,9 @@ object RawConfigStore {
      * Parse a vault-blob config JSON object into a raw document (decrypt path).
      * Inverse of [toJson]; shared with the sync layer so tests exercise it.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML/JSON maps: keys are strings by construction
     fun jsonToRaw(configJson: String): LinkedHashMap<String, Any?> {
         val el = kotlinx.serialization.json.Json.parseToJsonElement(configJson)
-        val map = jsonElementToJava(el) as? Map<String, Any?> ?: emptyMap()
+        val map = jsonElementToJava(el).asStringMap() ?: emptyMap()
         return loadRaw(dumpRaw(LinkedHashMap(map)))
     }
 
@@ -428,9 +407,8 @@ object RawConfigStore {
 
     fun isEncrypted(doc: Map<String, Any?>): Boolean = doc[KEY_ENCRYPTED] as? Boolean ?: false
 
-    @Suppress("UNCHECKED_CAST")
     fun storedVault(doc: Map<String, Any?>): StoredVault? {
-        val v = doc[KEY_VAULT] as? Map<String, Any?> ?: return null
+        val v = doc[KEY_VAULT].asStringMap() ?: return null
         return StoredVault(
             version = (v["version"] as? Number)?.toInt() ?: 1,
             contents = v["contents"]?.toString() ?: "",
@@ -439,7 +417,6 @@ object RawConfigStore {
         )
     }
 
-    @Suppress("UNCHECKED_CAST")
     fun toDomain(doc: Map<String, Any?>): TabbyConfig {
         val version = (doc[KEY_VERSION] as? Number)?.toInt() ?: ConfigMigrator.LATEST_VERSION
         val encrypted = isEncrypted(doc)
@@ -454,7 +431,7 @@ object RawConfigStore {
                 val name = it["name"]?.toString() ?: return@mapNotNull null
                 ProfileGroup(id = id, name = name, parentGroupId = it["parentGroupId"]?.toString())
             }
-        val sshMap = doc[KEY_SSH] as? Map<String, Any?>
+        val sshMap = doc[KEY_SSH].asStringMap()
         val ssh = SshGlobals(
             knownHosts = (sshMap?.get("knownHosts") as? List<*>)?.mapNotNull { entry ->
                 (entry as? Map<*, *>)?.let { m ->
@@ -470,8 +447,8 @@ object RawConfigStore {
             verifyHostKeys = sshMap?.get("verifyHostKeys") as? Boolean ?: true,
             warnOnClose = sshMap?.get("warnOnClose") as? Boolean ?: false,
         )
-        val csMap = doc[KEY_CONFIG_SYNC] as? Map<String, Any?>
-        val parts = csMap?.get("parts") as? Map<String, Any?>
+        val csMap = doc[KEY_CONFIG_SYNC].asStringMap()
+        val parts = csMap?.get("parts").asStringMap()
         val configSync = ConfigSync(
             host = csMap?.get("host")?.toString(),
             token = csMap?.get("token")?.toString(),
@@ -488,7 +465,6 @@ object RawConfigStore {
         )
     }
 
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     private fun parseProfile(m: Map<String, Any?>): SshProfile? {
         // Desktop v4 parity (config.service.ts:390): id-less profiles get
         // `<type>:custom:<uuid>`, never dropped.
@@ -513,7 +489,7 @@ object RawConfigStore {
             )
         }
         val name = m["name"]?.toString() ?: id
-        val o = (m["options"] as? Map<String, Any?>) ?: emptyMap()
+        val o = (m["options"].asStringMap()) ?: emptyMap()
         return SshProfile(
             id = id,
             type = type,
@@ -551,9 +527,8 @@ object RawConfigStore {
         )
     }
 
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     private fun parseAlgorithms(raw: Any?): Map<String, List<String>> {
-        val m = raw as? Map<String, Any?> ?: return emptyMap()
+        val m = raw.asStringMap() ?: return emptyMap()
         return SshAlgorithms.TYPES.mapNotNull { k ->
             val list = (m[k] as? List<*>)?.map { it.toString() }
             if (list == null) null else k to list
@@ -615,14 +590,13 @@ object RawConfigStore {
      * - version defaults to LATEST when missing (a desktop-uploaded remote
      *   always carries one after the desktop's first save).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun mergeDownload(
         remoteRaw: LinkedHashMap<String, Any?>,
         localRaw: LinkedHashMap<String, Any?>,
         parts: Map<String, Boolean>,
     ): LinkedHashMap<String, Any?> {
         val doc = LinkedHashMap<String, Any?>(remoteRaw)
-        (localRaw[KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+        (localRaw[KEY_CONFIG_SYNC].asStringMap())?.let {
             doc[KEY_CONFIG_SYNC] = it
         } ?: doc.remove(KEY_CONFIG_SYNC)
         if (!isEncrypted(doc)) {
@@ -655,7 +629,6 @@ object RawConfigStore {
      * @param groupWrite null = keep; "" = remove the key (ungrouped);
      * otherwise set the value.
      */
-    @Suppress("UNCHECKED_CAST")
     fun updateProfileMap(
         existing: Map<String, Any?>,
         p: SshProfile,
@@ -684,7 +657,7 @@ object RawConfigStore {
         if (p.terminalColorScheme != null) out["terminalColorScheme"] = p.terminalColorScheme.toRawMap()
         else out.remove("terminalColorScheme")
         val o = p.options
-        val opts = LinkedHashMap<String, Any?>((existing["options"] as? Map<String, Any?>) ?: emptyMap())
+        val opts = LinkedHashMap<String, Any?>((existing["options"].asStringMap()) ?: emptyMap())
         opts["host"] = o.host
         opts["port"] = o.port
         opts["user"] = o.user
@@ -768,7 +741,6 @@ object RawConfigStore {
      * host+port+type, replaces digest). The single source of trust — read
      * offline from the local cache, synced to desktop via upload.
      */
-    @Suppress("UNCHECKED_CAST")
     fun appendKnownHost(doc: LinkedHashMap<String, Any?>, entry: KnownHostEntry) {
         val ssh = LinkedHashMap((doc[KEY_SSH] as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to v } ?: emptyMap())
         val list = ((ssh["knownHosts"] as? List<*>)?.toMutableList() ?: mutableListOf())
@@ -796,7 +768,6 @@ object RawConfigStore {
      * and the encrypted vault-blob edit so both write the identical desktop
      * ssh-section shape. Mutates [doc] in place, like [appendKnownHost].
      */
-    @Suppress("UNCHECKED_CAST")
     fun setSshFlags(doc: LinkedHashMap<String, Any?>, verify: Boolean, warn: Boolean) {
         val ssh = LinkedHashMap(
             (doc[KEY_SSH] as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to v }
@@ -812,7 +783,6 @@ object RawConfigStore {
      * session-minted ids, so fall back to name+type+connection params for
      * those (`:custom:` ids only). Returns -1 when absent.
      */
-    @Suppress("UNCHECKED_CAST")
     fun findProfileIndex(
         profiles: List<*>,
         profileId: String,
@@ -827,7 +797,7 @@ object RawConfigStore {
         if (!profileId.contains(":custom:")) return -1
         profiles.forEachIndexed { i, m ->
             val map = m as? Map<*, *> ?: return@forEachIndexed
-            val o = map["options"] as? Map<String, Any?>
+            val o = map["options"].asStringMap()
             if (map["name"]?.toString() == name &&
                 (map["type"]?.toString() ?: "ssh") == (type ?: "ssh") &&
                 (o?.get("host")?.toString() ?: "") == (host ?: "") &&
@@ -872,9 +842,8 @@ object RawConfigStore {
         )
     }
 
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun setSyncTarget(doc: LinkedHashMap<String, Any?>, target: RawSyncTarget) {
-        val cs = (doc[KEY_CONFIG_SYNC] as? LinkedHashMap<String, Any?>)
+        val cs = (doc[KEY_CONFIG_SYNC].asMutableStringMap())
             ?: linkedMapOf<String, Any?>().also { doc[KEY_CONFIG_SYNC] = it }
         if (target.host == null) cs.remove("host") else cs["host"] = target.host
         if (target.token == null) cs.remove("token") else cs["token"] = target.token
@@ -959,9 +928,8 @@ object RawConfigStore {
      * secret (null when absent, blank, or already a vault:// ref).
      * Parse fallbacks (root/22) match parseProfile so secret keys resolve.
      */
-    @Suppress("UNCHECKED_CAST")
     fun inlinePasswordOf(profile: Map<String, Any?>): InlinePassword? {
-        val o = profile["options"] as? Map<String, Any?> ?: return null
+        val o = profile["options"].asStringMap() ?: return null
         val pw = o["password"]?.toString() ?: return null
         if (pw.isBlank() || pw.startsWith("vault://")) return null
         return InlinePassword(
@@ -973,19 +941,17 @@ object RawConfigStore {
     }
 
     /** Copy of the profile map with the inline password key removed. */
-    @Suppress("UNCHECKED_CAST")
     fun withoutInlinePassword(profile: Map<String, Any?>): LinkedHashMap<String, Any?> {
         val out = LinkedHashMap<String, Any?>(profile)
-        val o = LinkedHashMap<String, Any?>(profile["options"] as? Map<String, Any?> ?: emptyMap())
+        val o = LinkedHashMap<String, Any?>(profile["options"].asStringMap() ?: emptyMap())
         o.remove("password")
         out["options"] = o
         return out
     }
 
     /** All `options.privateKeys` entries as strings (refs, PEM, or paths). */
-    @Suppress("UNCHECKED_CAST")
     fun privateKeyRefs(profile: Map<String, Any?>): List<String> {
-        val o = profile["options"] as? Map<String, Any?> ?: return emptyList()
+        val o = profile["options"].asStringMap() ?: return emptyList()
         return (o["privateKeys"] as? List<*>)?.map { it.toString() } ?: emptyList()
     }
 
@@ -998,12 +964,28 @@ object RawConfigStore {
         privateKeyRefs(profile).filter { !it.startsWith("vault://") && it.contains("-----BEGIN") }
 
     /** Copy of the profile map with the given final key-ref list. */
-    @Suppress("UNCHECKED_CAST")
     fun withPrivateKeys(profile: Map<String, Any?>, refs: List<String>): LinkedHashMap<String, Any?> {
         val out = LinkedHashMap<String, Any?>(profile)
-        val o = LinkedHashMap<String, Any?>(profile["options"] as? Map<String, Any?> ?: emptyMap())
+        val o = LinkedHashMap<String, Any?>(profile["options"].asStringMap() ?: emptyMap())
         o["privateKeys"] = refs.toList()
         out["options"] = o
         return out
     }
 }
+
+/**
+ * Warning-free view of a dynamic YAML/JSON map.
+ *
+ * SnakeYAML parses mappings into `Map<*, *>`; casting straight to
+ * `Map<String, Any?>` is unchecked (generics are erased) and used to need
+ * `@Suppress("UNCHECKED_CAST")` at every call site. Casting to `Map<*, *>`
+ * instead is fully checkable, so no warning is produced — keys are mapped
+ * with `toString()` (they are strings by construction; this mirrors what
+ * [RawConfigStore.loadRaw] already did for the generic branch).
+ */
+internal fun Any?.asStringMap(): Map<String, Any?>? =
+    (this as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to v }
+
+/** Mutable copy of [asStringMap] for the read-modify-write call sites. */
+internal fun Any?.asMutableStringMap(): LinkedHashMap<String, Any?>? =
+    asStringMap()?.let { LinkedHashMap(it) }

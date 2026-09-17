@@ -127,9 +127,8 @@ fun argbToHex(argb: Int): String {
  * anything but exactly 16 valid palette entries. Optionals stay null when
  * absent/invalid (desktop falls back per-field at apply time).
  */
-@Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
 fun parseTerminalColorScheme(raw: Any?): TerminalColorScheme? {
-    val m = raw as? Map<String, Any?> ?: return null
+    val m = raw.asStringMap() ?: return null
     val name = m["name"]?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val fg = normalizeSchemeColor(m["foreground"]?.toString()) ?: return null
     val bg = normalizeSchemeColor(m["background"]?.toString()) ?: return null

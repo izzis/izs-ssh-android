@@ -1,6 +1,7 @@
 package id.web.izs.sshclient
 
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.asMutableStringMap
 import id.web.izs.sshclient.core.config.SOURCE_CODE_PRO_YAML_NAME
 import id.web.izs.sshclient.core.config.SchemeSource
 import id.web.izs.sshclient.core.config.TerminalCursor
@@ -82,8 +83,9 @@ class TerminalAppearanceTest {
         assertTrue(RawConfigStore.terminalCursorBlink(doc))
         RawConfigStore.setTerminalCursorBlink(doc, false)
         assertFalse(RawConfigStore.terminalCursorBlink(doc))
-        @Suppress("UNCHECKED_CAST")
-        (doc[RawConfigStore.KEY_TERMINAL] as MutableMap<String, Any?>)["cursorBlink"] = "yes"
+        val term = doc[RawConfigStore.KEY_TERMINAL].asMutableStringMap()!!
+        term["cursorBlink"] = "yes"
+        doc[RawConfigStore.KEY_TERMINAL] = term
         assertTrue(RawConfigStore.terminalCursorBlink(doc))
     }
 

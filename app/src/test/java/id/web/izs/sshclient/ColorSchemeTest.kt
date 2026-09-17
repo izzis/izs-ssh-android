@@ -6,6 +6,7 @@ import id.web.izs.sshclient.core.config.SchemeSource
 import id.web.izs.sshclient.core.config.TABBY_DEFAULT_SCHEME
 import id.web.izs.sshclient.core.config.TerminalColorScheme
 import id.web.izs.sshclient.core.config.argbToHex
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.config.contrastRatio
 import id.web.izs.sshclient.core.config.deleteCustomByName
 import id.web.izs.sshclient.core.config.effectiveTerminalScheme
@@ -237,25 +238,21 @@ class ColorSchemeTest {
         RawConfigStore.setTerminalColorScheme(mutable, TABBY_DEFAULT_SCHEME)
         RawConfigStore.setCustomColorSchemes(mutable, listOf(IZS_DEFAULT_SCHEME))
         val redumped = RawConfigStore.loadRaw(RawConfigStore.dumpRaw(mutable))
-        @Suppress("UNCHECKED_CAST")
-        val term = redumped["terminal"] as Map<String, Any?>
+        val term = redumped["terminal"].asStringMap()!!
         assertEquals(TABBY_DEFAULT_SCHEME, RawConfigStore.terminalColorSchemeRaw(redumped))
         assertEquals(listOf(IZS_DEFAULT_SCHEME), RawConfigStore.customColorSchemesRaw(redumped))
         assertEquals(5, (term["showRecentProfiles"] as? Number)?.toInt())
         assertEquals(1, (term["desktopOnly"] as? Number)?.toInt())
-        @Suppress("UNCHECKED_CAST")
-        val light = term["lightColorScheme"] as Map<String, Any?>
+        val light = term["lightColorScheme"].asStringMap()!!
         assertEquals("L", light["name"])
-        @Suppress("UNCHECKED_CAST")
-        val p = ((redumped["profiles"] as List<*>).single() as Map<String, Any?>)
+        val p = ((redumped["profiles"] as? List<*>)!!.single().asStringMap()!!)
         assertEquals("X", p["fontFamily"])
         assertEquals("S", parseTerminalColorScheme(p["terminalColorScheme"])?.name)
         // Removing the global restores absent (null), siblings intact.
         RawConfigStore.setTerminalColorScheme(mutable, null)
         val cleared = RawConfigStore.loadRaw(RawConfigStore.dumpRaw(mutable))
         assertNull(RawConfigStore.terminalColorSchemeRaw(cleared))
-        @Suppress("UNCHECKED_CAST")
-        val term2 = cleared["terminal"] as Map<String, Any?>
+        val term2 = cleared["terminal"].asStringMap()!!
         assertEquals("L", (term2["lightColorScheme"] as? Map<*, *>)?.get("name"))
     }
 

@@ -4,6 +4,7 @@ import id.web.izs.sshclient.core.config.ForwardedPort
 import id.web.izs.sshclient.core.config.LoginScript
 import id.web.izs.sshclient.core.config.normalizeProfileColor
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.core.config.SshAlgorithms
 import id.web.izs.sshclient.core.config.SshDefaults
@@ -109,8 +110,7 @@ class ProfileFieldsTest {
                 algorithms = SshAlgorithms.DEFAULTS,
             ),
         )
-        @Suppress("UNCHECKED_CAST")
-        val opts = RawConfigStore.updateProfileMap(existing, p, null, null, emptyList())["options"] as Map<String, Any?>
+        val opts = RawConfigStore.updateProfileMap(existing, p, null, null, emptyList())["options"].asStringMap()!!
         assertEquals(true, opts["x11"])
         assertFalse(opts.containsKey("keepaliveInterval"))
         assertFalse(opts.containsKey("algorithms"))
@@ -135,27 +135,23 @@ class ProfileFieldsTest {
                 scripts = listOf(LoginScript("a", "b")),
             ),
         )
-        @Suppress("UNCHECKED_CAST")
-        val opts = RawConfigStore.updateProfileMap(emptyMap(), p, null, null, emptyList())["options"] as Map<String, Any?>
+        val opts = RawConfigStore.updateProfileMap(emptyMap(), p, null, null, emptyList())["options"].asStringMap()!!
         assertEquals(7000L, opts["readyTimeout"])
         assertEquals(false, opts["reuseSession"])
-        @Suppress("UNCHECKED_CAST")
-        val algos = opts["algorithms"] as Map<String, List<String>>
+        val algos = opts["algorithms"].asStringMap()!!
         // Desktop sorts lexicographically on save (not preference order),
         // compression untouched.
         assertEquals(
             SshAlgorithms.DEFAULTS.getValue(SshAlgorithms.CIPHER).sorted(),
-            algos[SshAlgorithms.CIPHER],
+            (algos[SshAlgorithms.CIPHER] as? List<*>)?.map { it.toString() },
         )
         assertEquals(
             SshAlgorithms.DEFAULTS.getValue(SshAlgorithms.COMPRESSION),
-            algos[SshAlgorithms.COMPRESSION],
+            (algos[SshAlgorithms.COMPRESSION] as? List<*>)?.map { it.toString() },
         )
-        @Suppress("UNCHECKED_CAST")
-        val fw = opts["forwardedPorts"] as List<Map<String, Any?>>
+        val fw = (opts["forwardedPorts"] as? List<*>)!!.filterIsInstance<Map<String, Any?>>()
         assertEquals("Local", fw.single()["type"])
-        @Suppress("UNCHECKED_CAST")
-        val sc = opts["scripts"] as List<Map<String, Any?>>
+        val sc = (opts["scripts"] as? List<*>)!!.filterIsInstance<Map<String, Any?>>()
         assertEquals("a", sc.single()["expect"])
     }
 
@@ -189,8 +185,7 @@ class ProfileFieldsTest {
                 "options" to linkedMapOf<String, Any?>("host" to "h", "password" to "x"),
             ),
         )
-        @Suppress("UNCHECKED_CAST")
-        val opts = out["options"] as Map<String, Any?>
+        val opts = out["options"].asStringMap()!!
         assertEquals("h", opts["host"])
         assertFalse(opts.containsKey("password"))
     }
@@ -226,8 +221,7 @@ class ProfileFieldsTest {
         assertEquals("ssh:custom:x", out["id"])
         assertEquals("ssh", out["type"])
         assertEquals("fresh", out["name"])
-        @Suppress("UNCHECKED_CAST")
-        val opts = out["options"] as Map<String, Any?>
+        val opts = out["options"].asStringMap()!!
         assertEquals("h", opts["host"])
         assertFalse(opts.containsKey("group"))
     }

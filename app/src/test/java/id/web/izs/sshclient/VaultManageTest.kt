@@ -1,6 +1,7 @@
 package id.web.izs.sshclient
 
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.vault.VaultCrypto
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -146,8 +147,7 @@ class VaultManageTest {
             ),
         )
         RawConfigStore.setSshFlags(doc, verify = false, warn = true)
-        @Suppress("UNCHECKED_CAST")
-        val ssh = doc["ssh"] as Map<String, Any?>
+        val ssh = doc["ssh"].asStringMap()!!
         assertEquals(false, ssh["verifyHostKeys"])
         assertEquals(true, ssh["warnOnClose"])
         assertEquals(listOf(linkedMapOf("host" to "h")), ssh["knownHosts"])
@@ -157,8 +157,7 @@ class VaultManageTest {
     fun `setSshFlags creates the ssh section when absent`() {
         val doc = linkedMapOf<String, Any?>("version" to 1)
         RawConfigStore.setSshFlags(doc, verify = false, warn = false)
-        @Suppress("UNCHECKED_CAST")
-        val ssh = doc["ssh"] as Map<String, Any?>
+        val ssh = doc["ssh"].asStringMap()!!
         assertEquals(false, ssh["verifyHostKeys"])
         assertEquals(false, ssh["warnOnClose"])
     }

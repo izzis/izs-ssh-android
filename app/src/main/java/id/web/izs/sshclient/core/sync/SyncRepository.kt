@@ -2,6 +2,8 @@ package id.web.izs.sshclient.core.sync
 
 import id.web.izs.sshclient.core.config.ConfigMigrator
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.asMutableStringMap
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.config.RemoteConfigMeta
 import id.web.izs.sshclient.core.config.StoredVault
 import id.web.izs.sshclient.core.config.TabbyConfig
@@ -242,7 +244,6 @@ class SyncRepository(
      * throws "Vault is locked" and the caller keeps session-only trust.
      * Server upload follows the normal Upload/auto path (never on accept).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun appendKnownHost(entry: id.web.izs.sshclient.core.config.KnownHostEntry): Loaded =
         withContext(Dispatchers.IO) {
             val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
@@ -263,7 +264,7 @@ class SyncRepository(
                 RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                 RawConfigStore.KEY_ENCRYPTED to true,
             )
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 out[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
             disk.saveYaml(RawConfigStore.dumpRaw(out))
@@ -435,8 +436,7 @@ class SyncRepository(
             disk.savePreImport(localYaml, disk.lastRemoteChange)
         }
         // Make sure the local configSync points at the freshly downloaded config
-        @Suppress("UNCHECKED_CAST")
-        val cs = (merged[RawConfigStore.KEY_CONFIG_SYNC] as? LinkedHashMap<String, Any?>)
+            val cs = merged[RawConfigStore.KEY_CONFIG_SYNC].asMutableStringMap()
             ?: linkedMapOf<String, Any?>().also { merged[RawConfigStore.KEY_CONFIG_SYNC] = it }
         cs["host"] = host
         cs["token"] = token
@@ -465,12 +465,11 @@ class SyncRepository(
      * once with a fresh salt/iv after the prompt (immediately when already
      * unlocked, otherwise on the first [unlockWithPassphrase]).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun importRawYaml(text: String): Loaded = withContext(Dispatchers.IO) {
         val doc = RawConfigStore.parseImport(text)
         val localYaml = disk.loadYaml()
         val localSync = if (localYaml.isNullOrBlank()) null
-        else (RawConfigStore.loadRaw(localYaml)[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)
+        else (RawConfigStore.loadRaw(localYaml)[RawConfigStore.KEY_CONFIG_SYNC].asStringMap())
         if (localSync != null) doc[RawConfigStore.KEY_CONFIG_SYNC] = localSync
         else doc.remove(RawConfigStore.KEY_CONFIG_SYNC)
         if (!doc.containsKey(RawConfigStore.KEY_VERSION)) doc[RawConfigStore.KEY_VERSION] = ConfigMigrator.LATEST_VERSION
@@ -599,7 +598,6 @@ class SyncRepository(
      * as an ssh:password secret and stripped from the YAML, so enabling the
      * master passphrase never leaves a duplicated secret in one file.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun setVaultPassphrase(passphrase: String): Loaded = withContext(Dispatchers.IO) {
         require(passphrase.isNotBlank()) { "Passphrase is empty" }
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
@@ -607,10 +605,9 @@ class SyncRepository(
         require(RawConfigStore.storedVault(raw) == null) { "Vault is already configured" }
         require(!RawConfigStore.isEncrypted(raw)) { "Config is already encrypted" }
         var secrets = emptyList<id.web.izs.sshclient.core.config.VaultSecret>()
-        @Suppress("UNCHECKED_CAST")
-        val profiles = (raw[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+            val profiles = (raw[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
         raw[RawConfigStore.KEY_PROFILES] = profiles.map { pm ->
-            val map = pm as? Map<String, Any?> ?: return@map pm
+            val map = pm.asStringMap() ?: return@map pm
             var cur: Map<String, Any?> = map
             RawConfigStore.inlinePasswordOf(cur)?.let { inline ->
                 secrets = SecretResolver.upsertPassword(
@@ -668,7 +665,6 @@ class SyncRepository(
      * which bricks the file; mobile restores plaintext (blob removed,
      * encryption off) so the config stays loadable.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun eraseVault(): Loaded = withContext(Dispatchers.IO) {
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
         val raw = RawConfigStore.loadRaw(yamlStr)
@@ -684,7 +680,7 @@ class SyncRepository(
             out = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
             out.remove(RawConfigStore.KEY_VAULT)
             out[RawConfigStore.KEY_ENCRYPTED] = false
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 out[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
         } else {
@@ -758,7 +754,6 @@ class SyncRepository(
      * one profile. No-vault configs only — the vault path never keeps a
      * literal (desktop convention).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     private fun withPlaintextPassword(
         raw: LinkedHashMap<String, Any?>,
         profile: SshProfile,
@@ -772,9 +767,9 @@ class SyncRepository(
         )
         if (idx < 0) throw IllegalStateException("Profile not found")
         val list = profiles.toMutableList()
-        val cur = list[idx] as? Map<String, Any?> ?: emptyMap()
+        val cur = list[idx].asStringMap() ?: emptyMap()
         val upd = LinkedHashMap(cur)
-        val opts = LinkedHashMap((cur["options"] as? Map<String, Any?>) ?: emptyMap())
+        val opts = LinkedHashMap(cur["options"].asStringMap() ?: emptyMap())
         if (password.isNullOrEmpty()) opts.remove("password") else opts["password"] = password
         upd["options"] = opts
         list[idx] = upd
@@ -787,7 +782,6 @@ class SyncRepository(
      * shape of both modes (encrypted shell vs plaintext-with-blob, incl.
      * local configSync on the encrypted path).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     private fun withVaultSecrets(
         raw: LinkedHashMap<String, Any?>,
         configJson: String,
@@ -800,7 +794,7 @@ class SyncRepository(
                 RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                 RawConfigStore.KEY_ENCRYPTED to true,
             ).also { m ->
-                (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+                raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                     m[RawConfigStore.KEY_CONFIG_SYNC] = it
                 }
             }
@@ -820,7 +814,6 @@ class SyncRepository(
      * Both directions require an unlocked vault; the UI prompts first
      * (desktop vault.load() -> getPassphrase() modal parity).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun setConfigEncrypted(encrypted: Boolean): Loaded = withContext(Dispatchers.IO) {
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
         val raw = RawConfigStore.loadRaw(yamlStr)
@@ -840,7 +833,7 @@ class SyncRepository(
                 RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                 RawConfigStore.KEY_ENCRYPTED to true,
             )
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 out[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
         } else {
@@ -850,7 +843,7 @@ class SyncRepository(
             out = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
             out[RawConfigStore.KEY_VAULT] = RawConfigStore.storedVaultMap(vault)
             out[RawConfigStore.KEY_ENCRYPTED] = false
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 out[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
         }
@@ -866,7 +859,6 @@ class SyncRepository(
      * the blob must be re-encrypted, secrets payload passed through
      * byte-identical).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun deleteProfile(profileId: String, original: SshProfile): Loaded =
         withContext(Dispatchers.IO) {
             val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
@@ -880,8 +872,7 @@ class SyncRepository(
                     ?: throw IllegalStateException("Vault is not configured")
                 val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
                 val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
-                @Suppress("UNCHECKED_CAST")
-                val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+                            val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
                 val idx = RawConfigStore.findProfileIndex(
                     profiles, profileId, original.name, original.type,
                     original.options.host, original.options.user,
@@ -901,8 +892,7 @@ class SyncRepository(
             }
             } else {
                 out = LinkedHashMap(raw)
-                @Suppress("UNCHECKED_CAST")
-                val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+                            val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
                 val idx = RawConfigStore.findProfileIndex(
                     profiles, profileId, original.name, original.type,
                     original.options.host, original.options.user,
@@ -941,7 +931,6 @@ class SyncRepository(
      * @throws IllegalStateException("Vault is locked") when secrets must be
      * touched while locked — the UI prompts for the passphrase and retries.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun updateProfile(
         profileId: String,
         original: SshProfile,
@@ -1028,8 +1017,7 @@ class SyncRepository(
             newGroupId == null || newGroupId == original.group -> null
             newGroupId.isEmpty() -> ""
             else -> {
-                @Suppress("UNCHECKED_CAST")
-                val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                            val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                     .filterIsInstance<Map<String, Any?>>()
                     .mapNotNull { it["id"]?.toString() }.toSet()
                 RawConfigStore.resolveGroupWriteValue(rawIds, newGroupId, newGroupName)
@@ -1039,8 +1027,7 @@ class SyncRepository(
         val out: LinkedHashMap<String, Any?>
         if (encrypted) {
             val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(blobConfigJson))
-            @Suppress("UNCHECKED_CAST")
-            val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+                    val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
             val idx = RawConfigStore.findProfileIndex(
                 profiles, profileId, original.name, original.type,
                 ou.host, ou.user,
@@ -1048,7 +1035,7 @@ class SyncRepository(
             if (idx < 0) throw IllegalStateException("Profile not found")
             val list = profiles.toMutableList()
             list[idx] = RawConfigStore.updateProfileMap(
-                profiles[idx] as? Map<String, Any?> ?: emptyMap(),
+                profiles[idx].asStringMap() ?: emptyMap(),
                 updated.copy(options = updated.options.copy(privateKeys = finalRefs)),
                 passwordField, groupWrite, finalRefs,
             )
@@ -1060,13 +1047,12 @@ class SyncRepository(
                 RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                 RawConfigStore.KEY_ENCRYPTED to true,
             )
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 out[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
         } else {
             out = LinkedHashMap(raw)
-            @Suppress("UNCHECKED_CAST")
-            val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+                    val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
             val idx = RawConfigStore.findProfileIndex(
                 profiles, profileId, original.name, original.type,
                 ou.host, ou.user,
@@ -1074,7 +1060,7 @@ class SyncRepository(
             if (idx < 0) throw IllegalStateException("Profile not found")
             val list = profiles.toMutableList()
             list[idx] = RawConfigStore.updateProfileMap(
-                profiles[idx] as? Map<String, Any?> ?: emptyMap(),
+                profiles[idx].asStringMap() ?: emptyMap(),
                 updated.copy(options = updated.options.copy(privateKeys = finalRefs)),
                 passwordField, groupWrite, finalRefs,
             )
@@ -1099,7 +1085,6 @@ class SyncRepository(
      *
      * @param groupId null/blank = ungrouped.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun createProfile(
         profile: SshProfile,
         groupId: String?,
@@ -1155,8 +1140,7 @@ class SyncRepository(
         val groupWrite: String? = when {
             groupId.isNullOrBlank() -> null
             else -> {
-                @Suppress("UNCHECKED_CAST")
-                val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                            val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                     .filterIsInstance<Map<String, Any?>>()
                     .mapNotNull { it["id"]?.toString() }.toSet()
                 RawConfigStore.resolveGroupWriteValue(rawIds, groupId, groupName)
@@ -1171,8 +1155,7 @@ class SyncRepository(
         val out: LinkedHashMap<String, Any?>
         if (encrypted) {
             val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(blobConfigJson))
-            @Suppress("UNCHECKED_CAST")
-            val profiles = ((blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
+                    val profiles = ((blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             profiles += map
             blobConfig[RawConfigStore.KEY_PROFILES] = profiles
@@ -1183,13 +1166,12 @@ class SyncRepository(
                 RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                 RawConfigStore.KEY_ENCRYPTED to true,
             )
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 out[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
         } else {
             out = LinkedHashMap(raw)
-            @Suppress("UNCHECKED_CAST")
-            val profiles = ((out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
+                    val profiles = ((out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             profiles += map
             out[RawConfigStore.KEY_PROFILES] = profiles
@@ -1206,7 +1188,6 @@ class SyncRepository(
      * Append a top-level group (mobile "New group" in the profile editor).
      * No secrets involved; encrypted shells still need unlock (re-encrypt).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun createGroup(id: String, name: String): Loaded = withContext(Dispatchers.IO) {
         require(name.isNotBlank()) { "Group name is empty" }
         val yamlStr = disk.loadYaml() ?: throw IllegalStateException("No local config")
@@ -1220,8 +1201,7 @@ class SyncRepository(
                 ?: throw IllegalStateException("Vault is not configured")
             val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
             val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
-            @Suppress("UNCHECKED_CAST")
-            val groups = ((blobConfig[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                    val groups = ((blobConfig[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             groups += entry
             blobConfig[RawConfigStore.KEY_GROUPS] = groups
@@ -1230,13 +1210,12 @@ class SyncRepository(
                 RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
                 RawConfigStore.KEY_ENCRYPTED to true,
             )
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 out[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
         } else {
             out = LinkedHashMap(raw)
-            @Suppress("UNCHECKED_CAST")
-            val groups = ((out[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                    val groups = ((out[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             groups += entry
             out[RawConfigStore.KEY_GROUPS] = groups
@@ -1254,7 +1233,6 @@ class SyncRepository(
      * Throws "Vault is locked" when the blob cannot be rewritten; callers
      * surface the unlock dialog and retry (profile-editor pendingSave parity).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     suspend fun updateTerminalSection(
         transform: (LinkedHashMap<String, Any?>) -> Unit,
     ): Loaded = withContext(Dispatchers.IO) {
@@ -1277,7 +1255,7 @@ class SyncRepository(
             RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
             RawConfigStore.KEY_ENCRYPTED to true,
         )
-        (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+        raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
             out[RawConfigStore.KEY_CONFIG_SYNC] = it
         }
         disk.saveYaml(RawConfigStore.dumpRaw(out))
@@ -1289,7 +1267,7 @@ class SyncRepository(
         val merged = LinkedHashMap<String, Any?>(blobConfig)
         merged[RawConfigStore.KEY_VAULT] = RawConfigStore.storedVaultMap(stored)
         merged[RawConfigStore.KEY_ENCRYPTED] = true
-        (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+        raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
             merged[RawConfigStore.KEY_CONFIG_SYNC] = it
         }
         Loaded(
@@ -1301,10 +1279,8 @@ class SyncRepository(
     }
 
     private fun readParts(raw: Map<String, Any?>): Map<String, Boolean> {
-        @Suppress("UNCHECKED_CAST")
-        val cs = raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>
-        @Suppress("UNCHECKED_CAST")
-        val parts = cs?.get("parts") as? Map<String, Any?>
+            val cs = raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()
+            val parts = cs?.get("parts").asStringMap()
         // The v1 UI disk prefs win when the document has no complete configSync yet
         return mapOf(
             "hotkeys" to (parts?.get("hotkeys") as? Boolean ?: disk.partsHotkeys),
@@ -1348,7 +1324,6 @@ class SyncRepository(
      * preserving the exact desktop outer shape `{vault, encrypted, configSync}`.
      * Plaintext docs (including plaintext-with-blob) are never rewritten here.
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     private fun reencryptShellDoc(
         raw: LinkedHashMap<String, Any?>,
         configJson: String,
@@ -1360,7 +1335,7 @@ class SyncRepository(
             RawConfigStore.KEY_VAULT to RawConfigStore.storedVaultMap(stored),
             RawConfigStore.KEY_ENCRYPTED to true,
         ).also { m ->
-            (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+            raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()?.let {
                 m[RawConfigStore.KEY_CONFIG_SYNC] = it
             }
         }

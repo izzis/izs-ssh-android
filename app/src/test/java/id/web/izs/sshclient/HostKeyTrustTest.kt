@@ -1,6 +1,7 @@
 package id.web.izs.sshclient
 
 import id.web.izs.sshclient.core.config.KnownHostEntry
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.ssh.HostKeyTrust
 import net.schmizz.sshj.common.Buffer
 import org.junit.Assert.*
@@ -133,10 +134,8 @@ class HostKeyTrustTest {
         id.web.izs.sshclient.core.config.RawConfigStore.appendKnownHost(doc, e1)
         id.web.izs.sshclient.core.config.RawConfigStore.appendKnownHost(doc, e2)
         id.web.izs.sshclient.core.config.RawConfigStore.appendKnownHost(doc, e3)
-        @Suppress("UNCHECKED_CAST")
-        val ssh = doc["ssh"] as Map<String, Any?>
-        @Suppress("UNCHECKED_CAST")
-        val list = ssh["knownHosts"] as List<Map<String, Any?>>
+        val ssh = doc["ssh"].asStringMap()!!
+        val list = (ssh["knownHosts"] as? List<*>)!!.filterIsInstance<Map<String, Any?>>()
         assertEquals(2, list.size)
         assertEquals("BBB=", list.first { it["port"] == 22 }["digest"])
     }

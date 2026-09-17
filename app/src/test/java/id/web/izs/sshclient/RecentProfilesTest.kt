@@ -1,6 +1,7 @@
 package id.web.izs.sshclient
 
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.data.local.recordRecent
 import org.junit.Assert.*
 import org.junit.Test
@@ -94,8 +95,7 @@ class RecentProfilesTest {
         )
         RawConfigStore.setShowRecentProfiles(doc, 2)
         assertEquals(2, RawConfigStore.showRecentProfiles(doc))
-        @Suppress("UNCHECKED_CAST")
-        assertEquals(true, (doc["terminal"] as Map<String, Any?>)["hideTabIndex"])
+        assertEquals(true, doc["terminal"].asStringMap()!!["hideTabIndex"])
     }
 
     @Test

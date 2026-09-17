@@ -1,6 +1,7 @@
 package id.web.izs.sshclient
 
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.config.SshOptions
 import id.web.izs.sshclient.core.config.SshProfile
 import id.web.izs.sshclient.core.config.VaultSecret
@@ -105,8 +106,7 @@ class SecretStoreTest {
         )
         val out = RawConfigStore.updateProfileMap(existing, sshProfile(), null, null, emptyList())
         assertEquals("keep", out["customDesktopKey"])
-        @Suppress("UNCHECKED_CAST")
-        val opts = out["options"] as Map<String, Any?>
+        val opts = out["options"].asStringMap()!!
         assertEquals("10.0.0.1", opts["host"])
         assertEquals(42, opts["mysteryOpt"])
         assertEquals("web-01", out["name"])
@@ -117,8 +117,7 @@ class SecretStoreTest {
         val existing = linkedMapOf<String, Any?>(
             "options" to linkedMapOf<String, Any?>("password" to "plain"),
         )
-        @Suppress("UNCHECKED_CAST")
-        val opts = RawConfigStore.updateProfileMap(existing, sshProfile(), "", null, emptyList())["options"] as Map<String, Any?>
+        val opts = RawConfigStore.updateProfileMap(existing, sshProfile(), "", null, emptyList())["options"].asStringMap()!!
         assertFalse(opts.containsKey("password"))
     }
 

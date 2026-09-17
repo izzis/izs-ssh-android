@@ -1,6 +1,7 @@
 package id.web.izs.sshclient
 
 import id.web.izs.sshclient.core.config.RawConfigStore
+import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.term.TerminalEmulator
 import id.web.izs.sshclient.ui.screens.preparePaste
 import id.web.izs.sshclient.ui.screens.trimPasted
@@ -82,8 +83,7 @@ class ClipboardParityTest {
             "replaceNewlinesWithSpacesOnPaste" to true,
         )
         RawConfigStore.setTerminalBracketedPaste(doc, true)
-        @Suppress("UNCHECKED_CAST")
-        val term = doc["terminal"] as Map<String, Any?>
+        val term = doc["terminal"].asStringMap()!!
         assertFalse(term.containsKey("bracketedPaste"))
         assertEquals(true, term["replaceNewlinesWithSpacesOnPaste"])
     }

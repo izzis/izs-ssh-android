@@ -3,6 +3,7 @@ package id.web.izs.sshclient
 import id.web.izs.sshclient.core.config.ConfigMigrator
 import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.SshDefaults
+import id.web.izs.sshclient.core.config.asStringMap
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -73,8 +74,7 @@ class RawRoundTripTest {
         val remote = RawConfigStore.loadRaw("appearance:\n  theme: Remote Theme\nvault: null\n")
         val parts = mapOf("hotkeys" to true, "appearance" to false, "vault" to true)
         val upload = RawConfigStore.buildUploadDoc(local, remote, parts)
-        @Suppress("UNCHECKED_CAST")
-        val appearance = upload["appearance"] as Map<String, Any?>
+        val appearance = upload["appearance"].asStringMap()!!
         assertEquals("Remote Theme", appearance["theme"])
         // enabled parts stay local
         assertTrue(upload.containsKey("hotkeys"))
@@ -88,13 +88,11 @@ class RawRoundTripTest {
         )
         val parts = mapOf("hotkeys" to true, "appearance" to false, "vault" to true)
         val merged = RawConfigStore.mergeDownload(remote, local, parts)
-        @Suppress("UNCHECKED_CAST")
-        val cs = merged["configSync"] as Map<String, Any?>
+        val cs = merged["configSync"].asStringMap()!!
         assertEquals("http://192.168.1.10:8080", cs["host"])
         assertEquals(3, (cs["configID"] as Number).toInt())
         // appearance disabled -> local wins even though remote differs
-        @Suppress("UNCHECKED_CAST")
-        val appearance = merged["appearance"] as Map<String, Any?>
+        val appearance = merged["appearance"].asStringMap()!!
         assertEquals("Follow the color scheme", appearance["theme"])
     }
 
@@ -145,8 +143,7 @@ class RawRoundTripTest {
         assertEquals("root", view.options.user)
         assertEquals(5000L, view.options.keepaliveInterval)
         // raw doc untouched (no defaults written back)
-        @Suppress("UNCHECKED_CAST")
-        val rawOpts = ((RawConfigStore.loadRaw(yaml)["profiles"] as List<*>)[0] as Map<String, Any?>)["options"] as Map<String, Any?>
+        val rawOpts = (((RawConfigStore.loadRaw(yaml)["profiles"] as? List<*>)!![0].asStringMap()!!)["options"].asStringMap()!!)
         assertFalse(rawOpts.containsKey("port"))
         assertFalse(rawOpts.containsKey("user"))
     }

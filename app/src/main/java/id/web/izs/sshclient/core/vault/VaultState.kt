@@ -2,6 +2,7 @@ package id.web.izs.sshclient.core.vault
 
 import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.VaultSecret
+import id.web.izs.sshclient.core.config.asStringMap
 
 /**
  * Pure vault-state resolution (desktop vault.service.ts + config.service.ts parity).
@@ -48,7 +49,6 @@ object VaultState {
      * @throws VaultCrypto.BadDecryptException on a wrong passphrase when
      * not forgiving (explicit unlock attempts surface Retry/Delete/Cancel).
      */
-    @Suppress("UNCHECKED_CAST") // dynamic YAML maps: keys are strings by construction
     fun resolve(
         raw: LinkedHashMap<String, Any?>,
         passphrase: String?,
@@ -90,7 +90,7 @@ object VaultState {
             "iv" to vault.iv,
         )
         merged[RawConfigStore.KEY_ENCRYPTED] = true
-        (raw[RawConfigStore.KEY_CONFIG_SYNC] as? Map<String, Any?>)?.let {
+        (raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap())?.let {
             merged[RawConfigStore.KEY_CONFIG_SYNC] = it
         }
         return View(merged, secrets, needsPassphrase = false, merged)
