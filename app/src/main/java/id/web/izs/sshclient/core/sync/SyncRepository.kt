@@ -436,7 +436,7 @@ class SyncRepository(
             disk.savePreImport(localYaml, disk.lastRemoteChange)
         }
         // Make sure the local configSync points at the freshly downloaded config
-            val cs = merged[RawConfigStore.KEY_CONFIG_SYNC].asMutableStringMap()
+        val cs = merged[RawConfigStore.KEY_CONFIG_SYNC].asMutableStringMap()
             ?: linkedMapOf<String, Any?>().also { merged[RawConfigStore.KEY_CONFIG_SYNC] = it }
         cs["host"] = host
         cs["token"] = token
@@ -605,7 +605,7 @@ class SyncRepository(
         require(RawConfigStore.storedVault(raw) == null) { "Vault is already configured" }
         require(!RawConfigStore.isEncrypted(raw)) { "Config is already encrypted" }
         var secrets = emptyList<id.web.izs.sshclient.core.config.VaultSecret>()
-            val profiles = (raw[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+        val profiles = (raw[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
         raw[RawConfigStore.KEY_PROFILES] = profiles.map { pm ->
             val map = pm.asStringMap() ?: return@map pm
             var cur: Map<String, Any?> = map
@@ -872,7 +872,7 @@ class SyncRepository(
                     ?: throw IllegalStateException("Vault is not configured")
                 val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
                 val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
-                            val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+                val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
                 val idx = RawConfigStore.findProfileIndex(
                     profiles, profileId, original.name, original.type,
                     original.options.host, original.options.user,
@@ -892,7 +892,7 @@ class SyncRepository(
             }
             } else {
                 out = LinkedHashMap(raw)
-                            val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+                val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
                 val idx = RawConfigStore.findProfileIndex(
                     profiles, profileId, original.name, original.type,
                     original.options.host, original.options.user,
@@ -1017,7 +1017,7 @@ class SyncRepository(
             newGroupId == null || newGroupId == original.group -> null
             newGroupId.isEmpty() -> ""
             else -> {
-                            val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                     .filterIsInstance<Map<String, Any?>>()
                     .mapNotNull { it["id"]?.toString() }.toSet()
                 RawConfigStore.resolveGroupWriteValue(rawIds, newGroupId, newGroupName)
@@ -1027,7 +1027,7 @@ class SyncRepository(
         val out: LinkedHashMap<String, Any?>
         if (encrypted) {
             val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(blobConfigJson))
-                    val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+            val profiles = (blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
             val idx = RawConfigStore.findProfileIndex(
                 profiles, profileId, original.name, original.type,
                 ou.host, ou.user,
@@ -1052,7 +1052,7 @@ class SyncRepository(
             }
         } else {
             out = LinkedHashMap(raw)
-                    val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
+            val profiles = (out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>()
             val idx = RawConfigStore.findProfileIndex(
                 profiles, profileId, original.name, original.type,
                 ou.host, ou.user,
@@ -1140,7 +1140,7 @@ class SyncRepository(
         val groupWrite: String? = when {
             groupId.isNullOrBlank() -> null
             else -> {
-                            val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+                val rawIds = ((raw[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                     .filterIsInstance<Map<String, Any?>>()
                     .mapNotNull { it["id"]?.toString() }.toSet()
                 RawConfigStore.resolveGroupWriteValue(rawIds, groupId, groupName)
@@ -1155,7 +1155,7 @@ class SyncRepository(
         val out: LinkedHashMap<String, Any?>
         if (encrypted) {
             val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(blobConfigJson))
-                    val profiles = ((blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
+            val profiles = ((blobConfig[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             profiles += map
             blobConfig[RawConfigStore.KEY_PROFILES] = profiles
@@ -1171,7 +1171,7 @@ class SyncRepository(
             }
         } else {
             out = LinkedHashMap(raw)
-                    val profiles = ((out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
+            val profiles = ((out[RawConfigStore.KEY_PROFILES] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             profiles += map
             out[RawConfigStore.KEY_PROFILES] = profiles
@@ -1201,7 +1201,7 @@ class SyncRepository(
                 ?: throw IllegalStateException("Vault is not configured")
             val (configJson, secretsJson) = VaultCrypto.decrypt(vault, pass)
             val blobConfig = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
-                    val groups = ((blobConfig[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+            val groups = ((blobConfig[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             groups += entry
             blobConfig[RawConfigStore.KEY_GROUPS] = groups
@@ -1215,7 +1215,7 @@ class SyncRepository(
             }
         } else {
             out = LinkedHashMap(raw)
-                    val groups = ((out[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
+            val groups = ((out[RawConfigStore.KEY_GROUPS] as? List<*>) ?: emptyList<Any>())
                 .toMutableList()
             groups += entry
             out[RawConfigStore.KEY_GROUPS] = groups
@@ -1279,8 +1279,8 @@ class SyncRepository(
     }
 
     private fun readParts(raw: Map<String, Any?>): Map<String, Boolean> {
-            val cs = raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()
-            val parts = cs?.get("parts").asStringMap()
+        val cs = raw[RawConfigStore.KEY_CONFIG_SYNC].asStringMap()
+        val parts = cs?.get("parts").asStringMap()
         // The v1 UI disk prefs win when the document has no complete configSync yet
         return mapOf(
             "hotkeys" to (parts?.get("hotkeys") as? Boolean ?: disk.partsHotkeys),

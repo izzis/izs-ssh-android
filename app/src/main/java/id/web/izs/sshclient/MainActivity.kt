@@ -272,6 +272,9 @@ class MainActivity : ComponentActivity() {
                             is Boot.Failed ->
                                 BootFailedScreen(
                                     message = b.message,
+                                    detail = appState.disk.backendError?.let {
+                                        "Encryption failed: ${it.javaClass.simpleName}: ${it.message}"
+                                    },
                                     canRestore = appState.disk.hasYamlBackup(),
                                     onRetry = { rebootCounter++ },
                                     onRestore = {
@@ -326,6 +329,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun BootFailedScreen(
     message: String,
+    detail: String?,
     canRestore: Boolean,
     onRetry: () -> Unit,
     /** Returns an error message to display, or null on success. */
@@ -340,6 +344,7 @@ private fun BootFailedScreen(
     ) {
         Text("Could not load local data", style = MaterialTheme.typography.headlineSmall)
         Text(message, style = MaterialTheme.typography.bodyMedium)
+        detail?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
         if (canRestore) {
             OutlinedButton(

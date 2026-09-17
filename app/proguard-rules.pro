@@ -6,10 +6,8 @@
 -keep class org.slf4j.** { *; }
 -dontwarn org.bouncycastle.**
 -dontwarn net.schmizz.**
-# Tink (via androidx security-crypto) references error-prone annotations that
-# exist only at compile time; safe to ignore on Android.
--dontwarn com.google.errorprone.annotations.**
--dontwarn com.google.crypto.tink.**
+# Tink Android ships its own consumer rules ("requires no proguard
+# configuration"); the old security-crypto -dontwarn lines left with it.
 # SnakeYAML: TypeDescription.<clinit> calls TypeDescription.class.getPackage().getName().
 # R8 merges Yaml/LoaderOptions ctors into unrelated classes and breaks that lookup,
 # so release builds crash instantly at startup with NPE. Keep the whole library.

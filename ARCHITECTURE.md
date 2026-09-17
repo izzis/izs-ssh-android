@@ -172,7 +172,7 @@ app/src/main/java/id/web/izs/sshclient/
                           scrollback history deque capped by maxHistory
       TerminalInput.kt    Pure sticky CTRL/ALT mapping (c & 0x1F, ALT = ESC prefix)
   data/local/
-    ConfigDisk.kt         EncryptedSharedPreferences (backend pinned once per
+    ConfigDisk.kt         TinkKvStore (Tink AES256-GCM whole-blob, backend pinned once per
                            process; secret writes refused when encryption is
                            unavailable): sync behavior prefs (auto/parts/stamp),
                            RAW YAML cache, known_hosts (TOFU), terminal prefs
@@ -182,8 +182,10 @@ app/src/main/java/id/web/izs/sshclient/
                            YAML > configSync (single source, RAM-mirrored after
                            load — never a prefs duplicate).
                            Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode/window.hideTerminalHeader/window.fabAtBottom/window.fabAtLeft (never synced to YAML).
-                          security-crypto 1.1.0 deprecated the API wholesale
-                          (suppressed; revisit on a DataStore+Tink migration)
+                           Replaces EncryptedSharedPreferences (security-crypto
+                           deprecated wholesale, no drop-in successor) with the
+                           same Tink engine used directly; pre-Tink store file
+                           deleted on first boot (one-time alpha reset).
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
 app/src/test/... (36 files, 299 tests — §8)
@@ -533,26 +535,25 @@ countered in four layers:
 ## 10. Build & diagnostics
 
 - Gradle 9.7.1, AGP 9.4.0, Kotlin 2.4.20, Compose BOM 2026.08.00,
-  navigation 2.10.0, OkHttp 5.5.0, SnakeYAML 2.7, security-crypto 1.1.0,
+  navigation 2.10.0, OkHttp 5.5.0, SnakeYAML 2.7, tink-android 1.23.0,
   sshj 0.40.0, BC 1.85.x, lifecycle-viewmodel(-ktx) 2.11.0.
 - compileSdk 37, targetSdk 36, minSdk 26. Manifest
   `windowSoftInputMode="adjustResize"`, label `izs SSH`.
 - `./gradlew :app:assembleDebug` -> `app-debug.apk`; install with
   `adb install -r`, read logs with `adb logcat`, screenshot with
   `adb shell screencap -p`.
-- **Zero-warning policy:** `assembleDebug` + `compileDebugUnitTestKotlin`
-  must emit 0 `w:` lines. Fix the code first (AutoMirrored icons,
-  `PrimaryScrollableTabRow`, `menuAnchor(type)`, `LocalClipboard`,
-  lifecycle-compose owner, `autoCorrectEnabled`, smart-cast simplifications).
+- **Zero-warning policy (enforced):** `allWarningsAsErrors = true` —
+  `assembleDebug` + `testDebugUnitTest` fail on any warning. Fix the cause
+  first (AutoMirrored icons, `PrimaryScrollableTabRow`, `menuAnchor(type)`,
+  `LocalClipboard`, lifecycle-compose owner, `autoCorrectEnabled`,
+  smart-cast simplifications, `ServiceCompat.startForeground`).
+  Dynamic YAML/JSON maps go through `asStringMap`/`asMutableStringMap`
+  (`is Map<*, *>` is fully checkable — no cast, no warning, no `@Suppress`).
   `@Suppress` is the LAST resort — never slap it on just to silence the
   compiler. Each suppression must carry a comment stating WHY it is safe and
-  WHAT would remove it. Allowed today, and only these two: dynamic
-  YAML/JSON `Map<String, Any?>` casts (keys are strings by construction —
-  a per-entry re-check would only add copies, gone if the RAW layer ever
-  gets typed models) and whole-library deprecations with no drop-in
-  (security-crypto 1.1.0, revisit on DataStore+Tink). Verify with a clean
-  `--rerun-tasks` build: incremental builds do not re-emit warnings for
-  unchanged files.
+  WHAT would remove it. Allowed today: none — the ledger is zero.
+  Verify with a clean `--rerun-tasks` build: incremental builds do not
+  re-emit warnings for unchanged files.
 - `CrashLog` (debug builds only) persists the last crash trace; the next
   launch offers the Crash Report screen with copy.
 

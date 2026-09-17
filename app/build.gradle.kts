@@ -78,6 +78,9 @@ android {
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            // Zero-warning policy (enforced): any new warning fails the build.
+            // Keep the ledger at zero — fix the cause, never suppress.
+            allWarningsAsErrors.set(true)
         }
     }
     buildFeatures {
@@ -116,7 +119,10 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.snakeyaml)
-    implementation(libs.security.crypto)
+    // Encrypted storage backend (Tink AEAD + Android Keystore).
+    // Replaces androidx security-crypto (deprecated wholesale in 1.1.0, no
+    // drop-in successor) — same engine Tink it wrapped, used directly.
+    implementation(libs.tink.android)
 
     // SSH: sshj is actively maintained (ed25519, modern KEX). Do NOT use the original JSch (abandoned).
     implementation(libs.sshj)

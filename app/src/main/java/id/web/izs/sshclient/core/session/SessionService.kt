@@ -44,8 +44,8 @@ import id.web.izs.sshclient.data.local.ConfigDisk
 class SessionService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
-    // Cached per process: building ConfigDisk pays EncryptedSharedPreferences
-    // + Keystore init, which must not run on Main at every status transition.
+    // Cached per process: building ConfigDisk pays Tink + Keystore init,
+    // which must not run on Main at every status transition.
     private var disk: ConfigDisk? = null
 
     private fun disk(): ConfigDisk = disk ?: ConfigDisk(this).also { disk = it }

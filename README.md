@@ -10,6 +10,13 @@ Tabby Developers. MIT licensed, see [LICENSE](LICENSE).
 Design doc: [ARCHITECTURE.md](ARCHITECTURE.md).
 Release flow: [RELEASE.md](RELEASE.md).
 
+> ⚠️ **Upgrading from an older alpha (pre-1.2.1):** the encrypted storage
+> backend was replaced, so on-device profiles and settings from previous
+> builds are cleared on first boot (one-time reset, fresh installs are
+> unaffected). Back up first: Settings → Config file → **Copy** (unlock
+> first if fully encrypted; plaintext configs copy directly), then restore
+> after updating via Config file → Import → Paste from clipboard.
+
 ## Features
 
 - **Tabby Sync import** — host + token setup, download/upload with lossless
@@ -47,7 +54,7 @@ binaries) — full matrix in [ARCHITECTURE.md](ARCHITECTURE.md) §11.
 | Lifecycle | lifecycle-viewmodel(-ktx) 2.11.0 |
 | Async / JSON / HTTP | coroutines 1.11.0, serialization-json 1.11.0, OkHttp 5.5.0 |
 | YAML | SnakeYAML 2.7 |
-| Secure storage | AndroidX Security Crypto 1.1.0 |
+| Secure storage | Tink AES256-GCM (tink-android 1.23.0) |
 | SSH | sshj 0.40.0 + BouncyCastle (bcprov 1.85.2 / bcpkix 1.85) |
 | SDK | minSdk 26, compileSdk 37, targetSdk 36 |
 

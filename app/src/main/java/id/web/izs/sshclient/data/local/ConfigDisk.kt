@@ -2,8 +2,6 @@ package id.web.izs.sshclient.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 /**
  * Local storage for v1.
@@ -12,7 +10,7 @@ import androidx.security.crypto.MasterKey
  * - knownHosts: JSON list (app-owned TOFU keys, kept separate from desktop knownHosts).
  * - sync prefs: host/token/configID/auto/parts + lastRemoteChange.
  *
- * EncryptedSharedPreferences (stable 1.1.0, Tink/AES256-GCM) with a plain
+ * TinkKvStore (Tink AES256-GCM, Keystore-backed keyset) with a plain
  * SharedPreferences fallback when the Keystore is unavailable (old emulators) —
  * the fallback is reported via [isEncryptedStorage] so the UI can inform the
  * user, and writes of secrets (config YAML, sync token/target, known hosts)
@@ -23,24 +21,6 @@ import androidx.security.crypto.MasterKey
 class ConfigDisk(context: Context) {
     private val appContext = context.applicationContext
 
-    // Google deprecated MasterKey/EncryptedSharedPreferences wholesale in
-    // security-crypto 1.1.0 with no drop-in replacement (the guidance is
-    // DataStore + hand-rolled Tink — a storage rewrite, out of scope while
-    // the format is stable). Suppressed until that migration.
-    @Suppress("DEPRECATION")
-    private val secure: SharedPreferences by lazy {
-        val masterKey = MasterKey.Builder(appContext)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            appContext,
-            "tabby_secure",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }
-
     private val plain: SharedPreferences by lazy {
         appContext.getSharedPreferences("tabby_plain", Context.MODE_PRIVATE)
     }
@@ -49,22 +29,41 @@ class ConfigDisk(context: Context) {
         private set
 
     /**
+     * The Tink init failure when the encrypted backend lost, null when it
+     * won (or before first access). Surfaced on the boot-failure screen so
+     * a dead Keystore is diagnosable instead of a silent fallback + a
+     * misleading "refusing unencrypted" loop. Never a secret — keystore
+     * exceptions carry only the platform reason.
+     */
+    var backendError: Exception? = null
+        private set
+
+    /**
      * Backend is pinned ONCE per process: either the encrypted store or the
-     * plain fallback — never mixed. Per-call `try secure` used to split-brain
+     * plain fallback — never mixed. Per-call try-secure used to split-brain
      * (a transient Keystore glitch wrote to plain, the next read came back
      * from secure looking empty, and a blank config could then overwrite the
      * cloud). First access decides; [isEncryptedStorage] reports which won.
      */
-    private val backend: SharedPreferences by lazy {
+    // Encrypted backend is Tink directly (security-crypto was deprecated
+    // wholesale in 1.1.0 with no drop-in replacement; same AES256-GCM
+    // engine it wrapped, Keystore-backed keyset, no API change for callers).
+    private val backend: KvBackend by lazy {
+        // One-time storage reset (alpha, option B): the pre-Tink encrypted
+        // file is deleted, never read — backup via Settings > Config file >
+        // Copy before updating (see release notes). Exactly one line.
+        appContext.deleteSharedPreferences("tabby_secure")
         try {
-            secure.also { isEncryptedStorage = true }
+            TinkKvStore.create(appContext).also { isEncryptedStorage = true }
         } catch (e: Exception) {
             isEncryptedStorage = false
-            plain
+            backendError = e
+            android.util.Log.w("ConfigDisk", "encrypted backend unavailable, plain fallback", e)
+            SharedPrefsBackend(plain)
         }
     }
 
-    private fun prefs(): SharedPreferences = backend
+    private fun prefs(): KvBackend = backend
 
     /**
      * Refuses to persist secrets where they would land in cleartext. Reads

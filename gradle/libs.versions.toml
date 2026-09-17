@@ -10,7 +10,7 @@ coroutines = "1.11.0"
 serializationJson = "1.11.0"
 okhttp = "5.5.0"
 snakeyaml = "2.7"
-securityCrypto = "1.1.0"
+tinkAndroid = "1.23.0"
 sshj = "0.40.0"
 slf4j = "2.0.17"
 bouncycastle = "1.86"
@@ -36,7 +36,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 mockwebserver3 = { group = "com.squareup.okhttp3", name = "mockwebserver3", version.ref = "okhttp" }
 snakeyaml = { group = "org.yaml", name = "snakeyaml", version.ref = "snakeyaml" }
-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tinkAndroid" }
 sshj = { group = "com.hierynomus", name = "sshj", version.ref = "sshj" }
 slf4j-api = { group = "org.slf4j", name = "slf4j-api", version.ref = "slf4j" }
 slf4j-nop = { group = "org.slf4j", name = "slf4j-nop", version.ref = "slf4j" }
