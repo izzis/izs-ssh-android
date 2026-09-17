@@ -70,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import id.web.izs.sshclient.ui.AuthPrompt
+import id.web.izs.sshclient.ui.UsernamePrompt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -223,6 +224,9 @@ fun TerminalScreen(
     // Desktop prompt-password parity: auth failure (wrong or missing
     // password) offers `Password for user@host` instead of a dead-end card.
     val authPrompt by handle.authPrompt.collectAsState()
+    // Desktop username-prompt parity: blank stored user offers
+    // `Username for host` before the first transport attempt.
+    val usernamePrompt by handle.usernamePrompt.collectAsState()
     val pwSavePending by handle.passwordSavePending.collectAsState()
     val emuVersion by handle.version.collectAsState()
     // Shell presence as OBSERVABLE state: branching on the plain
@@ -508,6 +512,10 @@ fun TerminalScreen(
         sessionViewModel.connectWithPassword(sessionId, state, context.cacheDir, password, remember)
     }
 
+    fun doConnectWithUsername(username: String) {
+        sessionViewModel.connectWithUsername(sessionId, state, context.cacheDir, username)
+    }
+
     fun sendRaw(text: String) {
         val s = handle.shell ?: return
         scope.launch {
@@ -715,7 +723,9 @@ fun TerminalScreen(
     }
 
     LaunchedEffect(sessionId, state.loaded) {
-        if (handle.shell == null && failed == null && hostKeyPrompt == null && !handle.connecting) {
+        if (handle.shell == null && failed == null && hostKeyPrompt == null &&
+            usernamePrompt == null && !handle.connecting
+        ) {
             if (locked) {
                 pendingConnect = true
                 showUnlock = true
@@ -1808,6 +1818,15 @@ fun TerminalScreen(
             onCancel = { sessionViewModel.cancelAuthPrompt(sessionId, state) },
         )
     }
+
+    // Desktop username-prompt modal parity (`Username for host`).
+    usernamePrompt?.let { prompt ->
+        UsernamePromptDialog(
+            prompt = prompt,
+            onConnect = { name -> doConnectWithUsername(name) },
+            onCancel = { sessionViewModel.cancelUsernamePrompt(sessionId) },
+        )
+    }
 }
 
 /**
@@ -1987,6 +2006,41 @@ private fun PasswordPromptDialog(
             Button(
                 enabled = password.isNotEmpty(),
                 onClick = { onConnect(password, remember) },
+            ) { Text("Connect") }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Desktop username-prompt modal parity: `Username for host` with a plain
+ * text field. Connect retries once with the typed name (session-local, never
+ * persisted); Cancel lands on the error card with the cause stated.
+ */
+@Composable
+private fun UsernamePromptDialog(
+    prompt: UsernamePrompt,
+    onConnect: (username: String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var username by remember(prompt) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Username for ${prompt.host}") },
+        text = {
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = { Text("Username") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            )
+        },
+        confirmButton = {
+            Button(
+                enabled = username.isNotBlank(),
+                onClick = { onConnect(username.trim()) },
             ) { Text("Connect") }
         },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },

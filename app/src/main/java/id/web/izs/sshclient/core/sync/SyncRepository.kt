@@ -944,9 +944,6 @@ class SyncRepository(
         val encrypted = RawConfigStore.isEncrypted(raw)
         val vault = RawConfigStore.storedVault(raw)
 
-        val connChanged = updated.options.user != original.options.user ||
-            updated.options.host != original.options.host ||
-            updated.options.port != original.options.port
         val wantsSecrets = vault != null &&
             (encrypted || secretEdits.password != null ||
                 secretEdits.newKeyPems.isNotEmpty() || secretEdits.removedKeyRefs.isNotEmpty())
@@ -975,14 +972,11 @@ class SyncRepository(
                 } else {
                     SecretResolver.upsertPassword(newSecrets, nu.user, nu.host, nu.port, pw)
                 }
-            } else if (connChanged) {
-                // Migrate the existing secret to the new params instead of
-                // orphaning it (desktop leaves orphans; mobile moves it).
-                SecretResolver.findPassword(newSecrets, ou.user, ou.host, ou.port)?.let { old ->
-                    newSecrets = SecretResolver.removePassword(newSecrets, ou.user, ou.host, ou.port)
-                    newSecrets = SecretResolver.upsertPassword(newSecrets, nu.user, nu.host, nu.port, old.value)
-                }
-            }
+            } // No migration on identity change (desktop parity — and our own
+            // delete path, which orphans secrets too): a secret belongs to
+            // its (user, host, port), and silently re-keying it onto a
+            // possibly different account is surprising. The old secret stays
+            // orphaned; the next connect simply prompts for the password.
         }
         val addedRefs = mutableListOf<String>()
         if (wantsSecrets) {

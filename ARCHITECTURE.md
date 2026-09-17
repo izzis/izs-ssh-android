@@ -665,10 +665,11 @@ the raw map) — scope differences below are connect-time only, never silent
 stripping. Editor marks non-working options "(desktop only)" instead of
 hiding them, so synced values stay manageable from the phone.
 
-Connects on-device: password, publicKey, Auto, SOCKS proxy (default 1080),
-Local/Remote port forwarding, keepalive interval + countMax watchdog,
-readyTimeout, reuseSession, custom algorithms, login scripts, per-profile
-warnOnClose.
+Connects on-device: password, publicKey, Auto, username prompt when blank
+(desktop `Username for host` parity; typed name is session-local), SOCKS
+proxy (default 1080), Local/Remote port forwarding, keepalive interval +
+countMax watchdog, readyTimeout, reuseSession, custom algorithms, login
+scripts, per-profile warnOnClose.
 `keyboardInteractive` narrows to password + the failover prompt (no KI
 transport); typed failover passwords bypass the `auth` selection.
 

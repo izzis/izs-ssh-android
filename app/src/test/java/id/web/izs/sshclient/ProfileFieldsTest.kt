@@ -32,6 +32,15 @@ class ProfileFieldsTest {
         RawConfigStore.toDomain(profileMap(options)).profiles.single()
 
     @Test
+    fun `explicit blank user survives the parse for the username prompt`() {
+        val p = parsed(linkedMapOf("host" to "h", "user" to ""))
+        assertEquals("", p.options.user)
+        // ...while a missing key still means the desktop default.
+        val q = parsed(linkedMapOf("host" to "h"))
+        assertEquals("root", q.options.user)
+    }
+
+    @Test
     fun `parseProfile reads the full desktop option set`() {
         val p = parsed(
             linkedMapOf(

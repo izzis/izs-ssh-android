@@ -107,6 +107,14 @@ fun ProfileEditScreen(
     val vaultPresent = state.loaded?.domain?.vault != null
     val locked = state.loaded?.needsPassphrase == true
     val o = original?.options
+    // Raw stored user: the display profile transiently fills `root`, which
+    // would hide a stored-blank (ask every time) behind a fake name. A
+    // missing key still shows `root` (desktop default parity); only an
+    // explicit blank shows empty with the ask hint.
+    val rawUser = remember(state.loaded, profileId) {
+        if (isNew) null
+        else state.loaded?.domain?.profiles?.find { it.id == profileId }?.options?.user
+    }
 
     var tab by remember { mutableIntStateOf(0) }
 
@@ -118,7 +126,7 @@ fun ProfileEditScreen(
     var color by remember(original) { mutableStateOf(normalizeProfileColor(original?.color) ?: "") }
     var host by remember(original) { mutableStateOf(o?.host ?: "") }
     var portText by remember(original) { mutableStateOf(o?.port?.toString() ?: "22") }
-    var user by remember(original) { mutableStateOf(o?.user ?: "root") }
+    var user by remember(original) { mutableStateOf(rawUser ?: o?.user ?: "root") }
     var auth by remember(original) { mutableStateOf(o?.auth ?: "") }
     // Desktop connectionMode parity (sshProfileSettings.component.ts:48-56):
     // priority proxyCommand > jumpHost > socksProxy > httpProxy > direct.
@@ -220,7 +228,10 @@ fun ProfileEditScreen(
     // routes through unlock first, like the desktop "Vault is locked" throw).
     val savedKeys = remember(state.loaded) { state.savedKeys() }
     val secrets = SyncRepository.ProfileSecretEdits(
-        password = passwordTouched.takeIf { it }?.let { passwordText },
+        // No username, no keyable password (the row hides too): a null edit
+        // leaves existing secrets alone instead of storing under "".
+        password = if (user.isBlank()) null
+        else passwordTouched.takeIf { it }?.let { passwordText },
         newKeyPems = addedKeys,
         removedKeyRefs = removedRefs.toList(),
     )
@@ -229,7 +240,7 @@ fun ProfileEditScreen(
         host = host.trim(),
         port = portText.toIntOrNull()?.takeIf { it in 1..65535 }
             ?: if (isNew) 22 else (o?.port ?: 22),
-        user = user.trim().ifBlank { "root" },
+        user = user.trim(),
         auth = auth.ifBlank { null },
         // Only the selected connection mode's fields survive (desktop save
         // parity); the rest are nulled so the YAML stays unambiguous.
@@ -289,7 +300,9 @@ fun ProfileEditScreen(
                         terminalColorScheme = scheme,
                         options = buildOptions().copy(
                             port = port,
-                            user = user.trim().ifBlank { orig.options.user },
+                            // Blank user is meaningful (ask every time) —
+                            // never silently revert it to the old name.
+                            user = user.trim(),
                         ),
                     )
                     state.repo.updateProfile(
@@ -668,69 +681,79 @@ private fun GeneralTab(
     }
     OutlinedTextField(
         value = user, onValueChange = onUser,
-        label = { Text("User") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+        // HTML placeholders (desktop) show whenever the field is empty;
+        // the Compose placeholder slot only shows while focused. A dynamic
+        // label mirrors the desktop look in both states: empty (focused or
+        // not) reads "Ask every time", filled reads "User".
+        label = { Text(if (user.isBlank()) "Ask every time" else "User") },
+        modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
     AuthDropdown(selected = auth, onSelect = onAuth)
     // Desktop parity (sshProfileSettings "Set password / Forget"): Forget
     // stages the removal — the saved password is dropped when you Save
     // (repo removes the vault secret / plaintext literal; nothing is
     // written before that, like every other edit on this screen).
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        OutlinedTextField(
-            value = if (passwordTouched) passwordText else "",
-            onValueChange = onPassword,
-            label = { Text("Password") },
-            placeholder = {
-                Text(
-                    when {
-                        locked -> "Locked. Tap Show to unlock."
-                        hasSavedPassword -> "Saved. Leave empty to keep it."
-                        else -> "No password saved."
-                    },
-                )
-            },
-            modifier = Modifier.weight(1f),
-            singleLine = true,
-            visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
-            // Keep password keyboard (no predictions) even while revealed.
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = {
-                IconButton(onClick = onReveal) {
-                    Icon(
-                        if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                        contentDescription = if (reveal) "Hide password" else "Show password",
+    // Desktop parity (sshProfileSettings `*ngIf='profile.options.user ...'`):
+    // saved passwords are keyed by username, so without one there is nothing
+    // to set — the whole row hides instead of accepting an unkeyable secret.
+    if (user.isNotBlank()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = if (passwordTouched) passwordText else "",
+                onValueChange = onPassword,
+                label = { Text("Password") },
+                placeholder = {
+                    Text(
+                        when {
+                            locked -> "Locked. Tap Show to unlock."
+                            hasSavedPassword -> "Saved. Leave empty to keep it."
+                            else -> "No password saved."
+                        },
                     )
-                }
-            },
-        )
-        if (hasSavedPassword && !passwordTouched) {
-            TextButton(onClick = { onPassword("") }) { Text("Forget") }
+                },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+                // Keep password keyboard (no predictions) even while revealed.
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(onClick = onReveal) {
+                        Icon(
+                            if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (reveal) "Hide password" else "Show password",
+                        )
+                    }
+                },
+            )
+            if (hasSavedPassword && !passwordTouched) {
+                TextButton(onClick = { onPassword("") }) { Text("Forget") }
+            }
         }
-    }
-    if (passwordTouched && passwordText.isEmpty() && hasSavedPassword) {
-        Text(
-            "The password will be removed when you save.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-    // No vault means the repo stores the literal in the profile YAML
-    // (SyncRepository.saveProfile passwordField parity), so warn before
-    // the user types a password they assume is encrypted.
-    if (!vaultPresent && passwordTouched && passwordText.isNotBlank()) {
-        Text(
-            "No vault yet. This password will be saved as plain text. " +
-                "Set a master passphrase first (Settings > Vault) to keep it encrypted.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
-    if (reveal) {
-        Text(
-            "Saved password: ${effectivePassword ?: "None"}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (passwordTouched && passwordText.isEmpty() && hasSavedPassword) {
+            Text(
+                "The password will be removed when you save.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // No vault means the repo stores the literal in the profile YAML
+        // (SyncRepository.saveProfile passwordField parity), so warn before
+        // the user types a password they assume is encrypted.
+        if (!vaultPresent && passwordTouched && passwordText.isNotBlank()) {
+            Text(
+                "No vault yet. This password will be saved as plain text. " +
+                    "Set a master passphrase first (Settings > Vault) to keep it encrypted.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        if (reveal) {
+            Text(
+                "Saved password: ${effectivePassword ?: "None"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
     Text(
         "Private keys (${liveRefs.size + addedKeys.size + attachedRefs.size})",

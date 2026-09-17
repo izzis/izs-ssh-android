@@ -59,7 +59,7 @@ fun sessionLabel(user: String, host: String, profileName: String): String {
  * live shell once qualify (a first-connect failure is the user's explicit
  * tap — never retry behind their back), exactly once per death, and never
  * when a UI answer is still pending (vault passphrase, auth password,
- * host-key prompt). Pure for unit tests.
+ * username, host-key prompt). Pure for unit tests.
  */
 fun shouldAutoRetry(
     everConnected: Boolean,
@@ -67,8 +67,16 @@ fun shouldAutoRetry(
     needsPassphrase: Boolean,
     hasAuthPrompt: Boolean,
     hasHostKeyPrompt: Boolean,
+    hasUsernamePrompt: Boolean = false,
 ): Boolean = everConnected && !autoRetried &&
-    !needsPassphrase && !hasAuthPrompt && !hasHostKeyPrompt
+    !needsPassphrase && !hasAuthPrompt && !hasHostKeyPrompt && !hasUsernamePrompt
+
+/**
+ * Typed-username rule: surrounding whitespace is never part of a login
+ * name, and a blank confirmation answers nothing (the dialog stays open —
+ * its Connect button already requires non-blank, this is the second gate).
+ */
+internal fun normalizeUsername(raw: String): String? = raw.trim().ifEmpty { null }
 
 /**
  * Desktop `prompt-password` state: auth failed (wrong or missing password)
@@ -81,6 +89,15 @@ data class AuthPrompt(
     val error: String,
     val prefill: String?,
 )
+
+/**
+ * Desktop username-prompt state: the profile stores no user (blank survives
+ * the YAML parse, but the display layer transiently fills `root`, so the raw
+ * value is consulted at connect time) and the user is offered
+ * `Username for host`. The typed name is session-local — desktop never writes
+ * it back to the profile either.
+ */
+data class UsernamePrompt(val host: String)
 
 class SshSessionHandle(
     val sessionId: String,
@@ -123,6 +140,9 @@ class SshSessionHandle(
     private val _authPrompt = MutableStateFlow<AuthPrompt?>(null)
     val authPrompt: StateFlow<AuthPrompt?> = _authPrompt.asStateFlow()
 
+    private val _usernamePrompt = MutableStateFlow<UsernamePrompt?>(null)
+    val usernamePrompt: StateFlow<UsernamePrompt?> = _usernamePrompt.asStateFlow()
+
     /**
      * A typed password that connected but is not stored yet: the vault was
      * locked at save time. TerminalScreen routes it through the unlock
@@ -157,6 +177,7 @@ class SshSessionHandle(
     fun setFailed(v: String?) { _failed.value = v }
     fun setPrompt(v: UnknownHostKeyException?) { _hostKeyPrompt.value = v }
     fun setAuthPrompt(v: AuthPrompt?) { _authPrompt.value = v }
+    fun setUsernamePrompt(v: UsernamePrompt?) { _usernamePrompt.value = v }
     fun setPasswordSavePending(v: String?) { _passwordSavePending.value = v }
     fun bumpVersion() { _version.value = emulator.version }
     fun setActivity(v: Boolean) { _activity.value = v }
@@ -273,6 +294,11 @@ class SshSessionViewModel : ViewModel() {
     /** Explicit tab close: free the cap slot now, tear the socket down off-Main. */
     fun close(sessionId: String) {
         val h = _sessions.remove(sessionId) ?: return
+        // Answered one-shots die with the tab: a reopened tab asks again.
+        synchronized(poolGuard) {
+            usernameOneShots.remove(sessionId)
+            oneShots.remove(sessionId)
+        }
         if (_selectedSessionId.value == sessionId) _selectedSessionId.value = null
         // Disconnect aborts this session's SFTP transfers first (their
         // channels die with the transport anyway — abort surfaces Cancelled
@@ -352,6 +378,60 @@ class SshSessionViewModel : ViewModel() {
         syncService()
     }
 
+    /** One-shot typed username from the username prompt (never persisted).
+     *  Unlike the password attempt below, this is PEEKED per connect, not
+     *  consumed: connect re-enters for every stage (host-key accept, typed
+     *  password, background auto-retry), and each re-entry must reuse the
+     *  answered name instead of re-prompting. Desktop parity — ssh.ts keeps
+     *  `authUsername` for the tab lifetime. Cleared on tab close (and on
+     *  prompt cancel); a closed-then-reopened tab asks again. */
+    private val usernameOneShots = mutableMapOf<String, String>()
+
+    /**
+     * Raw username blankness: the display profile transiently fills `root`
+     * (SshDefaults), so the prompt decision reads the pre-defaults YAML
+     * value. Unknown profile (deleted mid-flight) counts as blank — the
+     * snapshot cannot prove a stored name.
+     */
+    private fun isUsernameBlank(appState: AppState, profileId: String): Boolean =
+        appState.loaded?.domain?.profiles?.find { it.id == profileId }
+            ?.options?.user.isNullOrBlank()
+
+    /**
+     * Desktop username-prompt parity: retry this session once with a typed
+     * username. The name is session-local (it never reaches the YAML) but it
+     * does pick the pooled transport and the vault lookup, so tabs as
+     * different users never share a connection.
+     */
+    fun connectWithUsername(
+        sessionId: String,
+        appState: AppState,
+        cacheDir: File,
+        username: String,
+    ) {
+        val h = _sessions[sessionId] ?: return
+        val name = normalizeUsername(username) ?: return
+        h.setUsernamePrompt(null)
+        h.setFailed(null)
+        synchronized(poolGuard) { usernameOneShots[sessionId] = name }
+        connect(sessionId, appState, cacheDir)
+    }
+
+    /**
+     * Username prompt cancelled: land on the error card (desktop dismisses
+     * into a doomed auth with a null name; the card states the cause
+     * directly instead). Nothing to forget — no secret was involved.
+     */
+    fun cancelUsernamePrompt(sessionId: String) {
+        val h = _sessions[sessionId] ?: return
+        if (h.usernamePrompt.value == null) return
+        h.setUsernamePrompt(null)
+        synchronized(poolGuard) { usernameOneShots.remove(sessionId) }
+        h.setStatus("disconnected")
+        h.setFailed("Username required")
+        syncService()
+    }
+
     /**
      * Desktop total-failure parity (ssh.ts: passwordStorage.deletePassword +
      * throw 'Authentication rejected'): the stored password just proved wrong
@@ -400,8 +480,24 @@ class SshSessionViewModel : ViewModel() {
         h.connectJob = viewModelScope.launch {
             h.setFailed(null)
             h.setStatus("connecting…")
-            val profile = appState.displayProfiles().find { it.id == h.profileId }
+            val displayProfile = appState.displayProfiles().find { it.id == h.profileId }
                 ?: h.profileSnapshot
+            val typedUsername = synchronized(poolGuard) { usernameOneShots[sessionId] }
+            if (typedUsername == null && isUsernameBlank(appState, h.profileId)) {
+                // Desktop username-prompt parity (ssh.ts `Username for
+                // host`): the display profile transiently fills `root`, so
+                // blankness is read from the raw YAML value. No `$VAR`
+                // expansion — there is no process environment on Android.
+                h.setUsernamePrompt(UsernamePrompt(displayProfile.options.host))
+                h.setStatus("disconnected")
+                h.connecting = false
+                h.connectJob = null
+                syncService()
+                return@launch
+            }
+            val profile = if (typedUsername != null) {
+                displayProfile.copy(options = displayProfile.options.copy(user = typedUsername))
+            } else displayProfile
             h.profileSnapshot = profile
             val attempt = synchronized(poolGuard) { oneShots.remove(sessionId) }
             // Only a fresh transport authenticates: an adopted (already
@@ -729,6 +825,7 @@ class SshSessionViewModel : ViewModel() {
                 needsPassphrase = appState.loaded?.needsPassphrase == true,
                 hasAuthPrompt = h.authPrompt.value != null,
                 hasHostKeyPrompt = h.hostKeyPrompt.value != null,
+                hasUsernamePrompt = h.usernamePrompt.value != null,
             )
         ) return
         h.autoRetried = true
