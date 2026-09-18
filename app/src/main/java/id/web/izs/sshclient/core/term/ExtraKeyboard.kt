@@ -66,7 +66,8 @@ const val MOD_NONE = ""
 const val MOD_CTRL = "ctrl"
 const val MOD_ALT = "alt"
 
-/** Key width tiers: 1x slot, 1.5x, 2x. */
+/** Key width tiers: half slot, 1x slot, 1.5x, 2x. */
+const val WIDTH_HALF = "half"
 const val WIDTH_NORMAL = "normal"
 const val WIDTH_WIDE = "wide"
 const val WIDTH_DOUBLE = "double"
@@ -86,8 +87,9 @@ const val MAX_MENU_LABEL = 16
 
 private val layoutJson = Json { ignoreUnknownKeys = true }
 
-/** Row weight for the bar: normal 1 slot, wide 1.5, double 2. */
+/** Row weight for the bar: half slot, normal 1 slot, wide 1.5, double 2. */
 fun KeyDef.weight(): Float = when (width) {
+    WIDTH_HALF -> 0.5f
     WIDTH_WIDE -> 1.5f
     WIDTH_DOUBLE -> 2f
     else -> 1f
@@ -95,6 +97,7 @@ fun KeyDef.weight(): Float = when (width) {
 
 /** Label budget scales with button width (8 chars per slot). */
 fun maxLabelForWidth(width: String): Int = (MAX_LABEL * when (width) {
+    WIDTH_HALF -> 0.5f
     WIDTH_WIDE -> 1.5f
     WIDTH_DOUBLE -> 2f
     else -> 1f
@@ -105,7 +108,27 @@ fun isKnownKind(kind: String): Boolean =
         kind == KIND_STICKY_ALT || kind == KIND_MENU
 
 fun isKnownWidth(width: String): Boolean =
-    width == WIDTH_NORMAL || width == WIDTH_WIDE || width == WIDTH_DOUBLE
+    width == WIDTH_HALF || width == WIDTH_NORMAL ||
+        width == WIDTH_WIDE || width == WIDTH_DOUBLE
+
+/**
+ * Hold-to-repeat presets (Termux PRIMARY_REPETITIVE_KEYS parity):
+ * single navigation/editing keys that auto-repeat while held. The rule is
+ * structural — factory or user-added keys qualify alike — so custom macros
+ * can never sneak in: exactly one step, a named preset, and a name in this
+ * set. A text step labeled "UP" or a multi-step macro is not repetitive.
+ */
+val REPETITIVE_PRESETS: Set<String> = setOf(
+    "UP", "DOWN", "LEFT", "RIGHT", "BKSP", "DEL", "PGUP", "PGDN",
+)
+
+fun isRepetitiveKey(key: KeyDef): Boolean =
+    key.kind == KIND_SEND && key.steps.size == 1 &&
+        key.steps[0].preset && key.steps[0].text in REPETITIVE_PRESETS
+
+/** Repeat cadence (Termux DEFAULT_LONG_PRESS_REPEAT_DELAY parity): one send
+ *  per interval after the platform long-press timeout fires. */
+const val REPEAT_TICK_MS = 80L
 
 private fun normalizeStep(step: KeyStep): KeyStep? {
     val text = step.text.take(MAX_STEP_TEXT)

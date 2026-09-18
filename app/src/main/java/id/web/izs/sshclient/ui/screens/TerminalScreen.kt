@@ -649,8 +649,12 @@ fun TerminalScreen(
      * the recalled line and the IME never models it (Termux: backspace
      * sends DEL unconditionally, so any length deletes). The bar tap
      * steals focus onto the button, so hand it straight back.
+     *
+     * Hold-to-repeat ticks pass [grabFocus] = false: focus was already
+     * reclaimed by the initial press, and re-showing the keyboard a dozen
+     * times a second would jank for no benefit.
      */
-    fun sendKeySteps(steps: List<KeyStep>) {
+    fun sendKeySteps(steps: List<KeyStep>, grabFocus: Boolean = true) {
         val s = handle.shell ?: return
         val byteSteps = steps.map(::stepBytes).filter { it.isNotEmpty() }
         if (byteSteps.isEmpty()) return
@@ -660,8 +664,10 @@ fun TerminalScreen(
         }
         if (submitted) resetImeLine()
         sendChunks(s, byteSteps)
-        focusRequester.requestFocus()
-        keyboard?.show()
+        if (grabFocus) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
     }
 
     fun acceptHostKey(remember: Boolean) {
@@ -1396,6 +1402,7 @@ fun TerminalScreen(
                             ctrlActive = ctrlSticky,
                             altActive = altSticky,
                             onSendSteps = { sendKeySteps(it) },
+                            onRepeatSteps = { sendKeySteps(it, grabFocus = false) },
                             onToggleCtrl = { ctrlSticky = !ctrlSticky },
                             onToggleAlt = { altSticky = !altSticky },
                             modifier = Modifier.onSizeChanged { dockedBarH = it.height.toFloat() },

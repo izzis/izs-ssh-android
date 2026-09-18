@@ -12,10 +12,13 @@ import id.web.izs.sshclient.core.term.MOD_ALT
 import id.web.izs.sshclient.core.term.MOD_CTRL
 import id.web.izs.sshclient.core.term.MenuItemDef
 import id.web.izs.sshclient.core.term.MACRO_PRESETS
+import id.web.izs.sshclient.core.term.REPETITIVE_PRESETS
 import id.web.izs.sshclient.core.term.WIDTH_DOUBLE
+import id.web.izs.sshclient.core.term.WIDTH_HALF
 import id.web.izs.sshclient.core.term.WIDTH_NORMAL
 import id.web.izs.sshclient.core.term.WIDTH_WIDE
 import id.web.izs.sshclient.core.term.describeStep
+import id.web.izs.sshclient.core.term.isRepetitiveKey
 import id.web.izs.sshclient.core.term.loadKeyLayout
 import id.web.izs.sshclient.core.term.maxLabelForWidth
 import id.web.izs.sshclient.core.term.normalizeKeyLayout
@@ -286,5 +289,47 @@ class ExtraKeyboardTest {
         assertEquals("padded", reloaded.rows[0][0].label)
         assertEquals(WIDTH_WIDE, reloaded.rows[0][0].width)
         assertEquals(1, reloaded.rows[0][1].items.size)
+    }
+
+    @Test
+    fun `single preset navigation keys repeat`() {
+        for (name in REPETITIVE_PRESETS) {
+            assertTrue(
+                name,
+                isRepetitiveKey(KeyDef("k", KIND_SEND, steps = listOf(KeyStep(name, preset = true)))),
+            )
+        }
+    }
+
+    @Test
+    fun `macros text sticky menu and other presets never repeat`() {
+        // Multi-step macro, even all-preset.
+        assertFalse(
+            isRepetitiveKey(
+                KeyDef("q", KIND_SEND, steps = listOf(KeyStep("ESC", preset = true), KeyStep(":q!"))),
+            ),
+        )
+        // Single TEXT step: the label match is a decoy, structure rules.
+        assertFalse(isRepetitiveKey(KeyDef("UP", KIND_SEND, steps = listOf(KeyStep("UP")))))
+        // Single presets outside the navigation set.
+        assertFalse(isRepetitiveKey(KeyDef("E", KIND_SEND, steps = listOf(KeyStep("ENTER", preset = true)))))
+        assertFalse(isRepetitiveKey(KeyDef("F5", KIND_SEND, steps = listOf(KeyStep("F5", preset = true)))))
+        // Sticky and menu kinds never repeat, whatever their payload.
+        assertFalse(isRepetitiveKey(KeyDef("CTRL", KIND_STICKY_CTRL)))
+        assertFalse(
+            isRepetitiveKey(
+                KeyDef("m", KIND_MENU, steps = listOf(KeyStep("UP", preset = true))),
+            ),
+        )
+    }
+
+    @Test
+    fun `half width weighs half and budgets four chars`() {
+        assertEquals(0.5f, KeyDef("a", width = WIDTH_HALF).weight())
+        assertEquals(4, maxLabelForWidth(WIDTH_HALF))
+        val norm = normalizeKeyLayout(
+            KeyLayout(1, listOf(listOf(KeyDef("ab", KIND_SEND, steps = listOf(KeyStep("x")), width = WIDTH_HALF)))),
+        )
+        assertEquals(WIDTH_HALF, norm.rows.single().single().width)
     }
 }

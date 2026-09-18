@@ -286,6 +286,13 @@ extra keys: user-editable layout (ExtraKeyboard model: ordered send steps
   normalize+fallback) rendered by one shared ExtraKeysBar composable in the
   terminal and the editor preview; multi-step macros send staged with a
   settle delay; device-local JSON, never synced
+- **Hold-to-repeat extra keys + half width:** single preset
+  navigation/editing keys (`REPETITIVE_PRESETS`) auto-repeat while held
+  (80ms tick); the rule is structural so user-added keys qualify alike,
+  while macros/text/sticky/menu never repeat. Tap-or-hold shares one funnel
+  call (a quick tap sends once, a hold ticks with no double-send) and repeat
+  ticks skip focus-grab. `WIDTH_HALF` keys weigh 0.5 with a 4-char label
+  budget, picked from the width editor.
 resize: measured grid -> settle-debounced (150ms) emulator.resize +
   session window-change (RFC 4254); layout/scroll track live, reflow waits
 ```

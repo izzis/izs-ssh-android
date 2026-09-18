@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -16,9 +20,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,8 +38,13 @@ import id.web.izs.sshclient.core.term.KIND_STICKY_CTRL
 import id.web.izs.sshclient.core.term.KeyDef
 import id.web.izs.sshclient.core.term.KeyLayout
 import id.web.izs.sshclient.core.term.KeyStep
+import id.web.izs.sshclient.core.term.REPEAT_TICK_MS
+import id.web.izs.sshclient.core.term.isRepetitiveKey
 import id.web.izs.sshclient.core.term.stepsDisplay
 import id.web.izs.sshclient.core.term.weight
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Docked extra-keys bar rendered from a [KeyLayout].
@@ -59,6 +70,12 @@ fun ExtraKeysBar(
     onToggleCtrl: () -> Unit,
     onToggleAlt: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Hold-to-repeat tick (Termux parity): fired once per [REPEAT_TICK_MS]
+     * while a repetitive key is held, after the platform long-press
+     * timeout. Null (the layout-editor preview) keeps every key tap-only.
+     */
+    onRepeatSteps: ((List<KeyStep>) -> Unit)? = null,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -109,11 +126,18 @@ fun ExtraKeysBar(
                                     key, enabled, Modifier.weight(key.weight()), onSendSteps,
                                 )
                                 else -> {
+                                    val steps = key.steps
                                     ExtraKeyBtn(
                                         key.label, enabled, Modifier.weight(key.weight()),
                                         fill = explicit?.first,
                                         content = explicit?.second,
-                                    ) { onSendSteps(key.steps) }
+                                        onTap = { onSendSteps(steps) },
+                                        onHoldTick = if (onRepeatSteps != null && isRepetitiveKey(key)) {
+                                            { onRepeatSteps(steps) }
+                                        } else {
+                                            null
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -169,6 +193,9 @@ private fun MenuKeyBtn(
  * overrides the label color (null = button default). An explicit per-key
  * color passes both; kind tints pass fill only, keeping default content.
  *
+ * [onHoldTick] turns the key into tap-or-hold (Termux parity); null keeps
+ * the plain tap button. Sticky and menu keys always pass null.
+ *
  * Uniform [ExtraKeyHeight] for every key (a plain Surface, not a Button:
  * M3 buttons enforce a 40dp min height internally, which would keep the
  * dead space this bar was slimmed to remove).
@@ -182,30 +209,105 @@ private fun ExtraKeyBtn(
     modifier: Modifier = Modifier,
     fill: Color? = null,
     content: Color? = null,
+    onHoldTick: (() -> Unit)? = null,
     onTap: () -> Unit,
 ) {
+    if (onHoldTick == null) {
+        Surface(
+            onClick = onTap,
+            enabled = enabled,
+            // Bar keys are plain tappables; focus returns to the pipe via
+            // sendKeySteps (requestFocus + show) after every tap.
+            modifier = modifier.height(ExtraKeyHeight),
+            shape = RoundedCornerShape(6.dp),
+            color = fill ?: Color.Transparent,
+            contentColor = content ?: MaterialTheme.colorScheme.onSurface,
+        ) {
+            KeyFace(label, enabled, content)
+        }
+    } else {
+        RepeatableKeyBtn(label, enabled, modifier, fill, content, onTap, onHoldTick)
+    }
+}
+
+@Composable
+private fun KeyFace(label: String, enabled: Boolean, content: Color?) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            maxLines = 1,
+            color = (content ?: MaterialTheme.colorScheme.onSurface)
+                .copy(alpha = if (enabled) 1f else 0.38f),
+        )
+    }
+}
+
+/**
+ * Tap-or-hold key (Termux ExtraKeysView parity): release before the
+ * platform long-press timeout sends one tap; holding sends one tick per
+ * [REPEAT_TICK_MS] until release, with no extra tap afterwards (the
+ * consumed long-press suppresses onClick — no double send). Each tick is
+ * one funnel call, so an active sticky is consumed by the first tick
+ * exactly like a tap. Ripple and accessibility come from
+ * combinedClickable, matching the plain Surface button.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun RepeatableKeyBtn(
+    label: String,
+    enabled: Boolean,
+    modifier: Modifier,
+    fill: Color?,
+    content: Color?,
+    onTap: () -> Unit,
+    onTick: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    // Long-press timing follows the platform (combinedClickable reads the
+    // system ViewConfiguration, like Termux); only the tick cadence is ours.
+    val interactions = remember { MutableInteractionSource() }
+    var repeatJob: Job? by remember { mutableStateOf<Job?>(null) }
+    // Release (or gesture cancel) stops the ticker; the remembered source
+    // outlives each press, and scope death cancels a runaway ticker.
+    LaunchedEffect(interactions) {
+        interactions.interactions.collect { i ->
+            if (i is PressInteraction.Release || i is PressInteraction.Cancel) {
+                repeatJob?.cancel()
+                repeatJob = null
+            }
+        }
+    }
     Surface(
-        onClick = onTap,
-        enabled = enabled,
-        // Bar keys are plain tappables; focus returns to the pipe via
-        // sendKeySteps (requestFocus + show) after every tap.
-        modifier = modifier.height(ExtraKeyHeight),
+        modifier = modifier
+            .height(ExtraKeyHeight)
+            .combinedClickable(
+                enabled = enabled,
+                onClick = onTap,
+                onLongClick = {
+                    // First tick lands on the long-press (Termux sends on
+                    // timeout, never on DOWN); further ticks follow until
+                    // the release above cancels the job.
+                    onTick()
+                    repeatJob?.cancel()
+                    repeatJob = scope.launch {
+                        while (true) {
+                            delay(REPEAT_TICK_MS)
+                            onTick()
+                        }
+                    }
+                },
+                indication = LocalIndication.current,
+                interactionSource = interactions,
+            ),
         shape = RoundedCornerShape(6.dp),
         color = fill ?: Color.Transparent,
         contentColor = content ?: MaterialTheme.colorScheme.onSurface,
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            Text(
-                label,
-                fontSize = 11.sp,
-                maxLines = 1,
-                color = (content ?: MaterialTheme.colorScheme.onSurface)
-                    .copy(alpha = if (enabled) 1f else 0.38f),
-            )
-        }
+        KeyFace(label, enabled, content)
     }
 }
 

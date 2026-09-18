@@ -82,6 +82,7 @@ import id.web.izs.sshclient.core.term.MenuItemDef
 import id.web.izs.sshclient.core.term.MACRO_PRESETS
 import id.web.izs.sshclient.core.term.STEP_PRESETS
 import id.web.izs.sshclient.core.term.WIDTH_DOUBLE
+import id.web.izs.sshclient.core.term.WIDTH_HALF
 import id.web.izs.sshclient.core.term.WIDTH_NORMAL
 import id.web.izs.sshclient.core.term.WIDTH_WIDE
 import id.web.izs.sshclient.core.term.describeStep
@@ -574,13 +575,15 @@ private fun KeyEditDialog(
                     }
                 }
                 item(key = "width") {
-                    // Segmented (never wraps): Normal 1x, Wide 1.5x, Double 2x.
+                    // Segmented (never wraps): Half 0.5x, Normal 1x, Wide
+                    // 1.5x, Double 2x.
                     Text(
                         "Key width",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     val widths = listOf(
+                        "Half" to WIDTH_HALF,
                         "Normal" to WIDTH_NORMAL,
                         "Wide" to WIDTH_WIDE,
                         "Double" to WIDTH_DOUBLE,
