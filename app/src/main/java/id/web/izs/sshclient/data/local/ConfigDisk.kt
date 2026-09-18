@@ -166,6 +166,25 @@ class ConfigDisk(context: Context) {
     var lastRemoteChange: String
         get() = prefs().getString(KEY_LAST_CHANGE, "") ?: ""
         set(v) = prefs().edit().putString(KEY_LAST_CHANGE, v).apply()
+    /**
+     * SHA-256 of the local YAML at the last completed sync (up or down).
+     * The auto tick uploads when the current content no longer matches —
+     * i.e. the user changed something locally since. Empty on first run
+     * after this update, so the first tick backfills local content upward
+     * (or raises a conflict when the server moved too). Non-secret.
+     */
+    var lastSyncedHash: String
+        get() = prefs().getString(KEY_SYNC_HASH, "") ?: ""
+        set(v) = prefs().edit().putString(KEY_SYNC_HASH, v).apply()
+    /**
+     * Both sides changed since the last sync: the auto tick pauses for this
+     * config instead of overwriting either side. Cleared by any successful
+     * up/download (auto or manual). Drives the toast + sync-screen card +
+     * settings dot; never blocks reads or connects.
+     */
+    var syncConflict: Boolean
+        get() = prefs().getBoolean(KEY_SYNC_CONFLICT, false)
+        set(v) = prefs().edit().putBoolean(KEY_SYNC_CONFLICT, v).apply()
 
     /**
      * Alpha cleanup: the sync target used to live in these prefs keys; it now
@@ -428,6 +447,8 @@ class ConfigDisk(context: Context) {
         const val KEY_PART_APPEARANCE = "sync.parts.appearance"
         const val KEY_PART_VAULT = "sync.parts.vault"
         const val KEY_LAST_CHANGE = "sync.lastRemoteChange"
+        const val KEY_SYNC_HASH = "sync.lastSyncedHash"
+        const val KEY_SYNC_CONFLICT = "sync.conflict"
         const val KEY_EXPANDED_GROUPS = "home.expandedGroups"
         const val KEY_TERMINAL_FONT_SP = "terminal.fontSp"
         const val KEY_TERMINAL_SCROLLBACK = "terminal.scrollback"

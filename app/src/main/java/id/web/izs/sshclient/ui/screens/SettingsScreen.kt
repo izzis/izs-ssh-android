@@ -1,12 +1,15 @@
 package id.web.izs.sshclient.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -99,6 +103,9 @@ fun SettingsScreen(
         ScreenHeader("Settings", onBack)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(SETTING_SECTIONS, key = { it.route }) { s ->
+                // Conflict dot: the auto tick pauses for this config when
+                // server and local both changed — visible without opening it.
+                val conflict = s.route == "sync" && state.disk.syncConflict
                 Card(modifier = Modifier.fillMaxWidth().clickable { onSection(s.route) }) {
                     Row(
                         Modifier.padding(12.dp),
@@ -109,9 +116,18 @@ fun SettingsScreen(
                         Column(Modifier.weight(1f)) {
                             Text(s.title, style = MaterialTheme.typography.titleMedium)
                             Text(
-                                s.subtitle,
+                                if (conflict) "Sync conflict — action needed" else s.subtitle,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (conflict) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (conflict) {
+                            Box(
+                                Modifier.size(10.dp).background(
+                                    MaterialTheme.colorScheme.error,
+                                    CircleShape,
+                                ),
                             )
                         }
                         Icon(Icons.Filled.ChevronRight, contentDescription = null)

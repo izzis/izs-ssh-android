@@ -241,11 +241,21 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   already unlocked. Ordinary boot unlocks keep desktop "Erase config"
   semantics instead (erase → `refresh()` → seeded empty, so the UI never
   strands on a stale locked view).
-- **Foreground auto-sync (desktop `autoSync` parity):** `AutoSyncTicker` in
-  `MainActivity` polls cloud metadata every 60s while the app is open.
-  Guards run cheap-first (background/busy/`sync.auto`-off/locked/stamp-equal
-  all skip before any download); default OFF. An update refreshes state
-  with a toast, never a modal — RAM sessions keep running untouched.
+- **Foreground auto-sync (desktop `autoSync` parity), both directions:**
+  `AutoSyncTicker` in `MainActivity` polls cloud metadata every 60s while
+  the app is open. Guards run cheap-first (background/busy/`sync.auto`-off/
+  locked/stamp-equal all skip before any network); default OFF. Each tick
+  acts on two dirtiness bits (`decideAutoSync`): server-only movement
+  downloads (toast + refresh, never a modal — RAM sessions keep running
+  untouched), local-only movement (local YAML hash vs `lastSyncedHash`
+  baseline, stamped after every completed up/download/import) uploads
+  silently, and both-sides movement sets `syncConflict` and pauses instead
+  of overwriting either side. A conflict toasts once ("open Settings >
+  Sync"), dots the Settings row, and shows a resolve card atop the sync
+  screen (Upload local / Download server, reusing the manual confirm
+  dialogs); any successful up/download clears it. Undo/restore deliberately
+  do NOT re-baseline, so reverting to an older local copy against a newer
+  server surfaces as a conflict rather than silently re-downloading.
 - **Secret-field keyboards:** every passphrase/password field uses
   `KeyboardType.Password` (no predictions/autocomplete), not just visual
   masking — secrets never leak into the keyboard dictionary.
@@ -501,6 +511,8 @@ the IME:
 | `SshAuthTest` | typed SshAuthFailed + friendly reason (MINA rejects-all server), no-credentials case |
 | `SessionKeepAliveTest` | label fallback, auto-retry gate, mirror exactness, notification text builders |
 | `SyncHostPolicyTest` | cleartext matrix: https always, public http refused, LAN/loopback/link-local allowed |
+| `SyncTargetTest` | sync-target write-back on present/missing/stale sections + dump/load round-trip |
+| `AutoSyncDecisionTest` | tick direction matrix (clean/download/upload/conflict) + content-hash stability |
 | `PortForwardingTest` | forward validation + Local/Remote traffic proofs vs MINA, bind-conflict abort |
 | `SocksProxyTest` | SOCKS defaults/validation + live handshake-through-proxy vs fake SOCKS5 |
 | `AuthSelectionTest` | auth selection honored (stage proofs) + typed failover bypass vs MINA |

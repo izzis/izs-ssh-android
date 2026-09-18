@@ -44,6 +44,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import id.web.izs.sshclient.core.sync.AutoSyncOutcome
 import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.core.sync.TabbySyncApi
 import id.web.izs.sshclient.core.session.SessionService
@@ -402,20 +403,33 @@ private fun AutoSyncTicker(appState: AppState) {
             if (!AppForeground.isForeground) continue
             if (appState.loading) continue
             if (!appState.disk.auto) continue
-            val name = try {
+            val outcome = try {
                 appState.repo.autoSyncTick()
             } catch (_: Exception) {
                 // Silent: network/auth errors surface on the sync screen.
                 null
             } ?: continue
-            appState.refresh {
-                val locked = appState.loaded?.unlockRequired == true
-                Toast.makeText(
+            when (outcome) {
+                is AutoSyncOutcome.Downloaded -> appState.refresh {
+                    val locked = appState.loaded?.unlockRequired == true
+                    Toast.makeText(
+                        appCtx,
+                        if (locked) "Config \"${outcome.name}\" updated — passphrase needed"
+                        else "Config \"${outcome.name}\" updated",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+                is AutoSyncOutcome.Uploaded -> Toast.makeText(
                     appCtx,
-                    if (locked) "Config \"$name\" updated — passphrase needed"
-                    else "Config \"$name\" updated",
+                    "Config \"${outcome.name}\" uploaded",
                     Toast.LENGTH_LONG,
                 ).show()
+                is AutoSyncOutcome.Conflict -> Toast.makeText(
+                    appCtx,
+                    "Sync conflict — open Settings > Sync to resolve",
+                    Toast.LENGTH_LONG,
+                ).show()
+                AutoSyncOutcome.Clean -> { /* nothing changed */ }
             }
         }
     }

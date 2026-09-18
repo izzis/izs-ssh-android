@@ -844,10 +844,28 @@ object RawConfigStore {
 
     fun setSyncTarget(doc: LinkedHashMap<String, Any?>, target: RawSyncTarget) {
         val cs = (doc[KEY_CONFIG_SYNC].asMutableStringMap())
-            ?: linkedMapOf<String, Any?>().also { doc[KEY_CONFIG_SYNC] = it }
+            ?: linkedMapOf<String, Any?>()
         if (target.host == null) cs.remove("host") else cs["host"] = target.host
         if (target.token == null) cs.remove("token") else cs["token"] = target.token
         if (target.configId < 0) cs.remove("configID") else cs["configID"] = target.configId
+        // asMutableStringMap returns a detached copy, so the mutated section
+        // must be written back — otherwise a present-but-empty `configSync`
+        // (fresh-install seed) silently swallows the save.
+        doc[KEY_CONFIG_SYNC] = cs
+    }
+
+    /**
+     * Point a merged/downloaded doc at the cloud config it came from
+     * (download retarget). Pure for unit tests; same write-back rule as
+     * [setSyncTarget].
+     */
+    fun retargetSyncSection(doc: LinkedHashMap<String, Any?>, host: String, token: String, configId: Long) {
+        val cs = (doc[KEY_CONFIG_SYNC].asMutableStringMap())
+            ?: linkedMapOf<String, Any?>()
+        cs["host"] = host
+        cs["token"] = token
+        cs["configID"] = configId
+        doc[KEY_CONFIG_SYNC] = cs
     }
 
     /**

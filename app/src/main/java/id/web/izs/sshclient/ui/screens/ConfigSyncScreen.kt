@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import id.web.izs.sshclient.core.config.RawConfigStore
 import id.web.izs.sshclient.core.config.RemoteConfigMeta
+import id.web.izs.sshclient.core.sync.AutoSyncOutcome
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -74,6 +75,9 @@ fun ConfigSyncScreen(
     var confirmDelete by remember { mutableStateOf<RemoteConfigMeta?>(null) }
     var confirmUndo by remember { mutableStateOf(false) }
     var auto by remember { mutableStateOf(state.disk.auto) }
+    // Conflict flag, persisted: the auto tick pauses for this config when
+    // server and local both changed. Any successful up/download clears it.
+    var conflict by remember { mutableStateOf(state.disk.syncConflict) }
     var pHotkeys by remember { mutableStateOf(state.disk.partsHotkeys) }
     var pAppearance by remember { mutableStateOf(state.disk.partsAppearance) }
     var pVault by remember { mutableStateOf(state.disk.partsVault) }
@@ -113,6 +117,8 @@ fun ConfigSyncScreen(
         withContext(Dispatchers.IO) {
             state.repo.uploadAsCurrent(host, token, meta.id, "android-1.0.0")
         }
+        state.disk.syncConflict = false
+        conflict = false
         state.refresh()
         reload()
     }
@@ -124,6 +130,8 @@ fun ConfigSyncScreen(
         val loaded = withContext(Dispatchers.IO) {
             state.repo.downloadIntoLocal(host, token, meta.id)
         }
+        state.disk.syncConflict = false
+        conflict = false
         state.adopt(loaded)
         if (loaded.unlockRequired) {
             showUnlock = true
@@ -176,6 +184,33 @@ fun ConfigSyncScreen(
                 "updated ${state.disk.lastRemoteChange.ifBlank { "-" }}",
             style = MaterialTheme.typography.bodySmall,
         )
+        if (conflict) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Sync conflict — auto-sync is paused",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        "The server config and this phone's config both changed " +
+                            "since the last sync. Nothing was overwritten — pick which side wins:",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            val meta = items?.find { it.id == syncId }
+                            if (meta == null) error = "Reload the cloud list first, then choose."
+                            else confirmUpload = meta
+                        }) { Text("Upload local") }
+                        OutlinedButton(onClick = {
+                            val meta = items?.find { it.id == syncId }
+                            if (meta == null) error = "Reload the cloud list first, then choose."
+                            else confirmDownload = meta
+                        }) { Text("Download server") }
+                    }
+                }
+            }
+        }
 
         // ---- connection ----
         Text("Connection", style = MaterialTheme.typography.titleMedium)
@@ -347,8 +382,21 @@ fun ConfigSyncScreen(
                 scope.launch {
                     busy = true
                     try {
-                        val name = withContext(Dispatchers.IO) { state.repo.autoSyncTick() }
-                        info = if (name != null) "Auto-sync: config \"$name\" downloaded" else "Settings saved"
+                        when (val outcome = withContext(Dispatchers.IO) { state.repo.autoSyncTick() }) {
+                            is AutoSyncOutcome.Downloaded -> {
+                                info = "Auto-sync: config \"${outcome.name}\" downloaded"
+                                conflict = false
+                            }
+                            is AutoSyncOutcome.Uploaded -> {
+                                info = "Auto-sync: local changes uploaded to \"${outcome.name}\""
+                                conflict = false
+                            }
+                            is AutoSyncOutcome.Conflict -> {
+                                info = "Auto-sync paused: server and local both changed — resolve above"
+                                conflict = true
+                            }
+                            AutoSyncOutcome.Clean -> info = "Settings saved"
+                        }
                         // Wait for the reload before clearing busy: a tick that
                         // fetched a different-passphrase blob lands locked and
                         // must prompt here, not silently.

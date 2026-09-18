@@ -2,7 +2,6 @@ package id.web.izs.sshclient.core.sync
 
 import id.web.izs.sshclient.core.config.ConfigMigrator
 import id.web.izs.sshclient.core.config.RawConfigStore
-import id.web.izs.sshclient.core.config.asMutableStringMap
 import id.web.izs.sshclient.core.config.asStringMap
 import id.web.izs.sshclient.core.config.RemoteConfigMeta
 import id.web.izs.sshclient.core.config.StoredVault
@@ -30,6 +29,38 @@ import kotlinx.coroutines.withContext
  *
  * The passphrase is NEVER written to disk; RAM only, for the session.
  */
+
+/** Client version string sent with sync uploads (manual and auto alike). */
+private const val SYNC_APP_VERSION = "android-1.0.0"
+
+/**
+ * What the auto tick should do, from the two dirtiness bits. Pure for unit
+ * tests. CONFLICT means both sides moved since the last sync: the tick
+ * pauses instead of overwriting either side, and the UI resolves it.
+ */
+enum class AutoSyncAction { CLEAN, DOWNLOAD, UPLOAD, CONFLICT }
+
+fun decideAutoSync(localDirty: Boolean, remoteDirty: Boolean): AutoSyncAction = when {
+    localDirty && remoteDirty -> AutoSyncAction.CONFLICT
+    localDirty -> AutoSyncAction.UPLOAD
+    remoteDirty -> AutoSyncAction.DOWNLOAD
+    else -> AutoSyncAction.CLEAN
+}
+
+/** SHA-256 hex of the local YAML: the "did the user change anything" bit. */
+fun syncContentHash(yaml: String): String {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    return digest.digest(yaml.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+}
+
+/** One auto-tick result for the UI (toast / sync-screen card). */
+sealed interface AutoSyncOutcome {
+    data object Clean : AutoSyncOutcome
+    data class Downloaded(val name: String) : AutoSyncOutcome
+    data class Uploaded(val name: String) : AutoSyncOutcome
+    data object Conflict : AutoSyncOutcome
+}
+
 class SyncRepository(
     private val disk: ConfigDisk,
     private val api: TabbySyncApi = TabbySyncApi(),
@@ -381,6 +412,7 @@ class SyncRepository(
         // Refresh the stamp so autosync does not treat this as a new change.
         val meta = api.getConfig(host, token, configId)
         disk.lastRemoteChange = meta.modifiedAt
+        stampSynced()
         meta.modifiedAt
     }
 
@@ -436,18 +468,17 @@ class SyncRepository(
             disk.savePreImport(localYaml, disk.lastRemoteChange)
         }
         // Make sure the local configSync points at the freshly downloaded config
-        val cs = merged[RawConfigStore.KEY_CONFIG_SYNC].asMutableStringMap()
-            ?: linkedMapOf<String, Any?>().also { merged[RawConfigStore.KEY_CONFIG_SYNC] = it }
-        cs["host"] = host
-        cs["token"] = token
-        cs["configID"] = configId
+        // (detached-copy write-back lives inside retargetSyncSection).
+        RawConfigStore.retargetSyncSection(merged, host, token, configId)
         disk.lastRemoteChange = remote.modifiedAt
         // Snapshot for abortPendingImport(): cancelling before the first
         // unlock must just fail the import (restore this), not erase local.
         preImportBackupYaml = localYaml
         preImportPassphrase = rememberedPassphrase
         disk.saveYaml(RawConfigStore.dumpRaw(merged))
-        maybeReencryptFreshShell(merged)
+        val loaded = maybeReencryptFreshShell(merged)
+        stampSynced()
+        loaded
     }
 
     /**
@@ -494,7 +525,9 @@ class SyncRepository(
             disk.savePreImport(localYaml, disk.lastRemoteChange)
         }
         disk.saveYaml(RawConfigStore.dumpRaw(doc))
-        maybeReencryptFreshShell(doc)
+        val loaded = maybeReencryptFreshShell(doc)
+        stampSynced()
+        loaded
     }
 
     /**
@@ -556,34 +589,63 @@ class SyncRepository(
         }
 
     /**
-     * Autosync parity: check lightweight metadata (list), download only when
-     * modified_at changed. Skip while the vault is locked (never prompt in background).
-     * @return config name when a download happened, else null.
+     * Autosync, both directions: check lightweight metadata (list), then act
+     * on the two dirtiness bits — download when only the server moved,
+     * upload when only the local YAML moved, pause with a conflict flag when
+     * both moved (never auto-overwrite either side). Skip while the vault is
+     * locked (never prompt in background). Network is touched only when the
+     * target is configured; a cheap local hash decides the local bit.
      */
-    suspend fun autoSyncTick(): String? = withContext(Dispatchers.IO) {
-        if (!disk.auto) return@withContext null
+    suspend fun autoSyncTick(): AutoSyncOutcome = withContext(Dispatchers.IO) {
+        if (!disk.auto) return@withContext AutoSyncOutcome.Clean
         val localYaml = disk.loadYaml()
-        if (localYaml.isNullOrBlank()) return@withContext null
+        if (localYaml.isNullOrBlank()) return@withContext AutoSyncOutcome.Clean
         val localRaw = RawConfigStore.loadRaw(localYaml)
         // Target from YAML (single source, readable while locked).
         val target = RawConfigStore.syncTargetOf(localRaw)
         val host = target.host
         val token = target.token
         val id = target.configId
-        if (host.isNullOrBlank() || token.isNullOrBlank() || id < 0) return@withContext null
-        if (RawConfigStore.isEncrypted(localRaw) && !isVaultOpen()) return@withContext null
+        if (host.isNullOrBlank() || token.isNullOrBlank() || id < 0) return@withContext AutoSyncOutcome.Clean
+        if (RawConfigStore.isEncrypted(localRaw) && !isVaultOpen()) return@withContext AutoSyncOutcome.Clean
         val list = try {
             api.getConfigs(host, token)
         } catch (e: Exception) {
-            return@withContext null
+            return@withContext AutoSyncOutcome.Clean
         }
-        val sel = list.find { it.id == id } ?: return@withContext null
-        if (sel.modifiedAt.isNotBlank() && sel.modifiedAt == disk.lastRemoteChange) {
-            return@withContext null
+        val sel = list.find { it.id == id } ?: return@withContext AutoSyncOutcome.Clean
+        val remoteDirty = sel.modifiedAt.isNotBlank() && sel.modifiedAt != disk.lastRemoteChange
+        val localDirty = syncContentHash(localYaml) != disk.lastSyncedHash
+        when (decideAutoSync(localDirty, remoteDirty)) {
+            AutoSyncAction.CLEAN -> AutoSyncOutcome.Clean
+            AutoSyncAction.DOWNLOAD -> {
+                downloadIntoLocal(host, token, id)
+                disk.syncConflict = false
+                AutoSyncOutcome.Downloaded(sel.name)
+            }
+            AutoSyncAction.UPLOAD -> {
+                uploadAsCurrent(host, token, id, SYNC_APP_VERSION)
+                disk.syncConflict = false
+                AutoSyncOutcome.Uploaded(sel.name)
+            }
+            AutoSyncAction.CONFLICT -> {
+                disk.syncConflict = true
+                AutoSyncOutcome.Conflict
+            }
         }
-        downloadIntoLocal(host, token, id)
-        disk.lastRemoteChange = sel.modifiedAt
-        sel.name
+    }
+
+    /**
+     * Baseline the local content as "synced" after any completed content sync
+     * (up, down, import) so the tick's local-dirty bit only fires on genuine
+     * later edits. Target-set deliberately does NOT stamp: pointing at a
+     * server is itself a local change worth uploading. Undo/abort
+     * deliberately do NOT stamp either: restoring an older local copy
+     * against a newer server must surface as a conflict, not silently
+     * re-download.
+     */
+    private fun stampSynced() {
+        disk.lastSyncedHash = syncContentHash(disk.loadYaml() ?: "")
     }
 
     // ---- vault management (desktop vaultSettingsTab parity) ----
