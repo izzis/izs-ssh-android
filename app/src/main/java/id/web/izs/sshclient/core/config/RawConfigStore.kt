@@ -611,6 +611,85 @@ object RawConfigStore {
     }
 
     /**
+     * Rename a group entry (desktop parity: groups carry only
+     * id/name/parentGroupId). Unknown keys on the entry are preserved
+     * (lossless). No-op when the id is absent. Blank-name rejection lives
+     * in the repo layer, not here.
+     */
+    fun renameGroupEntry(doc: MutableMap<String, Any?>, id: String, name: String) {
+        val groups = (doc[KEY_GROUPS] as? List<*>) ?: return
+        doc[KEY_GROUPS] = groups.map { e ->
+            val m = e.asMutableStringMap() ?: return@map e
+            if (m["id"]?.toString() == id) m["name"] = name.trim()
+            m
+        }
+    }
+
+    /**
+     * Delete a group entry — desktop `deleteProfileGroup(group,
+     * {deleteProfiles:false})` parity: member profiles are ungrouped (never
+     * deleted) and child groups rise to top level. No-op when absent.
+     */
+    fun deleteGroupEntry(doc: MutableMap<String, Any?>, id: String) {
+        val groups = (doc[KEY_GROUPS] as? List<*>) ?: emptyList<Any>()
+        var removed = false
+        doc[KEY_GROUPS] = groups.mapNotNull { e ->
+            val m = e.asMutableStringMap() ?: return@mapNotNull e
+            if (m["id"]?.toString() == id) {
+                removed = true
+                null
+            } else {
+                if (m["parentGroupId"]?.toString() == id) m.remove("parentGroupId")
+                m
+            }
+        }
+        if (!removed) return
+        val profiles = (doc[KEY_PROFILES] as? List<*>) ?: return
+        doc[KEY_PROFILES] = profiles.map { p ->
+            val m = p.asMutableStringMap() ?: return@map p
+            if (m["group"]?.toString() == id) m.remove("group")
+            m
+        }
+    }
+
+    /**
+     * Reparent a group (desktop nested-group parity: the tree already
+     * renders parentGroupId, this makes it settable). parentId null/blank =
+     * top level. Returns false (no write) when the id is absent, the parent
+     * is unknown/self, or the move would cycle (group under its own
+     * descendant) — the UI filters those out, this is the backstop.
+     */
+    fun moveGroupEntry(doc: MutableMap<String, Any?>, id: String, parentId: String?): Boolean {
+        val groups = (doc[KEY_GROUPS] as? List<*>) ?: return false
+        val ids = groups.mapNotNull { (it as? Map<*, *>)?.get("id")?.toString() }.toSet()
+        if (id !in ids) return false
+        val parent = parentId?.takeIf { it.isNotBlank() }
+        if (parent != null) {
+            if (parent == id || parent !in ids) return false
+            val parentOf = groups.mapNotNull { e ->
+                val m = e as? Map<*, *> ?: return@mapNotNull null
+                m["id"]?.toString() to m["parentGroupId"]?.toString()
+            }.toMap()
+            var cursor: String? = parent
+            val seen = mutableSetOf<String>()
+            while (cursor != null && seen.add(cursor)) {
+                if (cursor == id) return false
+                cursor = parentOf[cursor]?.takeIf { it.isNotBlank() }
+            }
+        }
+        doc[KEY_GROUPS] = groups.map { e ->
+            val m = e.asMutableStringMap() ?: return@map e
+            if (m["id"]?.toString() == id) {
+                if (parent == null) m.remove("parentGroupId") else m["parentGroupId"] = parent
+            }
+            m
+        }
+        // In-place (desktop writeProfileGroup parity): a moved group keeps
+        // its YAML slot — only brand-new groups append at the bottom.
+        return true
+    }
+
+    /**
      * Convert a decrypted vault JSON object -> YAML so it can be re-parsed
      * by [loadRaw] (SnakeYAML). No nested structure is lost. Shared by the
      * sync layer and the vault-state resolution so tests exercise one path.

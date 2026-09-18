@@ -29,10 +29,16 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.shape.CircleShape
@@ -42,12 +48,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.config.ProfileGroup
 import id.web.izs.sshclient.core.config.RawConfigStore
@@ -57,6 +65,7 @@ import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.ui.AppState
 import id.web.izs.sshclient.ui.SshSessionHandle
 import id.web.izs.sshclient.ui.SshSessionViewModel
+import kotlinx.coroutines.launch
 
 /**
  * Home page: SSH profiles grouped into folders per group (nested via
@@ -90,6 +99,105 @@ fun ProfileListScreen(
     // Folders default to collapsed; only EXPANDED ids persist (disk-backed,
     // so expansion is remembered across navigation and restarts).
     var expanded by remember(state.loaded) { mutableStateOf(state.disk.expandedGroups) }
+    // Group manage (pencil): rename + reparent inline, delete with
+    // confirm. Node snapshot is fine — the dialog closes on every
+    // successful write.
+    var manageNode by remember { mutableStateOf<GroupNode?>(null) }
+    var confirmDeleteNode by remember { mutableStateOf<GroupNode?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var parentId by remember { mutableStateOf<String?>(null) }
+    var groupBusy by remember { mutableStateOf(false) }
+    var groupMsg by remember { mutableStateOf<String?>(null) }
+    var showUnlock by remember { mutableStateOf(false) }
+    var pendingGroupRetry by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun openManage(node: GroupNode) {
+        manageNode = node
+        renameText = node.group.name
+        parentId = node.group.parentGroupId?.takeIf { it.isNotBlank() }
+        groupMsg = null
+    }
+
+    // Eligible parents: every group except self + descendants (cycle
+    // guard; the raw helper re-checks as backstop).
+    val eligibleParents = remember(manageNode, groups) {
+        val node = manageNode ?: return@remember emptyList<ProfileGroup>()
+        val kids = mutableMapOf<String, MutableList<String>>()
+        for (g in groups) {
+            g.parentGroupId?.takeIf { it.isNotBlank() }?.let {
+                kids.getOrPut(it) { mutableListOf() } += g.id
+            }
+        }
+        val banned = mutableSetOf(node.group.id)
+        val stack = ArrayDeque(listOf(node.group.id))
+        while (stack.isNotEmpty()) {
+            for (k in kids[stack.removeFirst()].orEmpty()) {
+                if (banned.add(k)) stack.add(k)
+            }
+        }
+        groups.filter { it.id !in banned }.sortedBy { it.name.lowercase() }
+    }
+
+    fun doSaveGroup() {
+        val node = manageNode ?: return
+        val name = renameText.trim()
+        if (name.isBlank()) {
+            groupMsg = "Group name is empty"
+            return
+        }
+        scope.launch {
+            groupBusy = true
+            groupMsg = null
+            try {
+                if (name != node.group.name) state.repo.renameGroup(node.group.id, name)
+                val origParent = node.group.parentGroupId?.takeIf { it.isNotBlank() }
+                if (parentId != origParent) state.repo.moveGroup(node.group.id, parentId)
+                state.refresh {}
+                manageNode = null
+            } catch (e: IllegalStateException) {
+                // Encrypted shell: rewriting the blob needs the passphrase
+                // (lazy-unlock parity with the profile editor).
+                if ((e.message ?: "").contains("locked", ignoreCase = true)) {
+                    pendingGroupRetry = { doSaveGroup() }
+                    showUnlock = true
+                } else {
+                    groupMsg = "Couldn't save: ${e.message}"
+                }
+            } catch (e: Exception) {
+                groupMsg = "Couldn't save: ${e.message}"
+            } finally {
+                groupBusy = false
+            }
+        }
+    }
+
+    fun doDeleteGroup() {
+        val node = confirmDeleteNode ?: return
+        scope.launch {
+            groupBusy = true
+            groupMsg = null
+            try {
+                state.repo.deleteGroup(node.group.id)
+                expanded = expanded - node.group.id
+                state.disk.expandedGroups = expanded
+                state.refresh {}
+                confirmDeleteNode = null
+                manageNode = null
+            } catch (e: IllegalStateException) {
+                if ((e.message ?: "").contains("locked", ignoreCase = true)) {
+                    pendingGroupRetry = { doDeleteGroup() }
+                    showUnlock = true
+                } else {
+                    groupMsg = "Couldn't save: ${e.message}"
+                }
+            } catch (e: Exception) {
+                groupMsg = "Couldn't save: ${e.message}"
+            } finally {
+                groupBusy = false
+            }
+        }
+    }
 
     val filtered = remember(profiles, query) {
         if (query.isBlank()) profiles
@@ -245,6 +353,7 @@ fun ProfileListScreen(
                 },
                 onOpen = onOpen,
                 onEdit = onEdit,
+                onManageGroup = { openManage(it) },
             )
             items(ungroupedSorted, key = { it.id }) { p ->
                 ProfileCard(
@@ -267,6 +376,7 @@ fun ProfileListScreen(
                 },
                 onOpen = onOpen,
                 onEdit = onEdit,
+                onManageGroup = { openManage(it) },
             )
             items(fUngroupedSorted, key = { it.id }) { p ->
                 ProfileCard(
@@ -312,6 +422,93 @@ fun ProfileListScreen(
             },
         )
     }
+    // Group manage (folder pencil): rename inline, delete behind an explicit
+    // confirm that states the ungroup outcome (deleteProfiles:false parity).
+    manageNode?.let { node ->
+        AlertDialog(
+            onDismissRequest = { if (!groupBusy) manageNode = null },
+            title = { Text("Manage group") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        label = { Text("Group name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    ParentGroupDropdown(
+                        parents = eligibleParents,
+                        selected = parentId,
+                        onSelect = { parentId = it },
+                    )
+                    groupMsg?.let { m ->
+                        Text(m, color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(
+                        onClick = { confirmDeleteNode = node },
+                        enabled = !groupBusy,
+                    ) {
+                        Text("Delete group", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { doSaveGroup() }, enabled = !groupBusy) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { manageNode = null }, enabled = !groupBusy) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    confirmDeleteNode?.let { node ->
+        val members = node.totalProfiles
+        val kids = node.children.size
+        AlertDialog(
+            onDismissRequest = { if (!groupBusy) confirmDeleteNode = null },
+            title = { Text("Delete group \"${node.group.name}\"?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (members == 0) "The group is empty."
+                        else "$members profile${if (members > 1) "s" else ""} become ungrouped.",
+                    )
+                    if (kids > 0) {
+                        Text("$kids sub-group${if (kids > 1) "s" else ""} move to top level.")
+                    }
+                    groupMsg?.let { m ->
+                        Text(m, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { doDeleteGroup() }, enabled = !groupBusy) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteNode = null }, enabled = !groupBusy) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    if (showUnlock) {
+        VaultUnlockDialog(
+            state = state,
+            onUnlocked = {
+                showUnlock = false
+                pendingGroupRetry?.invoke()
+                pendingGroupRetry = null
+            },
+            onNoConfig = { showUnlock = false },
+            onDismiss = { showUnlock = false; pendingGroupRetry = null },
+        )
+    }
 }
 
 private data class GroupNode(
@@ -348,6 +545,9 @@ private fun buildTree(
     val byGroup = profiles.groupBy { it.group }
     fun node(g: ProfileGroup, seen: Set<String>): GroupNode {
         val kids = if (g.id in seen) emptyList()
+        // Alphabetical at every level (desktop display parity: the
+        // selector sorts by group-path/name, so the visible order is
+        // alphabetical even though the raw tree keeps config order).
         else (children[g.id] ?: emptyList()).map { node(it, seen + g.id) }
         return GroupNode(
             group = g,
@@ -369,8 +569,11 @@ private fun addNode(
 ) {
     out += HomeRow.Folder(n, depth)
     if (!forceExpand && n.group.id !in expanded) return
-    for (c in n.children) addNode(c, depth + 1, expanded, out, forceExpand)
+    // Desktop profilesSettingsTab parity: profiles first, child folders
+    // at the bottom (their template renders group.profiles, then
+    // group.children — never the reverse).
     for (p in n.profiles) out += HomeRow.Profile(p, depth + 1)
+    for (c in n.children) addNode(c, depth + 1, expanded, out, forceExpand)
 }
 
 /** Flattened child rows per top-level folder (subfolders + profiles). */
@@ -382,8 +585,8 @@ private fun buildSections(
     roots.map { root ->
         root to buildList {
             if (forceExpand || root.group.id in expanded) {
-                for (c in root.children) addNode(c, depth = 1, expanded, this, forceExpand)
                 for (p in root.profiles) add(HomeRow.Profile(p, 1))
+                for (c in root.children) addNode(c, depth = 1, expanded, this, forceExpand)
             }
         }
     }
@@ -402,6 +605,7 @@ private fun LazyListScope.groupSections(
     onToggle: (id: String, isCollapsed: Boolean) -> Unit,
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
+    onManageGroup: (GroupNode) -> Unit,
 ) {
     for ((root, sub) in sections) {
         val id = root.group.id
@@ -412,6 +616,7 @@ private fun LazyListScope.groupSections(
                 depth = 0,
                 collapsed = isCollapsed,
                 onToggle = { onToggle(id, isCollapsed) },
+                onManage = { onManageGroup(root) },
             )
         }
         items(sub, key = { it.key }) { row ->
@@ -424,6 +629,7 @@ private fun LazyListScope.groupSections(
                         depth = row.depth,
                         collapsed = cCollapsed,
                         onToggle = { onToggle(cid, cCollapsed) },
+                        onManage = { onManageGroup(row.node) },
                     )
                 }
                 is HomeRow.Profile -> ProfileCard(
@@ -587,15 +793,21 @@ private fun FolderRow(
     depth: Int,
     collapsed: Boolean,
     onToggle: () -> Unit,
+    onManage: () -> Unit,
 ) {
-    Card(
+    // Slim sticky-header bar, deliberately NOT a Card: profile rows are
+    // multi-line Cards, folders are single-line tonal headers (desktop
+    // settings-tree parity). Open/closed reads from Folder/FolderOpen.
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = (depth * 16).dp)
-            .clickable { onToggle() },
+            .padding(start = (depth * 16).dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        onClick = onToggle,
     ) {
         Row(
-            Modifier.padding(12.dp),
+            Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -603,10 +815,13 @@ private fun FolderRow(
                 if (collapsed) Icons.Filled.Folder else Icons.Filled.FolderOpen,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
             )
             Text(
                 node.group.name,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             Text(
@@ -614,10 +829,52 @@ private fun FolderRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Icon(
-                if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
-                contentDescription = if (collapsed) "Expand" else "Collapse",
+            // Desktop parity: folder actions are hover-revealed there (no
+            // hover on touch), so the pencil stays low-emphasis instead of
+            // a full primary-colour button.
+            IconButton(onClick = onManage, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "Rename or delete group",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Parent picker for the Manage-group dialog (GroupDropdown parity in the profile editor). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ParentGroupDropdown(
+    parents: List<ProfileGroup>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = when {
+        selected.isNullOrBlank() -> "Top level"
+        else -> parents.find { it.id == selected }?.name ?: "Top level"
+    }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = label, onValueChange = { },
+            readOnly = true, label = { Text("Parent group") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Top level") },
+                onClick = { onSelect(null); expanded = false },
             )
+            for (g in parents) {
+                DropdownMenuItem(
+                    text = { Text(g.name) },
+                    onClick = { onSelect(g.id); expanded = false },
+                )
+            }
         }
     }
 }
@@ -688,7 +945,14 @@ private fun ProfileCard(
             // Mobile v1 edits SSH profiles only; other types stay desktop-managed.
             if (profile.type == "ssh") {
                 IconButton(onClick = { onEdit(profile.id) }) {
-                    Icon(Icons.Filled.Edit, contentDescription = "Edit profile")
+                    // Low-emphasis like the folder pencil (desktop
+                    // hover-action parity): solid black is too harsh,
+                    // especially in the light theme.
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "Edit profile",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

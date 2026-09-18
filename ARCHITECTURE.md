@@ -63,9 +63,11 @@ app/src/main/java/id/web/izs/sshclient/
                                    sticky search + profiles share one scroll, so long
                                    Active/Recent never squeezes the profile viewport);
                                    Active always expanded with Close all, Recent
-                                   collapsible with per-row History icons + Clear,
-                                   identity-colour stripe per profile row,
-                                   exit-with-confirm top-bar button
+                                    collapsible with per-row History icons + Clear,
+                                    identity-colour stripe per profile row,
+                                    folder pencil (rename + reparent + delete group,
+                                    members ungrouped, children to top level),
+                                    exit-with-confirm top-bar button
        NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
                                    profiles, desktop-selector parity; half by
                                    default, draggable to full)
@@ -215,7 +217,7 @@ app/src/main/java/id/web/izs/sshclient/
                             deleted on first boot (one-time alpha reset).
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (43 files, 354 tests — §8)
+app/src/test/... (44 files, 360 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -508,7 +510,7 @@ the IME:
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 354 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 360 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -555,6 +557,7 @@ the IME:
 | `KeepaliveTest` | custom keepalive values reach the transport + defaults match desktop |
 | `TinkKvStoreTest` | typed KV round-trip + single-write batching + corrupt-blob quarantine + cross-instance persist |
 | `UsernamePromptTest` | blank-user prompt: trim/empty/cancel-to-error-card/retry gating |
+| `GroupEditTest` | group rename (trim/unknown-key keep/no-op) + delete (ungroup members, lift children) + move (reparent/top-level/cycle-guard) |
 
 ## 9. Background survival (SessionService)
 

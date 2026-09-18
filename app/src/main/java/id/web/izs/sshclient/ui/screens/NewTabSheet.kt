@@ -84,8 +84,8 @@ fun NewTabSheet(
     // group names can show during the overlap. Ungrouped profiles have no
     // header. Searching keeps the same grouped view over the matches.
     val groups = remember(state.loaded) { state.displayGroups() }
-    val sections = remember(profiles, groups) { toSections(profiles, groups, state) }
-    val fSections = remember(filtered, groups) { toSections(filtered, groups, state) }
+    val sections = remember(profiles, groups) { toSections(profiles, groups) }
+    val fSections = remember(filtered, groups) { toSections(filtered, groups) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -177,16 +177,37 @@ fun NewTabSheet(
     }
 }
 
-/** Profiles grouped under display group names (blank = ungrouped). */
+/** Profiles grouped under full group paths (blank = ungrouped). */
 private fun toSections(
     profiles: List<SshProfile>,
     groups: List<ProfileGroup>,
-    state: AppState,
 ): List<Pair<String, List<SshProfile>>> =
-    profiles.groupBy { state.groupName(groups, it.group) }
+    profiles.groupBy { groupPath(groups, it.group) }
         .toList()
         .sortedBy { (name, _) -> name.lowercase() }
         .map { (name, ps) -> name to ps.sortedBy { it.name.lowercase() } }
+
+/**
+ * Full breadcrumb for a group (desktop resolveProfileGroupPath parity:
+ * SUBGROUP header reads "GROUP -> SUBGROUP"). Blank = ungrouped.
+ * Separator is ASCII `->`: desktop's `🡒` glyph may not exist in device
+ * fonts (tofu risk). Depth-capped + cycle-guarded like the home tree.
+ */
+private fun groupPath(groups: List<ProfileGroup>, id: String?): String {
+    if (id.isNullOrBlank()) return ""
+    val byId = groups.associateBy { it.id }
+    val names = mutableListOf<String>()
+    val seen = mutableSetOf<String>()
+    var cursor: String? = id
+    var depth = 0
+    while (cursor != null && seen.add(cursor) && depth <= 30) {
+        val g = byId[cursor] ?: break
+        names.add(0, g.name)
+        cursor = g.parentGroupId?.takeIf { it.isNotBlank() }
+        depth++
+    }
+    return names.joinToString(" -> ")
+}
 
 /**
  * Grouped sheet list: sticky folder header (opaque, so rows scrolling

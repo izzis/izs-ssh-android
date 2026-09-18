@@ -1281,6 +1281,34 @@ class SyncRepository(
     }
 
     /**
+     * Rename a group (home folder pencil). Reuses [updateTerminalSection] so
+     * plaintext and encrypted shells share one path (unlock required when
+     * locked). Unknown ids are a no-op write via the raw helper.
+     */
+    suspend fun renameGroup(id: String, name: String): Loaded {
+        require(name.isNotBlank()) { "Group name is empty" }
+        return updateTerminalSection { RawConfigStore.renameGroupEntry(it, id, name) }
+    }
+
+    /**
+     * Delete a group; members become ungrouped and child groups rise to top
+     * level ([RawConfigStore.deleteGroupEntry], desktop deleteProfiles:false
+     * parity). Same shared plaintext/encrypted path as [renameGroup].
+     */
+    suspend fun deleteGroup(id: String): Loaded =
+        updateTerminalSection { RawConfigStore.deleteGroupEntry(it, id) }
+
+    /**
+     * Reparent a group (parentId null = top level). Invalid moves are
+     * rejected before any write ([RawConfigStore.moveGroupEntry]).
+     * Same shared plaintext/encrypted path as [renameGroup].
+     */
+    suspend fun moveGroup(id: String, parentId: String?): Loaded =
+        updateTerminalSection {
+            require(RawConfigStore.moveGroupEntry(it, id, parentId)) { "Invalid parent group" }
+        }
+
+    /**
      * Applies a `terminal`-section mutation (color scheme, custom schemes,
      * font, cursor — Settings > Color scheme / Appearance). Plaintext configs edit the outer document
      * (updateLocalRaw parity); encrypted shells edit the vault blob and
