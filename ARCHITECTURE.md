@@ -68,9 +68,10 @@ app/src/main/java/id/web/izs/sshclient/
                                     folder pencil (rename + reparent + delete group,
                                     members ungrouped, children to top level),
                                     exit-with-confirm top-bar button
-       NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
-                                   profiles, desktop-selector parity; half by
-                                   default, draggable to full)
+        NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
+                                    profiles, desktop-selector parity; custom
+                                    sheet: header-only drag to half/full/hide,
+                                    list owns all scrolls)
        ProfileEditScreen.kt        Tabbed editor (General + colour picker (FlowRow swatch
                                     grid — fixed chunked rows clipped the rightmost
                                     swatch into an oval on narrow phones) / Ports /
