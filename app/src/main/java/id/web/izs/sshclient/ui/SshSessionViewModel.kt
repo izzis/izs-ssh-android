@@ -72,6 +72,13 @@ fun shouldAutoRetry(
     !needsPassphrase && !hasAuthPrompt && !hasHostKeyPrompt && !hasUsernamePrompt
 
 /**
+ * Fold multi-line server text (auth banner) to terminal line endings,
+ * dropping blank edge lines. Pure for unit tests.
+ */
+internal fun foldBannerText(raw: String): String =
+    raw.split("\n").joinToString("\r\n") { it.trimEnd() }.trim()
+
+/**
  * Typed-username rule: surrounding whitespace is never part of a login
  * name, and a blank confirmation answers nothing (the dialog stays open —
  * its Connect button already requires non-blank, this is the second gate).
@@ -543,6 +550,9 @@ class SshSessionViewModel : ViewModel() {
                 // only) — surfaced below as an in-terminal service line,
                 // desktop emitServiceMessage parity.
                 var freshWarnings: List<String> = emptyList()
+                // Auth banner (fresh transports only) — surfaced first at
+                // the same service-line point, unless skipped.
+                var freshBanner: String? = null
                 if (adopted != null) {
                     h.setStage("Reusing connection…")
                     sess = try {
@@ -607,6 +617,7 @@ class SshSessionViewModel : ViewModel() {
                     sess.trustUpgrade = t.trustUpgrade
                     sess.trustUpgradeLine = t.trustUpgradeLine
                     freshWarnings = t.forwards.warnings
+                    freshBanner = t.authBanner
                     authenticatedFresh = true
                     sess.trustUpgrade?.let { entry ->
                         viewModelScope.launch {
@@ -655,6 +666,18 @@ class SshSessionViewModel : ViewModel() {
                         h.emulator.feed(chunk)
                         h.bumpVersion()
                         noteOutput(sessionId)
+                    }
+                }
+                // Auth banner (desktop banner$ service message): the server's
+                // pre-auth text, shown first unless the profile skips it.
+                // motd and other post-login shell output are NOT affected —
+                // those are plain terminal bytes, indistinguishable from
+                // command output.
+                freshBanner?.takeIf { it.isNotBlank() && !profile.options.skipBanner }?.let { banner ->
+                    val text = foldBannerText(banner)
+                    if (text.isNotEmpty()) {
+                        sess.output.tryEmit("\r\n$text\r\n")
+                        h.bumpVersion()
                     }
                 }
                 // Remote forwards the server rejected: the session survived,

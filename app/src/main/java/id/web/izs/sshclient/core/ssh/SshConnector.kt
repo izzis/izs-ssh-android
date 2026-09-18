@@ -35,7 +35,8 @@ import kotlin.concurrent.thread
  * - forwardedPorts: Local + Remote open at connect (desktop addPortForward
  *   parity — Local bind failure aborts the connect, Remote rejection warns
  *   and continues); Dynamic is desktop-only with a clear message.
- *   x11 / skipBanner stay saved-for-desktop.
+ *   x11 stays saved-for-desktop; skipBanner is honored (auth-banner
+ *   service line, suppressed when set).
  * - reuseSession: honored via transport sharing ([connectTransport] once per
  *   [transportKeyOf], [openShellOnTransport] per tab — desktop multiplexer
  *   parity). Every profile tap opens a new tab; true shares the TCP
@@ -78,6 +79,9 @@ class SshConnector {
         var trustUpgrade: id.web.izs.sshclient.core.config.KnownHostEntry? = null,
         var trustUpgradeLine: String? = null,
         val forwards: StartedForwards = StartedForwards.empty(),
+        /** Raw server text from the USERAUTH_BANNER packet (null when the
+         *  server sent none). Displayed unless the profile skips it. */
+        val authBanner: String? = null,
     ) {
         fun close() {
             try { forwards.close() } catch (_: Exception) { }
@@ -354,6 +358,12 @@ class SshConnector {
                 } catch (_: Exception) {
                     // Best-effort: a dead keepalive must never fail the session.
                 }
+                // Auth banner (USERAUTH_BANNER packet, e.g. /etc/issue.net):
+                // captured for the optional service-line display. Best
+                // effort — a dead banner must never fail the session.
+                val authBanner: String? = try {
+                    client.userAuth.banner.takeIf { it.isNotBlank() }
+                } catch (_: Exception) { null }
                 // Port forwarding opens here — once per transport, so shared
                 // tabs reuse the same forwards (desktop multiplexer parity).
                 // Local bind failure / Dynamic rows throw and abort the
@@ -365,6 +375,7 @@ class SshConnector {
                     verifier.trustUpgrade,
                     verifier.trustUpgradeLine,
                     startedForwards,
+                    authBanner,
                 )
             }
         } catch (e: Exception) {

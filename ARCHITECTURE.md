@@ -675,7 +675,7 @@ hiding them, so synced values stay manageable from the phone.
 Connects on-device: password, publicKey, Auto, username prompt when blank
 (desktop `Username for host` parity; typed name is session-local), SOCKS
 proxy (default 1080), Local/Remote port forwarding, keepalive interval +
-countMax watchdog, readyTimeout, reuseSession, custom algorithms, login
+countMax watchdog, auth-banner service line unless skipped, readyTimeout, reuseSession, custom algorithms, login
 scripts, per-profile warnOnClose.
 `keyboardInteractive` narrows to password + the failover prompt (no KI
 transport); typed failover passwords bypass the `auth` selection.
@@ -683,8 +683,7 @@ transport); typed failover passwords bypass the `auth` selection.
 Not yet (implementable, no platform blocker): keyboard-interactive
 transport + challenge UI, HTTP CONNECT proxy, jump-host chains
 (`connectVia` exists in sshj), Dynamic (device-side SOCKS listener),
-`skipBanner` filtering, `telnet` profile type (plain TCP + the existing
-emulator).
+`telnet` profile type (plain TCP + the existing emulator).
 
 Desktop-only (no mobile counterpart): `x11` (no X server), `agentForward`
 and `auth: agent` (no ssh-agent), `proxyCommand` (no helper binaries like

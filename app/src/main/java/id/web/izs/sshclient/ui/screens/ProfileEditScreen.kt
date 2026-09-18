@@ -1065,7 +1065,7 @@ private fun AdvancedTab(
     Text("Session", style = MaterialTheme.typography.titleMedium)
     CheckRow("X11 forwarding (desktop only)", x11, onX11)
     CheckRow("Forward SSH agent (desktop only)", agentForward, onAgentForward)
-    CheckRow("Skip banner (desktop only)", skipBanner, onSkipBanner)
+    CheckRow("Skip banner", skipBanner, onSkipBanner)
     CheckRow("Reuse session", reuseSession, onReuseSession)
     Text(
         "Reuse session shares one connection for all tabs of this profile. " +
