@@ -226,7 +226,7 @@ fun AboutScreen(onBack: () -> Unit) {
         Text(
             "Apache License 2.0: sshj, OkHttp, SnakeYAML, Jetpack Compose / " +
                 "AndroidX, kotlinx.coroutines, kotlinx.serialization-json, SLF4J, " +
-                "AndroidX Security Crypto. " +
+                "Tink Android. " +
                 "Bouncy Castle (MIT-style license): bcprov-jdk18on, bcpkix-jdk18on.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

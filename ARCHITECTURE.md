@@ -33,8 +33,10 @@ app/src/main/java/id/web/izs/sshclient/
     SessionService.kt             Foreground-service anchor (specialUse): exact
                                   "N sessions" notification (expandable
                                   per-host lines, Disconnect-all action),
-                                  opt-in wake lock; pure text builders at
-                                  file level for JVM tests
+                                   opt-in wake lock; pure text builders at
+                                   file level for JVM tests
+    BatteryOpt.kt               Battery-optimization exemption helpers
+                                (background survival)
   ui/
     AppForeground.kt              Process foreground counter (no extra deps)
     AppViewModel.kt               Rotation-safe holder of AppState (passphrase survives rotate)
@@ -54,7 +56,8 @@ app/src/main/java/id/web/izs/sshclient/
        ScreenHeader.kt           Shared sub-screen top bar (back arrow + title + trailing busy spinner for YAML writes); header is sticky outside the scrolling column so the spinner does not jitter content
        AboutScreen.kt              Version + email feedback + source-code link +
                                    manual GitHub Releases update check (manual
-                                   only, no background polling)
+                                   only, no background polling) + MIT license +
+                                   third-party attributions
        ConfigSyncScreen.kt         Connection + cloud configs + up/download (Settings only, sticky header with busy spinner + centered busy dialog for list/transfer ops)
        ProfileListScreen.kt        Home: single LazyColumn (header + Active + Recent +
                                    sticky search + profiles share one scroll, so long
@@ -123,6 +126,14 @@ app/src/main/java/id/web/izs/sshclient/
                                    (desktop Settings > SSH parity; live-save, vault-aware; sticky header with busy spinner)
        SettingsScreen.kt           Sidebar mirroring desktop Settings sections
        CrashReportScreen.kt        Shows last crash trace with copy button
+       ColorSchemeComponents.kt    Shared scheme picker list + sample-line
+                                   preview (used by Colours tab + global screen)
+       ExtraKeysBar.kt             Docked extra-keys bar (shared by terminal +
+                                   layout editor preview)
+       KeyboardLayoutScreen.kt     Extra-keys layout editor (WYSIWYG preview +
+                                   row/key editing, device-local)
+       SshInputPipe.kt             Hidden-field IME input pipe (Termux
+                                   onCreateInputConnection port)
   core/
     config/
       TabbyModels.kt      Domain models: SshProfile, ProfileGroup, options, SshGlobals
@@ -133,6 +144,11 @@ app/src/main/java/id/web/izs/sshclient/
                           terminal.showRecentProfiles + appearance.tabsLocation + 4 clipboard keys (bracketed/warn/replace/trim,
                           delete-on-default + empty-map prune) read/write — desktop-owned keys, never invented)
       ProfileColor.kt     Identity-color palette + hex normalize/parse (pure JVM)
+      ColorScheme.kt      TerminalColorScheme shape (theme.ts parity):
+                          parse/normalize/readability gates, resolution order
+                          (profile > device-local | synced-global > Izs),
+                          upsert/delete customs, YAML compat (pure JVM)
+      TerminalAppearance.kt terminal.font/cursor/cursorBlink keys (pure JVM)
     vault/
       VaultCrypto.kt      PBKDF2-HmacSHA512 x100k/salt8 -> AES-256-CBC/iv16 (pure JVM)
       VaultState.kt       Pure resolve/unlock-required logic + secret CRUD ops
@@ -165,13 +181,25 @@ app/src/main/java/id/web/izs/sshclient/
       LoginScriptRunner.kt Ordered expect/send automation (desktop LoginScriptProcessor
                           parity, pure JVM)
       SshAlgorithmFactories.kt Profile cipher/kex/mac/hostkey/compression wire names ->
-                          sshj factories, unknown skipped (pure JVM + Config build)
+                           sshj factories, unknown skipped (pure JVM + Config build)
+      PortForwarding.kt   Local + Remote forwarding at connect (addPortForward
+                           parity); Dynamic stays desktop-only (pure JVM)
+      SocksProxy.kt       Outbound SOCKS proxy for the transport (newSocksProxy
+                           parity, default 1080; pure JVM)
     term/
       TerminalEmulator.kt Pure-Kotlin VT100/xterm subset (SGR, cursor, erase,
                           scroll/margins, wrap, alt-buffer, ?25, ?1049) +
                           scrollback history deque capped by maxHistory
       TerminalInput.kt    Pure sticky CTRL/ALT mapping (c & 0x1F, ALT = ESC prefix)
+      ExtraKeyboard.kt    Editable on-screen extra-keys bar (dock rows below
+                           the grid); device-local JSON, strict import (pure JVM)
+      MonoFontCheck.kt    Proportional-system-monospace detection -> bundled
+                           fallback (pure JVM)
+      PipeInput.kt        Event-driven IME pipe commit mapping (pure JVM)
   data/local/
+    TinkKvStore.kt        Encrypted KV backend (Tink AES256-GCM, Keystore-backed
+                           keyset; batched single sealed write, corrupt-blob
+                           quarantine) + unencrypted fallback
     ConfigDisk.kt         TinkKvStore (Tink AES256-GCM whole-blob, backend pinned once per
                            process; secret writes refused when encryption is
                            unavailable): sync behavior prefs (auto/parts/stamp),
@@ -180,15 +208,14 @@ app/src/main/java/id/web/izs/sshclient/
                            Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode/window.hideTerminalHeader/window.fabAtBottom/window.fabAtLeft (never synced to YAML).
                            The sync target (host/token/configID) lives ONLY in
                            YAML > configSync (single source, RAM-mirrored after
-                           load — never a prefs duplicate).
-                           Android-only home.recentProfiles + window.tabSource/tabLocation/window.newTabMode/window.hideTerminalHeader/window.fabAtBottom/window.fabAtLeft (never synced to YAML).
-                           Replaces EncryptedSharedPreferences (security-crypto
-                           deprecated wholesale, no drop-in successor) with the
-                           same Tink engine used directly; pre-Tink store file
-                           deleted on first boot (one-time alpha reset).
+                            load — never a prefs duplicate).
+                            Replaces EncryptedSharedPreferences (security-crypto
+                            deprecated wholesale, no drop-in successor) with the
+                            same Tink engine used directly; pre-Tink store file
+                            deleted on first boot (one-time alpha reset).
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (36 files, 299 tests — §8)
+app/src/test/... (43 files, 354 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -472,10 +499,16 @@ the IME:
   (loopback, RFC 1918, link-local, .local-style, single-label LAN) enforced
   in code (`RawConfigStore.isSyncHostAllowed`, checked by `TabbySyncApi` on
   every request — network-security-config cannot express CIDR ranges).
+- **Compose staleness lesson (phantom-Disconnected):** never branch UI on the
+  plain `shell` field — the branch group can keep evaluating a stale null
+  forever (green dot + Disconnected + dead Reconnect on a live session;
+  logging masks it by reshuffling recomposition timing). Shell presence is
+  the observable `hasShell` flow, updated at every assignment site;
+  composition branches on the flow, event handlers read the field fresh.
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 324 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 354 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -517,6 +550,11 @@ the IME:
 | `SocksProxyTest` | SOCKS defaults/validation + live handshake-through-proxy vs fake SOCKS5 |
 | `AuthSelectionTest` | auth selection honored (stage proofs) + typed failover bypass vs MINA |
 | `ClipboardParityTest` | 4 clipboard keys (defaults/delete-on-default/prune) + `?2004`/`?1049` tracking + paste funnel (fold/replace/strip/trim) |
+| `BannerTextTest` | auth-banner fold (`\n`→`\r\n`) + blank-only collapse + skipBanner first-service-line |
+| `ConfigBackupTest` | single-slot YAML backup generations + RAM→disk restore fallback |
+| `KeepaliveTest` | custom keepalive values reach the transport + defaults match desktop |
+| `TinkKvStoreTest` | typed KV round-trip + single-write batching + corrupt-blob quarantine + cross-instance persist |
+| `UsernamePromptTest` | blank-user prompt: trim/empty/cancel-to-error-card/retry gating |
 
 ## 9. Background survival (SessionService)
 
@@ -576,93 +614,13 @@ countered in four layers:
 - `CrashLog` (debug builds only) persists the last crash trace; the next
   launch offers the Crash Report screen with copy.
 
-## 11. Roadmap (missing vs Tabby config.yaml)
+## 11. Capability scope (vs Tabby)
 
-- **Multi-session (done):** session registry in `SshSessionViewModel`
-  (PTYs survive nav + rotation, which fixed the rotation-PTY drop); every
-  profile tap opens a new tab while `reuseSession=true` (default) shares one
-  TCP transport per `host:port:user:proxy…` key (desktop multiplexer parity —
-  extra tabs skip re-auth, one reader pump per channel, refcounted teardown);
-  closing a tab on a shared transport releases the pool ref WITHOUT sending
-  channel-close (desktop `shell.ts` destroy parity — some servers kill the
-  whole connection on channel close; the abandoned remote shell lingers until
-  the last tab's disconnect, exactly like desktop);
-  the home list shows an Active-sessions section (green/amber/red dot)
-  replacing disconnect-on-back; per-session warn-on-close; cap on concurrent
-   sessions (default 5, hard max 10, tunable in Settings > Terminal, now
-   scrollable). Reader-pump death marks tabs failed (red + Retry): single
-   `exit` fails only its tab, a dead transport fails all riders.
-- **Tab chrome (done):** strip for `top`/`bottom` (status dot + profile
-  name + primary activity underline + × + `+`; scroll hoisted to the VM because every tab
-  is its own destination), custom side drawer for `left`/`right` (M3 drawer
-  is start-side only — whole-screen RTL mirroring is rejected; hamburger
-  replaces Back, edge-fling (32dp system-Back reserve) opens it, pinned
-  Profile-list/Settings footer, scrim/Back closes), Back always goes
-  home via synchronous popBackStack. Socket teardown runs off-Main (a stalled
-  VPN must never freeze the terminal mid-tap). Later polish: slim 32dp tab
-  buttons with a tight ⋮/× cluster, desktop-`.colorbar` profile-colour bar
-  inside the rounded tab box (live-resolved `colorOf`; `IntrinsicSize.Max`
-  binding because horizontal scroll collapses fillMaxWidth underlines to 0),
-  hide-terminal-header mode with the options on the active tab's ⋮ (+ a
-  corner-draggable floating ⋮ with persisted anchor when tabs are off;
-  drawer ⋮ hides its Settings/Profile-list copies).
-- **Tab UX polish (done):** home shares one LazyColumn (Active always
-  expanded with Close all in the header row, Recent collapsible with
-  per-row History icons + Clear, sticky search); `NewTabSheet.kt` quick-pick
-  (search + recent + group sections, desktop-selector parity; half by
-  default via partial anchor, draggable to full); `window.newTabMode`
-  device-only pref + Settings > Window radio; primary activity underline
-  (tertiary reads red on this theme); drawer footer Profile list + Settings;
-  drawer open fling reserves only the 32dp system-Back edge; sheet picks reuse
-  shallow `openProfile`; session-limit dialog moved global (visible from the
-  sheet, not just home).
-- **Appearance (done):** `AppearanceSettingsScreen` — app theme
-  (System/Dark/Light, device-only `ConfigDisk appearance.appTheme`) +
-  app color palettes (`ui/Theme.kt AppPalettes`: Grape/Ocean/Forest/Sunset, device-only `appearance.appPalette`, terminal untouched),
-  terminal font (system monospace or bundled Source Code Pro,
-  `terminal.font` YAML), font size (device-only, moved from Terminal),
-  cursor style + blink (`terminal.cursor`/`cursorBlink` YAML, live on
-  open sessions via a blink-gated cursor overlay), live preview (font +
-  size + cursor in the active scheme colors, same resolution as
-  TerminalScreen). No scheme set anywhere +
-  light app theme = light Izs terminal default (explicit schemes always
-  win). Desktop-only keys (vibrancy,
-  custom CSS, window frame) stay desktop-managed, RAW-lossless.
-- **Color scheme (done):** `core/config/ColorScheme.kt` (desktop
-  `theme.ts` shape; parse/normalize/toRawMap/readability gates/contrast;
-  JSON ser via kotlinx.serialization for the device pref; `SchemeSource` +
-  `resolveActiveScheme` (profile > device-local | synced-global > Izs);
-  `upsertCustom`/`deleteCustomByName` saveScheme parity; pure JVM) +
-  `assets/color_schemes.json` (102 built-ins, curated from 191 XResources;
-  light schemes gated on black/bright-black contrast + background visibility).
-  Global `terminal.colorScheme` + `terminal.customColorSchemes` +
-  per-profile `terminalColorScheme` (null = follow global) in synced YAML
-  via `RawConfigStore` readers/writers + `updateProfileMap` (null removes
-  the key); sibling keys (`lightColorScheme`, unknown) never touched
-  (desktop-compat test). `SyncRepository.updateTerminalSection` (plaintext
-  outer edit; encrypted shells rewrite the blob, direct Loaded without
-  re-decrypt); `AppState.adopt` skips the redundant refresh cycle.
-  `TerminalEmulator` palette is per-session instance state + `remapCells`
-  (whole screen follows a switch; 256/truecolor untouched). `drawTerminal`
-  backdrop + missing-cell fallbacks use the palette; TerminalScreen owns the
-  single apply path (`LaunchedEffect`, scheme-change only) + stage bg.
-  UI mirrors desktop: Current header + Edit/Delete, search + full-preview
-  rows with Custom badges (customs first), editor (22 dots with desktop
-  FG/BG/CU/CA/SB/SF + ANSI labels, long-press tooltips, 4×5 family grid +
-  9-step + hex picker, live preview, warnings never block), profile Colours
-  tab (Use-global + search). Source toggle (tabSource parity, ConfigDisk
-  `terminal.schemeSource`/`localScheme`): device picks apply instantly
-  (plain pref); device edits apply instantly and upsert the shared pool
-  (vault-aware). Terminal-content only;
-   `selectionForeground`/`cursorAccent` stored-but-unused;
-   `lightColorScheme`/`colorSchemeMode` ignored (single-scheme app: the
-   active scheme drives both terminal and app chrome, light or dark).
-- **Compose staleness lesson (phantom-Disconnected):** never branch UI on the
-  plain `shell` field — the branch group can keep evaluating a stale null
-  forever (green dot + Disconnected + dead Reconnect on a live session;
-  logging masks it by reshuffling recomposition timing). Shell presence is
-  the observable `hasShell` flow, updated at every assignment site;
-  composition branches on the flow, event handlers read the field fresh.
+Live feature-by-feature tracking (tiers, effort map, done log) lives outside
+this file: <https://ssh.izs.web.id/roadmap> (source:
+<https://raw.githubusercontent.com/izzis/izs-assets/main/tabby-parity-roadmap.md>).
+What stays here is the on-device capability contract — what connects,
+what round-trips untouched, and what never will.
 - **Port forwarding:** Local + Remote rules open at connect (desktop
   `addPortForward` parity — Local bind failure aborts the connect, Remote
   rejection warns in-terminal and continues); Dynamic (SOCKS) stays
@@ -675,7 +633,6 @@ countered in four layers:
   disables switching INTO still-unsupported modes from the phone ("…
   (desktop only)"); a synced non-direct value stays visible/selected so it
   round-trips untouched.
-- Multi-window / font-choice polish, search-in-buffer.
 
 ### Mobile scope: YAML features vs this device
 

@@ -15,4 +15,5 @@ Settings > About > Open-source licenses in the app):
   kotlinx.coroutines, kotlinx.serialization-json, SLF4J,
   Apache MINA SSHD (test-only, never ships in the APK).
 - Bouncy Castle (MIT-style adapted license): bcprov-jdk18on, bcpkix-jdk18on.
-- AndroidX Security Crypto (Apache 2.0).
+- Tink Android (Apache License 2.0): com.google.crypto.tink:tink-android
+  (encrypted storage backend; replaces AndroidX Security Crypto).
