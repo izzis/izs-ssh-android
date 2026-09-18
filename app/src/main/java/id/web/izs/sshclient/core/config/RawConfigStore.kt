@@ -20,6 +20,7 @@ object RawConfigStore {
     const val KEY_VERSION = "version"
     const val KEY_PROFILES = "profiles"
     const val KEY_GROUPS = "groups"
+    const val KEY_PROFILE_BLACKLIST = "profileBlacklist"
     const val KEY_SSH = "ssh"
     const val KEY_CONFIG_SYNC = "configSync"
     const val KEY_VAULT = "vault"
@@ -687,6 +688,29 @@ object RawConfigStore {
         // In-place (desktop writeProfileGroup parity): a moved group keeps
         // its YAML slot — only brand-new groups append at the bottom.
         return true
+    }
+
+    /**
+     * Hidden-profile ids (desktop `profileBlacklist` parity: a synced root
+     * list, honored by the new-tab selector). Missing/malformed = empty.
+     */
+    fun profileBlacklistOf(doc: Map<String, Any?>): Set<String> =
+        ((doc[KEY_PROFILE_BLACKLIST] as? List<*>) ?: emptyList<Any>())
+            .mapNotNull { it?.toString()?.takeIf { s -> s.isNotBlank() } }
+            .toSet()
+
+    /**
+     * Hide/show a profile. The key persists (even empty — desktop-shape
+     * parity) once touched; unknown ids are kept verbatim (lossless).
+     */
+    fun setProfileHiddenEntry(doc: MutableMap<String, Any?>, id: String, hidden: Boolean) {
+        val ids = profileBlacklistOf(doc).toMutableList()
+        if (hidden) {
+            if (id !in ids) ids += id
+        } else {
+            ids.removeAll { it == id }
+        }
+        doc[KEY_PROFILE_BLACKLIST] = ids
     }
 
     /**

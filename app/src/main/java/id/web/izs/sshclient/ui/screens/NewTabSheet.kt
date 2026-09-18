@@ -89,7 +89,13 @@ fun NewTabSheet(
 ) {
     var query by remember { mutableStateOf("") }
     var recentVersion by remember { mutableStateOf(0) }
-    val profiles = remember(state.loaded) { state.displayProfiles() }
+    // Hidden profiles never appear in the picker — not even in search
+    // (desktop selector parity: it filters profileBlacklist first).
+    val profiles = remember(state.loaded) {
+        val hidden = RawConfigStore.profileBlacklistOf(state.loaded?.store ?: emptyMap())
+        if (hidden.isEmpty()) state.displayProfiles()
+        else state.displayProfiles().filter { it.id !in hidden }
+    }
     val maxRecent = remember(state.loaded) {
         RawConfigStore.showRecentProfiles(state.loaded?.store ?: emptyMap())
     }

@@ -67,17 +67,26 @@ app/src/main/java/id/web/izs/sshclient/
                                     identity-colour stripe per profile row,
                                     folder pencil (rename + reparent + delete group,
                                     members ungrouped, children to top level),
+                                    profile ⋮ menu (Duplicate via editor
+                                    copy-mode, Hide/Show via synced
+                                    profileBlacklist + collapsed Hidden
+                                    section, Delete with confirm; 40dp action
+                                    buttons, 4dp row end-padding),
                                     exit-with-confirm top-bar button
         NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
                                     profiles, desktop-selector parity; custom
                                     sheet: header-only drag to half/full/hide,
-                                    list owns all scrolls)
+                                    list owns all scrolls; blacklisted
+                                    profiles filtered out, search included)
        ProfileEditScreen.kt        Tabbed editor (General + colour picker (FlowRow swatch
                                     grid — fixed chunked rows clipped the rightmost
                                     swatch into an oval on narrow phones) / Ports /
                                     Advanced / Ciphers / Colours (terminal-scheme
                                     override: Use-global + scheme search) / Login),
-                                    desktop-only options labeled, new profile + new group; sticky header with busy spinner
+                                     desktop-only options labeled, new profile + new group; sticky header with busy spinner.
+                                     `copy:<id>` duplicates one (editor
+                                     pre-filled from the source, Save creates,
+                                     Back cancels, Delete hidden)
        TerminalScreen.kt           PTY session: connect, input, dock, extra keys, box mode,
                                     warn-on-close + host-key trust dialogs, ⋮ menu SFTP entry,
                                     slim background-transfer indicator row (tap reopens the sheet),
@@ -218,7 +227,7 @@ app/src/main/java/id/web/izs/sshclient/
                             deleted on first boot (one-time alpha reset).
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (44 files, 360 tests — §8)
+app/src/test/... (45 files, 362 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -511,7 +520,7 @@ the IME:
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 360 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 362 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|
@@ -559,6 +568,7 @@ the IME:
 | `TinkKvStoreTest` | typed KV round-trip + single-write batching + corrupt-blob quarantine + cross-instance persist |
 | `UsernamePromptTest` | blank-user prompt: trim/empty/cancel-to-error-card/retry gating |
 | `GroupEditTest` | group rename (trim/unknown-key keep/no-op) + delete (ungroup members, lift children) + move (reparent/top-level/cycle-guard) |
+| `ProfileBlacklistTest` | blacklist hide/show round-trip (idempotent, unknown ids kept) + dump-reload stability |
 
 ## 9. Background survival (SessionService)
 

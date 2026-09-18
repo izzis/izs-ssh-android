@@ -18,17 +18,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -96,6 +102,16 @@ fun ProfileListScreen(
     val (profiles, groups) = remember(state.loaded) {
         state.displayProfiles() to state.displayGroups()
     }
+    // Hidden profiles (desktop profileBlacklist parity: synced root list).
+    // Partitioned before the tree so hidden rows never render in folders;
+    // the collapsed Hidden section below is the only unhide path.
+    val hiddenIds = remember(state.loaded) {
+        RawConfigStore.profileBlacklistOf(state.loaded?.store ?: emptyMap())
+    }
+    val (visibleProfiles, hiddenProfiles) = remember(profiles, hiddenIds) {
+        profiles.partition { it.id !in hiddenIds }
+    }
+    var hiddenCollapsed by rememberSaveable { mutableStateOf(true) }
     // Folders default to collapsed; only EXPANDED ids persist (disk-backed,
     // so expansion is remembered across navigation and restarts).
     var expanded by remember(state.loaded) { mutableStateOf(state.disk.expandedGroups) }
@@ -108,6 +124,12 @@ fun ProfileListScreen(
     var parentId by remember { mutableStateOf<String?>(null) }
     var groupBusy by remember { mutableStateOf(false) }
     var groupMsg by remember { mutableStateOf<String?>(null) }
+    // Three-dot profile menu (Duplicate / Hide-Show / Delete): same
+    // write-then-refresh shape as the group workers, including the
+    // lazy-unlock retry. confirmDeleteProfile carries the full snapshot
+    // (deleteProfile needs the original for id-less legacy profiles).
+    var confirmDeleteProfile by remember { mutableStateOf<SshProfile?>(null) }
+    var profileMsg by remember { mutableStateOf<String?>(null) }
     var showUnlock by remember { mutableStateOf(false) }
     var pendingGroupRetry by remember { mutableStateOf<(() -> Unit)?>(null) }
     val scope = rememberCoroutineScope()
@@ -199,15 +221,66 @@ fun ProfileListScreen(
         }
     }
 
-    val filtered = remember(profiles, query) {
-        if (query.isBlank()) profiles
-        else profiles.filter {
+    fun doProfileWrite(
+        errPrefix: String,
+        run: suspend () -> Unit,
+        retry: () -> Unit,
+    ) {
+        scope.launch {
+            groupBusy = true
+            profileMsg = null
+            try {
+                run()
+                state.refresh {}
+            } catch (e: IllegalStateException) {
+                if ((e.message ?: "").contains("locked", ignoreCase = true)) {
+                    pendingGroupRetry = { retry() }
+                    showUnlock = true
+                } else {
+                    profileMsg = "$errPrefix: ${e.message}"
+                }
+            } catch (e: Exception) {
+                profileMsg = "$errPrefix: ${e.message}"
+            } finally {
+                groupBusy = false
+            }
+        }
+    }
+
+    fun doToggleHide(p: SshProfile, hidden: Boolean) {
+        doProfileWrite(
+            if (hidden) "Couldn't hide" else "Couldn't show",
+            { state.repo.setProfileHidden(p.id, hidden) },
+            { doToggleHide(p, hidden) },
+        )
+    }
+
+    fun doDeleteProfile() {
+        val p = confirmDeleteProfile ?: return
+        doProfileWrite("Couldn't delete", {
+            state.repo.deleteProfile(p.id, p)
+            confirmDeleteProfile = null
+        }, { doDeleteProfile() })
+    }
+
+    val filtered = remember(visibleProfiles, query) {
+        if (query.isBlank()) visibleProfiles
+        else visibleProfiles.filter {
             it.name.contains(query, true) ||
                 it.options.host.contains(query, true) ||
                 it.options.user.contains(query, true)
         }
     }
-    val (roots, ungrouped) = remember(profiles, groups) { buildTree(groups, profiles) }
+    val hiddenFiltered = remember(hiddenProfiles, query) {
+        if (query.isBlank()) hiddenProfiles
+        else hiddenProfiles.filter {
+            it.name.contains(query, true) ||
+                it.options.host.contains(query, true) ||
+                it.options.user.contains(query, true)
+        }
+    }
+    val hiddenSorted = remember(hiddenFiltered) { hiddenFiltered.sortedBy { it.name.lowercase() } }
+    val (roots, ungrouped) = remember(visibleProfiles, groups) { buildTree(groups, visibleProfiles) }
     // Per top-level folder: flattened child rows (subfolders + profiles),
     // empty when collapsed (only the sticky folder bar stays visible).
     // While searching the same shape is built over the filtered matches
@@ -225,7 +298,7 @@ fun ProfileListScreen(
     val maxRecent = remember(state.loaded) {
         RawConfigStore.showRecentProfiles(state.loaded?.store ?: emptyMap())
     }
-    val byId = remember(profiles) { profiles.associateBy { it.id } }
+    val byId = remember(visibleProfiles) { visibleProfiles.associateBy { it.id } }
     // Prefs read per composition (cheap): returning from a session
     // must show the just-launched profile without a reload.
     val recentIds = remember(profiles, recentVersion) {
@@ -354,14 +427,21 @@ fun ProfileListScreen(
                 onOpen = onOpen,
                 onEdit = onEdit,
                 onManageGroup = { openManage(it) },
+                onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
+                onToggleHide = { p, hide -> doToggleHide(p, hide) },
+                onDeleteProfile = { confirmDeleteProfile = it },
             )
             items(ungroupedSorted, key = { it.id }) { p ->
                 ProfileCard(
                     state = state,
                     profile = p,
                     depth = 0,
+                    hidden = false,
                     onOpen = onOpen,
                     onEdit = onEdit,
+                    onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
+                    onToggleHide = { p, hide -> doToggleHide(p, hide) },
+                    onDeleteProfile = { confirmDeleteProfile = it },
                 )
             }
         } else {
@@ -377,14 +457,21 @@ fun ProfileListScreen(
                 onOpen = onOpen,
                 onEdit = onEdit,
                 onManageGroup = { openManage(it) },
+                onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
+                onToggleHide = { p, hide -> doToggleHide(p, hide) },
+                onDeleteProfile = { confirmDeleteProfile = it },
             )
             items(fUngroupedSorted, key = { it.id }) { p ->
                 ProfileCard(
                     state = state,
                     profile = p,
                     depth = 0,
+                    hidden = false,
                     onOpen = onOpen,
                     onEdit = onEdit,
+                    onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
+                    onToggleHide = { p, hide -> doToggleHide(p, hide) },
+                    onDeleteProfile = { confirmDeleteProfile = it },
                 )
             }
             if (fSections.all { it.second.isEmpty() } && fUngroupedSorted.isEmpty()) {
@@ -394,6 +481,61 @@ fun ProfileListScreen(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
+            }
+        }
+        // Hidden profiles (desktop profileBlacklist): a collapsed counter
+        // section at the bottom — the only unhide path, no new screen.
+        // Rendered in both modes (search filters it too, so a hidden
+        // profile stays findable for management).
+        if (hiddenSorted.isNotEmpty()) {
+            item(key = "hidden-header") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { hiddenCollapsed = !hiddenCollapsed },
+                ) {
+                    Icon(
+                        if (hiddenCollapsed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Hidden (${hiddenSorted.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        if (hiddenCollapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                        contentDescription = if (hiddenCollapsed) "Show hidden" else "Hide hidden",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (!hiddenCollapsed) {
+                items(hiddenSorted, key = { "hidden:${it.id}" }) { p ->
+                    ProfileCard(
+                        state = state,
+                        profile = p,
+                        depth = 0,
+                        hidden = true,
+                        onOpen = onOpen,
+                        onEdit = onEdit,
+                        onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
+                        onToggleHide = { p, hide -> doToggleHide(p, hide) },
+                        onDeleteProfile = { confirmDeleteProfile = it },
+                    )
+                }
+            }
+        }
+        profileMsg?.let { msg ->
+            item(key = "profile-msg") {
+                Text(
+                    msg,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable { profileMsg = null },
+                )
             }
         }
     }
@@ -492,6 +634,30 @@ fun ProfileListScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDeleteNode = null }, enabled = !groupBusy) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    confirmDeleteProfile?.let { p ->
+        AlertDialog(
+            onDismissRequest = { if (!groupBusy) confirmDeleteProfile = null },
+            title = { Text("Delete profile \"${p.name}\"?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("The profile is removed. Saved passwords stay in the vault.")
+                    profileMsg?.let { m ->
+                        Text(m, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { doDeleteProfile() }, enabled = !groupBusy) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteProfile = null }, enabled = !groupBusy) {
                     Text("Cancel")
                 }
             },
@@ -606,6 +772,9 @@ private fun LazyListScope.groupSections(
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
     onManageGroup: (GroupNode) -> Unit,
+    onDuplicate: (SshProfile) -> Unit,
+    onToggleHide: (SshProfile, Boolean) -> Unit,
+    onDeleteProfile: (SshProfile) -> Unit,
 ) {
     for ((root, sub) in sections) {
         val id = root.group.id
@@ -636,8 +805,12 @@ private fun LazyListScope.groupSections(
                     state = state,
                     profile = row.profile,
                     depth = row.depth,
+                    hidden = false,
                     onOpen = onOpen,
                     onEdit = onEdit,
+                    onDuplicate = onDuplicate,
+                    onToggleHide = onToggleHide,
+                    onDeleteProfile = onDeleteProfile,
                 )
             }
         }
@@ -645,8 +818,7 @@ private fun LazyListScope.groupSections(
 }
 
 /**
- * Multi-session entry point (v1): live sessions above search, Tabby-Android
- * style. Green dot = connected, amber = connecting, red = disconnected
+ * Multi-session entry point: live sessions above search. Green dot = connected, amber = connecting, red = disconnected
  * (network loss / background kill kept for reconnect). Tap re-attaches
  * without opening a duplicate; x closes the tab and frees the cap slot.
  */
@@ -884,8 +1056,13 @@ private fun ProfileCard(
     state: AppState,
     profile: SshProfile,
     depth: Int,
+    /** True inside the Hidden section: the menu offers Show instead of Hide. */
+    hidden: Boolean,
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
+    onDuplicate: (SshProfile) -> Unit,
+    onToggleHide: (SshProfile, Boolean) -> Unit,
+    onDeleteProfile: (SshProfile) -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -894,9 +1071,9 @@ private fun ProfileCard(
             .clickable { onOpen(profile.id) },
     ) {
         Row(
-            Modifier.padding(12.dp),
+            Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             // Identity stripe (desktop tab-colorbar parity). Absent without
             // a stored color, so uncolored rows look exactly as before.
@@ -942,9 +1119,12 @@ private fun ProfileCard(
                     )
                 }
             }
-            // Mobile v1 edits SSH profiles only; other types stay desktop-managed.
+            // Only SSH profiles are editable on this device; other types
+            // stay desktop-managed. The overflow menu follows the same
+            // gate — except inside Hidden, where every row needs at least
+            // Show (a desktop may hide any type).
             if (profile.type == "ssh") {
-                IconButton(onClick = { onEdit(profile.id) }) {
+                IconButton(onClick = { onEdit(profile.id) }, modifier = Modifier.size(40.dp)) {
                     // Low-emphasis like the folder pencil (desktop
                     // hover-action parity): solid black is too harsh,
                     // especially in the light theme.
@@ -952,7 +1132,51 @@ private fun ProfileCard(
                         Icons.Filled.Edit,
                         contentDescription = "Edit profile",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
                     )
+                }
+            }
+            if (profile.type == "ssh" || hidden) {
+                var menuOpen by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = "Profile actions",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                    ) {
+                        if (profile.type == "ssh") {
+                            DropdownMenuItem(
+                                text = { Text("Duplicate") },
+                                leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
+                                onClick = { menuOpen = false; onDuplicate(profile) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(if (hidden) "Show" else "Hide") },
+                            leadingIcon = {
+                                Icon(
+                                    if (hidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = { menuOpen = false; onToggleHide(profile, !hidden) },
+                        )
+                        if (profile.type == "ssh") {
+                            DropdownMenuItem(
+                                text = {
+                                    Text("Delete profile", color = MaterialTheme.colorScheme.error)
+                                },
+                                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                                onClick = { menuOpen = false; onDeleteProfile(profile) },
+                            )
+                        }
+                    }
                 }
             }
         }

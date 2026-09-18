@@ -68,16 +68,27 @@ import id.web.izs.sshclient.core.config.normalizeProfileColor
 import id.web.izs.sshclient.core.config.profileColorArgb
 import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.core.vault.SavedKeyInfo
+import id.web.izs.sshclient.core.vault.SecretResolver
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.launch
 
 private val EDIT_TABS = listOf("General", "Ports", "Advanced", "Ciphers", "Colours", "Login")
 
 /**
+ * Duplicate-mode route prefix (desktop Duplicate parity): the home
+ * three-dot menu navigates to `edit/<prefix><id>`, the editor pre-fills
+ * from the source. Shared with the home list so the two never drift.
+ */
+internal const val PROFILE_COPY_PREFIX = "copy:"
+
+/**
  * Profile editor with desktop-tab parity (General / Ports / Advanced /
  * Ciphers / Colours / Login scripts).
  *
  * `profileId == "new"` creates a profile (repo mints `ssh:custom:<uuid>`).
+ * `profileId == "copy:<id>"` duplicates one (desktop Duplicate parity):
+ * the editor is pre-filled from the source — name + " copy", same group,
+ * options, key refs and inline password — Save creates, Back cancels.
  *
  * Default-state rule (the cloud YAML omits defaults by design): fields left
  * at desktop defaults are REMOVED from YAML on save (see updateProfileMap);
@@ -98,10 +109,16 @@ fun ProfileEditScreen(
     onBack: () -> Unit,
 ) {
     val isNew = profileId == "new"
+    // Desktop Duplicate parity: "copy:<id>" opens the editor pre-filled
+    // from the source — Save creates a new profile, Back cancels with
+    // nothing written. The route already carries colon-ids, so the prefix
+    // needs no encoding.
+    val isCopy = profileId.startsWith(PROFILE_COPY_PREFIX)
+    val copySourceId = profileId.removePrefix(PROFILE_COPY_PREFIX).takeIf { isCopy }
     val scope = rememberCoroutineScope()
     val original = remember(state.loaded, profileId) {
         if (isNew) null
-        else state.displayProfiles().find { it.id == profileId }
+        else state.displayProfiles().find { it.id == (copySourceId ?: profileId) }
     }
     val groups = remember(state.loaded) { state.displayGroups() }
     val vaultPresent = state.loaded?.domain?.vault != null
@@ -113,13 +130,15 @@ fun ProfileEditScreen(
     // explicit blank shows empty with the ask hint.
     val rawUser = remember(state.loaded, profileId) {
         if (isNew) null
-        else state.loaded?.domain?.profiles?.find { it.id == profileId }?.options?.user
+        else state.loaded?.domain?.profiles?.find { it.id == (copySourceId ?: profileId) }?.options?.user
     }
 
     var tab by remember { mutableIntStateOf(0) }
 
     // ---- General ----
-    var name by remember(original) { mutableStateOf(o?.let { original.name } ?: "") }
+    var name by remember(original) {
+        mutableStateOf(if (isCopy) "${original?.name ?: ""} copy" else (o?.let { original.name } ?: ""))
+    }
     var groupId by remember(original) { mutableStateOf(original?.group ?: "") }
     // Identity color (profile-level `color`, desktop tab-colorbar parity).
     // Stored normalized; blank = default = omit on save.
@@ -148,8 +167,15 @@ fun ProfileEditScreen(
     var socksProxyPortText by remember(original) { mutableStateOf(o?.socksProxyPort?.toString() ?: "") }
     var httpProxyHost by remember(original) { mutableStateOf(o?.httpProxyHost ?: "") }
     var httpProxyPortText by remember(original) { mutableStateOf(o?.httpProxyPort?.toString() ?: "") }
-    var passwordTouched by remember(original) { mutableStateOf(false) }
-    var passwordText by remember(original) { mutableStateOf("") }
+    // Desktop Duplicate parity: a copy starts with the source's INLINE
+    // plaintext password (a vault secret resolves by credentials on
+    // connect, so nothing is seeded for those — no secret duplication).
+    val inlineSourcePassword = if (isCopy) {
+        original?.options?.password
+            ?.takeIf { it.isNotBlank() && !it.startsWith(SecretResolver.VAULT_PREFIX) } ?: ""
+    } else ""
+    var passwordTouched by remember(original) { mutableStateOf(inlineSourcePassword.isNotEmpty()) }
+    var passwordText by remember(original) { mutableStateOf(inlineSourcePassword) }
     var reveal by remember { mutableStateOf(false) }
     var removedRefs by remember(original) { mutableStateOf(setOf<String>()) }
     var addedKeys by remember { mutableStateOf(listOf<Pair<String, String>>()) }
@@ -277,7 +303,7 @@ fun ProfileEditScreen(
             busy = true
             msg = null
             try {
-                if (isNew) {
+                if (isNew || isCopy) {
                     state.repo.createProfile(
                         profile = SshProfile(
                             id = "",
@@ -381,7 +407,7 @@ fun ProfileEditScreen(
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
-            if (isNew) "New profile" else "Edit profile",
+            if (isNew) "New profile" else if (isCopy) "Duplicate profile" else "Edit profile",
             onBack,
             busy = busy,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
@@ -480,7 +506,7 @@ fun ProfileEditScreen(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
         ) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Cancel") }
-            if (!isNew) {
+            if (!isNew && !isCopy) {
                 OutlinedButton(
                     enabled = !busy,
                     onClick = { showDeleteConfirm = true },
@@ -548,7 +574,7 @@ fun ProfileEditScreen(
         )
     }
 
-    if (showDeleteConfirm && !isNew) {
+    if (showDeleteConfirm && !isNew && !isCopy) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("Delete this profile?") },

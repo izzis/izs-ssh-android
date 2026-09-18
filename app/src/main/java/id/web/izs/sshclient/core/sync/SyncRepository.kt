@@ -1309,6 +1309,13 @@ class SyncRepository(
         }
 
     /**
+     * Hide/show a profile (desktop `profileBlacklist` parity: synced, so a
+     * desktop honors it natively). Same shared path as [renameGroup].
+     */
+    suspend fun setProfileHidden(profileId: String, hidden: Boolean): Loaded =
+        updateTerminalSection { RawConfigStore.setProfileHiddenEntry(it, profileId, hidden) }
+
+    /**
      * Applies a `terminal`-section mutation (color scheme, custom schemes,
      * font, cursor — Settings > Color scheme / Appearance). Plaintext configs edit the outer document
      * (updateLocalRaw parity); encrypted shells edit the vault blob and
