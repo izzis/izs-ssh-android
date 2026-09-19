@@ -279,7 +279,7 @@ fun NewTabSheet(
                         OutlinedTextField(
                             value = query,
                             onValueChange = { query = it },
-                            label = { Text("Search by name, host, or user") },
+                            label = { Text("Filter by name, host, or user") },
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                             singleLine = true,
                         )
