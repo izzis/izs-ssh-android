@@ -19,11 +19,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -61,6 +63,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.config.ProfileGroup
@@ -327,6 +331,22 @@ fun ProfileListScreen(
         }
     }
     val liveSessions = sessionViewModel.ordered()
+    // Jump-to-active pill needs a programmatic handle on the list.
+    // NavCompose still restores scroll on back — this only adds control,
+    // it never moves the list on its own.
+    val listState = rememberLazyListState()
+    val pillHidePx = with(LocalDensity.current) { 64.dp.roundToPx() }
+    val hasLiveSessions = liveSessions.isNotEmpty()
+    // Visible only while sessions exist AND the Active card is scrolled
+    // out of view (it is item 0 then); a small offset grace avoids
+    // flicker when the card is merely half-visible.
+    val showActivePill by remember(hasLiveSessions) {
+        derivedStateOf {
+            hasLiveSessions &&
+                (listState.firstVisibleItemIndex > 0 ||
+                    listState.firstVisibleItemScrollOffset > pillHidePx)
+        }
+    }
     // Hide Recent while searching (desktop start-page parity).
     val showRecent = maxRecent > 0 && query.isBlank() && recent.isNotEmpty()
 
@@ -420,11 +440,21 @@ fun ProfileListScreen(
                 Text("New", modifier = Modifier.padding(start = 4.dp))
             }
         }
+        // Pill overlay host: BottomCenter alignment floats the
+        // active-session pill above the list (mini-player parity with
+        // the desktop tab strip).
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-        if (liveSessions.isNotEmpty()) {
+        // Active card: the way back to a live terminal (tapping a
+        // profile instead opens a NEW tab, desktop parity).
+        if (hasLiveSessions) {
             item(key = "active") {
                 ActiveSessionsSection(
                     sessions = liveSessions,
@@ -587,7 +617,47 @@ fun ProfileListScreen(
                 )
             }
         }
-    }
+        }
+            // Active-session pill: tap jumps back to the card; scroll
+            // position is never hijacked.
+            if (showActivePill) {
+                Surface(
+                    // Instant snap, no glide: animation buys nothing
+                    // here (a glide reads as stop-then-go, and a long
+                    // one stutters composing every skipped row).
+                    onClick = { scope.launch { listState.scrollToItem(0) } },
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                ) {
+                    val n = liveSessions.size
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    ) {
+                        Box(
+                            Modifier.size(10.dp).background(
+                                Color(0xFF4CAF50),
+                                CircleShape,
+                            ),
+                        )
+                        Text(
+                            "$n active session${if (n > 1) "s" else ""}",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Icon(
+                            Icons.Filled.ArrowUpward,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
     // Explicit exit: Back already goes home, so home needs its own way out.
     // Sessions are closed first (their sockets tear down off-Main), then the
