@@ -104,6 +104,33 @@ class ProfileFieldsTest {
     }
 
     @Test
+    fun `behaviorOnSessionEnd parses known values defaults auto and rejects bogus`() {
+        assertEquals("keep", parsed(linkedMapOf("host" to "h", "behaviorOnSessionEnd" to "keep")).options.behaviorOnSessionEnd)
+        assertEquals("reconnect", parsed(linkedMapOf("host" to "h", "behaviorOnSessionEnd" to "reconnect")).options.behaviorOnSessionEnd)
+        assertEquals("close", parsed(linkedMapOf("host" to "h", "behaviorOnSessionEnd" to "close")).options.behaviorOnSessionEnd)
+        // Missing key = desktop default.
+        assertEquals("auto", parsed(linkedMapOf("host" to "h")).options.behaviorOnSessionEnd)
+        // User-editable YAML: unknown values fall back, never crash.
+        assertEquals("auto", parsed(linkedMapOf("host" to "h", "behaviorOnSessionEnd" to "explode")).options.behaviorOnSessionEnd)
+    }
+
+    @Test
+    fun `updateProfileMap omits auto behaviorOnSessionEnd and writes the rest`() {
+        val auto = SshProfile(
+            id = "ssh:1", name = "n",
+            options = SshOptions(host = "h", behaviorOnSessionEnd = "auto"),
+        )
+        val autoOpts = RawConfigStore.updateProfileMap(emptyMap(), auto, null, null, emptyList())["options"].asStringMap()!!
+        assertFalse(autoOpts.containsKey("behaviorOnSessionEnd"))
+        val keep = SshProfile(
+            id = "ssh:1", name = "n",
+            options = SshOptions(host = "h", behaviorOnSessionEnd = "keep"),
+        )
+        val keepOpts = RawConfigStore.updateProfileMap(emptyMap(), keep, null, null, emptyList())["options"].asStringMap()!!
+        assertEquals("keep", keepOpts["behaviorOnSessionEnd"])
+    }
+
+    @Test
     fun `updateProfileMap omits defaults and writes the rest`() {
         val existing = linkedMapOf<String, Any?>(
             "options" to linkedMapOf<String, Any?>(

@@ -450,14 +450,17 @@ the IME:
   late-set colors still show). Terminal scheme override
   lives in the Colours tab (Use-global + scheme search) and Settings >
   Color scheme. Options with no mobile
-  effect (forwarding, x11/agent/banner/reuse, non-direct modes) carry a
-  desktop-only note in the editor instead of failing silently.
+   effect (forwarding, x11/agent, non-direct modes) carry a
+   desktop-only note in the editor instead of failing silently.
 - Extra-keys rows: `ESC / - HOME UP END PGUP` and
   `TAB CTRL ALT LEFT DOWN RIGHT PGDN`; special keys bypass stickies via
   `sendSpecial`. Font size pref `terminal.fontSp` (8–24sp, default 14,
   Settings > Appearance, device-only).
 - Terminal header extras: copy (puts `plainText()` on clipboard) +
-  box-mode toggle + `⋮` menu (font ±, extra keys on/off).
+  box-mode toggle + `⋮` menu (Disconnect, SFTP, Clear terminal
+  [`xterm.clear` parity: grid + scrollback emptied, session alive],
+  font ±, extra keys on/off, Settings, Profile list — one item list, five
+  anchors).
 - Connecting row: live stage text from the connector (crypto / connect /
   password / key i-of-n / shell / login scripts) instead of a spinner, with
   Cancel at the far right aborting the in-flight job (quiet, never a failure).
@@ -536,7 +539,7 @@ the IME:
 | `TerminalInputTest` | sticky CTRL/ALT mapping |
 | `PipeInputTest` | event-driven pipe commit mapping (LF→CR submit flag) |
 | `MonoFontCheckTest` | proportional-system-monospace detection → bundled fallback |
-| `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers, color/icon round-trip, global warnOnClose |
+| `ProfileFieldsTest` | profile full-set parse, defaults-omitted write, id shape, inline helpers, color/icon round-trip, global warnOnClose, behaviorOnSessionEnd parse + auto-omit |
 | `HostKeyTrustTest` | ssh-keygen digest vector, exact match/mismatch/port identity, legacy upgrade, negotiation order, knownHosts upsert |
 | `LoginScriptRunnerTest` | unconditional/expect/regex/optional/break/unescape parity |
 | `SshAlgorithmFactoriesTest` | defaults resolve (known skips), order, null-on-defaults, per-category fallback |
@@ -569,6 +572,8 @@ the IME:
 | `UsernamePromptTest` | blank-user prompt: trim/empty/cancel-to-error-card/retry gating |
 | `GroupEditTest` | group rename (trim/unknown-key keep/no-op) + delete (ungroup members, lift children) + move (reparent/top-level/cycle-guard) |
 | `ProfileBlacklistTest` | blacklist hide/show round-trip (idempotent, unknown ids kept) + dump-reload stability |
+| `SessionEndBehaviorTest` | destroy matrix: close always, auto only on Ctrl+D / submitted `exit`, keep/reconnect never |
+| `TerminalEmulatorTest` | (+ clear) grid + scrollback emptied, cursor home, version bump |
 
 ## 9. Background survival (SessionService)
 
@@ -596,12 +601,24 @@ countered in four layers:
    notice to show; Allow/Skip persist `window.notifAsked`. The battery
    prompt follows with honest scope (helps Doze, not OEM killers);
    Allow/Never persist `window.batteryOptAsked`, Later re-arms.
-4. **Graceful death**: `onTransportDeath` marks failed tabs (existing error
-   card + Retry) and schedules exactly one auto-retry per death
-   (`everConnected` + `!autoRetried` + no pending UI, 2s settle, aborts if
-   the user acted), using the last connect environment so backgrounded tabs
-   redial too. A backgrounded death also posts a tap-to-open "session lost"
-   notice when notifications are allowed.
+4. **Graceful death**: `onTransportDeath` funnels every dead shell through
+   `onSessionShellEnded`, gated by the profile's `behaviorOnSessionEnd`
+   (desktop `base/connectableTerminalTab` + `sshTab` parity, default `auto`,
+   synced to desktop verbatim, Advanced tab > Session section):
+   `close` and explicit-`auto` destroy the tab (registry drop + `tabDestroy`
+   event navigates its screen back); `reconnect` redials at once (consuming
+   the auto-retry one-shot so it can't double-fire); `keep` and
+   non-explicit `auto` keep today's failed card + Retry and add the desktop
+   "Press any key to reconnect" service line (first keypress reconnects;
+   input stays alive while the offer stands — tap-to-focus, extra keys,
+   box mode and paste all route through the `reconnectOffer` intercept, so
+   the promise is reachable even with the shell dead). Explicit exit = Ctrl+D tail or a
+   submitted `exit` (`recentInputs`, desktop-capped last 32 chars).
+   Explicit `keep` never self-heals (desktop-exact); `auto` keeps the
+   single pre-existing auto-retry (`everConnected` + `!autoRetried` + no
+   pending UI, 2s settle, aborts if the user acted) using the last connect
+   environment so backgrounded tabs redial too. A backgrounded death also
+   posts a tap-to-open "session lost" notice when notifications are allowed.
 
 ## 10. Build & diagnostics
 

@@ -17,8 +17,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,6 +73,22 @@ fun shouldAutoRetry(
     hasUsernamePrompt: Boolean = false,
 ): Boolean = everConnected && !autoRetried &&
     !needsPassphrase && !hasAuthPrompt && !hasHostKeyPrompt && !hasUsernamePrompt
+
+/**
+ * Desktop shouldTabBeDestroyedOnSessionClose parity
+ * (baseTerminalTab 859-862 + sshTab 247-251): close always destroys; auto
+ * destroys only on explicit exit — a Ctrl+D tail or a submitted `exit`
+ * (desktop reads recentInputs the same way); keep/reconnect never destroy
+ * here (offer / redial instead). Pure for unit tests.
+ */
+fun shouldDestroyOnSessionEnd(behavior: String, recentInputs: String): Boolean = when (behavior) {
+    "close" -> true
+    // 4.toChar() = Ctrl+D (spelled out: a raw control literal in source
+    // would be invisible and fragile).
+    "auto" -> recentInputs.lastOrNull() == 4.toChar() ||
+        recentInputs.endsWith("exit\r")
+    else -> false
+}
 
 /**
  * Fold multi-line server text (auth banner) to terminal line endings,
@@ -126,6 +145,7 @@ class SshSessionHandle(
     var shell: SshConnector.ShellSession? = null
         set(v) {
             field = v
+            if (v != null) setReconnectOffer(false)
             _hasShell.value = v != null
         }
 
@@ -178,6 +198,25 @@ class SshSessionHandle(
      */
     @Volatile var everConnected: Boolean = false
     @Volatile var autoRetried: Boolean = false
+    /**
+     * sshTab.recentInputs parity (baseTerminalTab:139, capped at the last
+     * 32 chars at :481-482): recent raw outbound bytes for the
+     * explicit-exit check (trailing Ctrl+D / `exit\r`). Written from
+     * TerminalScreen.sendRaw/sendChunks, read on session end.
+     */
+    @Volatile var recentInputs: String = ""
+    /**
+     * connectableTerminalTab.offerReconnection parity: a "Press any key to
+     * reconnect" line was written and the next keypress reconnects instead
+     * of sending. Observable (not @Volatile like its neighbors): the
+     * screen gates input on it, and composables must branch on flows —
+     * see [hasShell]. Lives only while the shell is null (any new shell
+     * above clears it).
+     */
+    private val _reconnectOffer = MutableStateFlow(false)
+    val reconnectOffer: StateFlow<Boolean> = _reconnectOffer.asStateFlow()
+
+    fun setReconnectOffer(v: Boolean) { _reconnectOffer.value = v }
 
     fun setStatus(v: String) { _status.value = v }
     fun setStage(v: String) { _stage.value = v }
@@ -260,6 +299,13 @@ class SshSessionViewModel : ViewModel() {
     var serviceSync: ((List<ConnectedInfo>) -> Unit)? = null
     var lostListener: ((String) -> Unit)? = null
     private var lastEnv: Pair<AppState, File>? = null
+    /**
+     * behaviorOnSessionEnd destroy() parity: the tab is dropped from the
+     * registry ([close]) and its screen — if composed — navigates back.
+     * tryEmit (never suspend): an uncomposed screen needs no navigation.
+     */
+    private val _tabDestroy = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val tabDestroy: SharedFlow<String> = _tabDestroy.asSharedFlow()
 
     /** Exact connected snapshot for [serviceSync]. Internal for unit tests. */
     internal fun connectedInfos(): List<ConnectedInfo> =
@@ -789,6 +835,52 @@ class SshSessionViewModel : ViewModel() {
     }
 
     /**
+     * One dead shell, profile-gated (base/connectableTerminalTab +
+     * sshTab parity). close/auto-explicit destroy the tab; reconnect
+     * redials at once; keep/auto-keep take today's failed-card flow plus
+     * the desktop service line (first keypress reconnects via the screen's
+     * reconnectOffer intercept).
+     */
+    private fun onSessionShellEnded(h: SshSessionHandle) {
+        val s = h.shell
+        h.shell = null
+        if (s != null) viewModelScope.launch {
+            withContext(Dispatchers.IO) { closeShellQuietly(s) }
+        }
+        val behavior = h.profileSnapshot.options.behaviorOnSessionEnd
+        when {
+            shouldDestroyOnSessionEnd(behavior, h.recentInputs) -> {
+                close(h.sessionId)
+                _tabDestroy.tryEmit(h.sessionId)
+            }
+            behavior == "reconnect" -> {
+                // Consumes the auto-retry one-shot so it can't double-fire.
+                h.autoRetried = true
+                h.setStatus("disconnected")
+                val env = lastEnv
+                if (env != null) connect(h.sessionId, env.first, env.second)
+                else {
+                    h.setFailed("Session ended")
+                    syncService()
+                }
+            }
+            else -> {
+                h.setFailed("Session ended")
+                h.setStatus("disconnected")
+                h.emulator.feed("\r\nPress any key to reconnect\r\n")
+                h.bumpVersion()
+                h.setReconnectOffer(true)
+                syncService()
+                // Explicit keep = desktop-exact: offer only, never redial
+                // behind the user's back. auto keeps the one-shot
+                // self-heal (background-survival divergence, the default
+                // stays as users know it).
+                if (behavior != "keep") maybeAutoRetry(h)
+            }
+        }
+    }
+
+    /**
      * Reader-pump death (runs on the pump thread — hop to the scope).
      * A live transport means just this channel ended (`exit`): fail this tab
      * only. A dead transport fails every tab riding it (red dots + Retry).
@@ -797,36 +889,20 @@ class SshSessionViewModel : ViewModel() {
     private fun onTransportDeath(sessionId: String, deadShell: SshConnector.ShellSession, deadClient: SSHClient) {
         viewModelScope.launch {
             val alive = try { deadClient.isConnected } catch (_: Exception) { false }
-            val newlyDead = mutableListOf<SshSessionHandle>()
             if (alive) {
                 val h = _sessions[sessionId]
                 // Shell identity (not just client): a late callback must not
                 // kill a NEW shell opened by Reconnect on the same transport.
                 if (h != null && h.failed.value == null && h.shell === deadShell) {
-                    val s = h.shell
-                    h.shell = null
-                    if (s != null) viewModelScope.launch {
-                        withContext(Dispatchers.IO) { closeShellQuietly(s) }
-                    }
-                    h.setFailed("Session ended")
-                    h.setStatus("disconnected")
-                    newlyDead += h
+                    onSessionShellEnded(h)
                 }
             } else {
                 for (h in _sessions.values.toList()) {
                     val s = h.shell ?: continue
                     if (s.client !== deadClient || h.failed.value != null) continue
-                    h.shell = null
-                    viewModelScope.launch {
-                        withContext(Dispatchers.IO) { closeShellQuietly(s) }
-                    }
-                    h.setFailed("Session ended")
-                    h.setStatus("disconnected")
-                    newlyDead += h
+                    onSessionShellEnded(h)
                 }
             }
-            syncService()
-            for (h in newlyDead) maybeAutoRetry(h)
         }
     }
 

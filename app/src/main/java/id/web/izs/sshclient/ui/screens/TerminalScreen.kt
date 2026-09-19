@@ -235,6 +235,10 @@ fun TerminalScreen(
     // dead Reconnect on a perfectly live session). hasShell emits on every
     // assignment, forcing a fresh read.
     val hasShell by handle.hasShell.collectAsState()
+    // Offer armed = input stays alive: the "Press any key to reconnect"
+    // promise needs reachable keys (tap-to-focus, extra keys, box mode).
+    val offerActive by handle.reconnectOffer.collectAsState()
+    val inputAlive = hasShell || offerActive
     // Background-transfer presence (the SFTP "dot"): observing the
     // session's manager subscribes this screen, so the slim indicator
     // below appears while transfers run — even with the sheet dismissed
@@ -516,7 +520,32 @@ fun TerminalScreen(
         sessionViewModel.connectWithUsername(sessionId, state, context.cacheDir, username)
     }
 
+    /**
+     * sshTab.recentInputs parity: every outbound byte extends the history
+     * the explicit-exit check reads (last char / `exit\r` suffix).
+     */
+    fun noteInput(text: String) {
+        if (text.isEmpty()) return
+        handle.recentInputs = (handle.recentInputs + text).takeLast(32)
+    }
+
+    /**
+     * offerReconnection parity (desktop input$.pipe(first())): while the
+     * offer stands and the shell is dead, any input reconnects instead of
+     * sending. Returns true when the input was consumed (callers return).
+     */
+    fun consumeReconnectOffer(): Boolean {
+        if (handle.reconnectOffer.value && handle.shell == null) {
+            handle.setReconnectOffer(false)
+            doConnect()
+            return true
+        }
+        return false
+    }
+
     fun sendRaw(text: String) {
+        if (consumeReconnectOffer()) return
+        noteInput(text)
         val s = handle.shell ?: return
         scope.launch {
             try {
@@ -558,6 +587,9 @@ fun TerminalScreen(
      * ?2004. The dialog-confirmed data goes out as-is (no trim), desktop-exact.
      */
     fun paste(raw: String) {
+        // Pasted text is input too (desktop input$ covers it): while the
+        // offer stands it reconnects instead of pasting.
+        if (consumeReconnectOffer()) return
         if (handle.shell == null) return
         val store = state.loaded?.store ?: emptyMap()
         val doBracketed = RawConfigStore.terminalBracketedPaste(store)
@@ -624,6 +656,9 @@ fun TerminalScreen(
             sendSpecial(chunks[0])
             return
         }
+        // Multi-packet macros bypass sendRaw: note the whole payload here
+        // so the explicit-exit tail sees macro-typed bytes too.
+        noteInput(chunks.joinToString(""))
         val gapMs = state.disk.macroStepDelayMs
         scope.launch {
             try {
@@ -655,6 +690,13 @@ fun TerminalScreen(
      * times a second would jank for no benefit.
      */
     fun sendKeySteps(steps: List<KeyStep>, grabFocus: Boolean = true) {
+        if (consumeReconnectOffer()) {
+            if (grabFocus) {
+                focusRequester.requestFocus()
+                keyboard?.show()
+            }
+            return
+        }
         val s = handle.shell ?: return
         val byteSteps = steps.map(::stepBytes).filter { it.isNotEmpty() }
         if (byteSteps.isEmpty()) return
@@ -739,6 +781,11 @@ fun TerminalScreen(
                 doConnect()
             }
         }
+    }
+    // behaviorOnSessionEnd destroy() parity: the ViewModel drops the tab
+    // on close/explicit-auto; its screen (if composed) navigates back.
+    LaunchedEffect(sessionId) {
+        sessionViewModel.tabDestroy.collect { if (it == sessionId) onBack() }
     }
     // No DisposableEffect close: rotation and navigation must NOT kill the
     // PTY. Cleanup happens in SshSessionViewModel.onCleared() (process death)
@@ -1330,7 +1377,7 @@ fun TerminalScreen(
                         cursor = termCursor,
                         cursorBlink = termBlink,
                         onTap = {
-                            if (!boxMode && handle.shell != null) {
+                            if (!boxMode && inputAlive) {
                                 focusRequester.requestFocus()
                                 keyboard?.show()
                             }
@@ -1402,7 +1449,7 @@ fun TerminalScreen(
                     ProfileChrome(profileColors) {
                         ExtraKeysBar(
                             layout = keyLayout,
-                            enabled = hasShell,
+                            enabled = inputAlive,
                             ctrlActive = ctrlSticky,
                             altActive = altSticky,
                             onSendSteps = { sendKeySteps(it) },
@@ -1418,15 +1465,20 @@ fun TerminalScreen(
                         BoxModeBar(
                             boxInput = boxInput,
                             onInput = { boxInput = it },
-                            hasShell = hasShell,
+                            inputAlive = inputAlive,
                             onSend = {
-                                val line = boxInput
-                                boxInput = ""
-                                scope.launch {
-                                    try {
-                                        withContext(Dispatchers.IO) { handle.shell?.send(line) }
-                                    } catch (e: Exception) {
-                                        sessionViewModel.markSendFailed(sessionId, "Send failed: ${e.message}")
+                                // Box send bypasses sendRaw: intercept here.
+                                if (consumeReconnectOffer()) {
+                                    boxInput = ""
+                                } else {
+                                    val line = boxInput
+                                    boxInput = ""
+                                    scope.launch {
+                                        try {
+                                            withContext(Dispatchers.IO) { handle.shell?.send(line) }
+                                        } catch (e: Exception) {
+                                            sessionViewModel.markSendFailed(sessionId, "Send failed: ${e.message}")
+                                        }
                                     }
                                 }
                             },
@@ -1864,7 +1916,7 @@ private fun ProfileChrome(
 private fun BoxModeBar(
     boxInput: String,
     onInput: (String) -> Unit,
-    hasShell: Boolean,
+    inputAlive: Boolean,
     onSend: () -> Unit,
     onDocked: (Float) -> Unit,
 ) {
@@ -1886,10 +1938,10 @@ private fun BoxModeBar(
                     label = { Text("$ ") },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    enabled = hasShell,
+                    enabled = inputAlive,
                 )
                 IconButton(
-                    enabled = hasShell && boxInput.isNotBlank(),
+                    enabled = inputAlive && boxInput.isNotBlank(),
                     onClick = onSend,
                 ) {
                     Icon(

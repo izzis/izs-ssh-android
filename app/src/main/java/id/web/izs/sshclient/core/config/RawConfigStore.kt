@@ -521,6 +521,9 @@ object RawConfigStore {
                 httpProxyHost = o["httpProxyHost"]?.toString(),
                 httpProxyPort = (o["httpProxyPort"] as? Number)?.toInt(),
                 reuseSession = o["reuseSession"] as? Boolean ?: true,
+                behaviorOnSessionEnd = (o["behaviorOnSessionEnd"]?.toString()
+                    ?.takeIf { it == "keep" || it == "reconnect" || it == "close" }
+                    ?: "auto"),
                 algorithms = parseAlgorithms(o["algorithms"]),
                 forwardedPorts = parseForwardedPorts(o["forwardedPorts"]),
                 scripts = parseLoginScripts(o["scripts"]),
@@ -785,6 +788,10 @@ object RawConfigStore {
         if (o.warnOnClose == true) opts["warnOnClose"] = true else opts.remove("warnOnClose")
         if (o.reuseSession != d.reuseSession) opts["reuseSession"] = o.reuseSession
         else opts.remove("reuseSession")
+        // Desktop key, non-default-only like the rest: auto profiles keep a
+        // clean YAML, and the value syncs to desktop verbatim.
+        if (o.behaviorOnSessionEnd != d.behaviorOnSessionEnd) opts["behaviorOnSessionEnd"] = o.behaviorOnSessionEnd
+        else opts.remove("behaviorOnSessionEnd")
         if (o.proxyCommand != null) opts["proxyCommand"] = o.proxyCommand else opts.remove("proxyCommand")
         if (o.socksProxyHost != null) opts["socksProxyHost"] = o.socksProxyHost
         else opts.remove("socksProxyHost")

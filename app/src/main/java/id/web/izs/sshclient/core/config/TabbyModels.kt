@@ -80,6 +80,12 @@ data class SshOptions(
     val httpProxyPort: Int? = null,
     val reuseSession: Boolean = true,
     /**
+     * Desktop profileProvider parity: auto | keep | reconnect | close
+     * (default auto). Unknown YAML values fall back to auto at parse —
+     * the field is user-editable/importable, so never trust it raw.
+     */
+    val behaviorOnSessionEnd: String = "auto",
+    /**
      * Empty = desktop defaults (filled transiently by SshDefaults, never
      * written to YAML — the cloud omits defaults by design).
      * Keys: cipher, kex, hmac, serverHostKey, compression.

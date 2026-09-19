@@ -201,6 +201,7 @@ fun ProfileEditScreen(
     var agentForward by remember(original) { mutableStateOf(o?.agentForward ?: false) }
     var skipBanner by remember(original) { mutableStateOf(o?.skipBanner ?: false) }
     var reuseSession by remember(original) { mutableStateOf(o?.reuseSession ?: true) }
+    var behaviorOnSessionEnd by remember(original) { mutableStateOf(o?.behaviorOnSessionEnd ?: "auto") }
     // No warnOnClose editor (desktop parity: it lives in Settings > SSH;
     // a stored per-profile value is preserved untouched via the copy below).
     var keepaliveText by remember(original) { mutableStateOf(o?.keepaliveInterval?.toString() ?: "5000") }
@@ -282,6 +283,7 @@ fun ProfileEditScreen(
         agentForward = agentForward,
         skipBanner = skipBanner,
         reuseSession = reuseSession,
+        behaviorOnSessionEnd = behaviorOnSessionEnd,
         keepaliveInterval = keepaliveText.toLongOrNull()?.takeIf { it > 0 } ?: 5000,
         keepaliveCountMax = keepaliveMaxText.toIntOrNull()?.takeIf { it > 0 } ?: 10,
         readyTimeout = readyTimeoutText.toLongOrNull()?.takeIf { it > 0 },
@@ -480,6 +482,8 @@ fun ProfileEditScreen(
                     agentForward = agentForward, onAgentForward = { agentForward = it },
                     skipBanner = skipBanner, onSkipBanner = { skipBanner = it },
                     reuseSession = reuseSession, onReuseSession = { reuseSession = it },
+                    behaviorOnSessionEnd = behaviorOnSessionEnd,
+                    onBehaviorOnSessionEnd = { behaviorOnSessionEnd = it },
                     keepaliveText = keepaliveText,
                     onKeepalive = { keepaliveText = it.filter { c -> c.isDigit() }.take(7) },
                     keepaliveMaxText = keepaliveMaxText,
@@ -1084,6 +1088,7 @@ private fun AdvancedTab(
     agentForward: Boolean, onAgentForward: (Boolean) -> Unit,
     skipBanner: Boolean, onSkipBanner: (Boolean) -> Unit,
     reuseSession: Boolean, onReuseSession: (Boolean) -> Unit,
+    behaviorOnSessionEnd: String, onBehaviorOnSessionEnd: (String) -> Unit,
     keepaliveText: String, onKeepalive: (String) -> Unit,
     keepaliveMaxText: String, onKeepaliveMax: (String) -> Unit,
     readyTimeoutText: String, onReadyTimeout: (String) -> Unit,
@@ -1093,6 +1098,7 @@ private fun AdvancedTab(
     CheckRow("Forward SSH agent (desktop only)", agentForward, onAgentForward)
     CheckRow("Skip banner", skipBanner, onSkipBanner)
     CheckRow("Reuse session", reuseSession, onReuseSession)
+    SessionEndDropdown(selected = behaviorOnSessionEnd, onSelect = onBehaviorOnSessionEnd)
     Text(
         "Reuse session shares one connection for all tabs of this profile. " +
             "When off, every tab connects separately. Options marked " +
@@ -1103,24 +1109,19 @@ private fun AdvancedTab(
     Text("Timeouts", style = MaterialTheme.typography.titleMedium)
     OutlinedTextField(
         value = keepaliveText, onValueChange = onKeepalive,
-        label = { Text("Keep-alive interval") },
+        label = { Text("Keep Alive Interval (Milliseconds)") },
         placeholder = { Text("In milliseconds. Default: 5000.") },
         modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
     OutlinedTextField(
         value = keepaliveMaxText, onValueChange = onKeepaliveMax,
-        label = { Text("Keep-alive max misses") },
+        label = { Text("Max Keep Alive Count") },
         placeholder = { Text("Default: 10.") },
         modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
-    Text(
-        "Sends keep-alive messages at this interval.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
     OutlinedTextField(
         value = readyTimeoutText, onValueChange = onReadyTimeout,
-        label = { Text("Ready timeout") },
+        label = { Text("Ready Timeout (Milliseconds)") },
         placeholder = { Text("In milliseconds. Empty uses the default.") },
         modifier = Modifier.fillMaxWidth(), singleLine = true,
     )
@@ -1283,6 +1284,41 @@ private fun ScriptsTab(scriptsList: List<LoginScript>, onChange: (List<LoginScri
         onClick = { onChange(scriptsList + LoginScript()) },
         modifier = Modifier.fillMaxWidth(),
     ) { Text("Add step") }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SessionEndDropdown(selected: String, onSelect: (String) -> Unit) {
+    // Desktop parity (editProfileModal.component.pug:71-81): Auto closes
+    // the tab only on explicit exit, Keep offers reconnect, Reconnect
+    // reconnects at once, Close always closes. No isConnectable guard —
+    // SSH is the only connectable type on this device.
+    var expanded by remember { mutableStateOf(false) }
+    val choices = listOf(
+        "auto" to "Auto",
+        "keep" to "Keep",
+        "reconnect" to "Reconnect",
+        "close" to "Close",
+    )
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = choices.toMap()[selected] ?: "Auto", onValueChange = { },
+            readOnly = true, label = { Text("When a session ends") },
+            supportingText = {
+                if (selected == "auto") Text("Only close the tab when session is explicitly terminated")
+            },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for ((value, label) in choices) {
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = { onSelect(value); expanded = false },
+                )
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
