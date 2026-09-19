@@ -45,9 +45,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -76,9 +81,11 @@ private const val SHEET_FLING_VELOCITY = 700f
  *
  * Custom sheet (not ModalBottomSheet): the M3 sheet consumes upward drags
  * for its own anchor priority, so list drags intermittently moved the
- * sheet instead of scrolling. Here the ONLY drag affordance is the header
- * zone (pill + title + search, outside the scroll); the list is plain and
- * owns every drag inside it.
+ * sheet instead of scrolling. Here the main drag affordance is the header
+ * zone (pill + title + search, outside the scroll); the list scrolls first
+ * and only finger-drag leftover at the edge moves the sheet — past the
+ * bottom expands half -> full, past the top shrinks full -> half -> hidden.
+ * Fling momentum stops at the edge; a second drag picks the next anchor.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -144,6 +151,71 @@ fun NewTabSheet(
                 }
             }
             fun hide() = settle(screenH, true)
+            // Nested drag from the list: the list always scrolls first.
+            // Only finger-drag leftover at the edge moves the sheet —
+            // drag up past the bottom expands half -> full, drag down
+            // past the top shrinks full -> half -> hidden. Fling momentum
+            // never moves the sheet; it stops at the edge and a second
+            // drag decides the next anchor. Settling only snaps a sheet
+            // that a drag left between anchors.
+            val sheetNested = remember(screenH, halfY, onDismiss) {
+                object : NestedScrollConnection {
+                    override fun onPreScroll(
+                        available: Offset,
+                        source: NestedScrollSource,
+                    ): Offset = Offset.Zero
+
+                    override fun onPostScroll(
+                        consumed: Offset,
+                        available: Offset,
+                        source: NestedScrollSource,
+                    ): Offset {
+                        if (source != NestedScrollSource.UserInput) return Offset.Zero
+                        if (available.y < 0f && offset.value > 0f) {
+                            val toConsume = available.y.coerceAtLeast(-offset.value)
+                            val next = (offset.value + toConsume).coerceIn(0f, screenH)
+                            scope.launch { offset.snapTo(next) }
+                            return Offset(0f, toConsume)
+                        }
+                        if (available.y > 0f && offset.value < screenH) {
+                            val toConsume = available.y.coerceAtMost(screenH - offset.value)
+                            val next = (offset.value + toConsume).coerceIn(0f, screenH)
+                            scope.launch { offset.snapTo(next) }
+                            return Offset(0f, toConsume)
+                        }
+                        return Offset.Zero
+                    }
+
+                    override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+
+                    override suspend fun onPostFling(
+                        consumed: Velocity,
+                        available: Velocity,
+                    ): Velocity {
+                        val start = offset.value
+                        val atAnchor = listOf(0f, halfY, screenH).any { abs(it - start) < 0.5f }
+                        if (atAnchor) {
+                            if (abs(screenH - start) < 0.5f && !gone) {
+                                gone = true
+                                onDismiss()
+                                return available
+                            }
+                            return Velocity.Zero
+                        }
+                        val target = when {
+                            available.y < -SHEET_FLING_VELOCITY -> if (start > halfY) halfY else 0f
+                            available.y > SHEET_FLING_VELOCITY -> if (start < halfY) halfY else screenH
+                            else -> listOf(0f, halfY, screenH).minBy { abs(it - start) }
+                        }
+                        offset.animateTo(target, spring(stiffness = Spring.StiffnessMedium))
+                        if (target == screenH && !gone) {
+                            gone = true
+                            onDismiss()
+                        }
+                        return available
+                    }
+                }
+            }
             // Enter at half (M3 sheet behavior).
             LaunchedEffect(screenH) {
                 offset.animateTo(halfY, spring(stiffness = Spring.StiffnessMediumLow))
@@ -162,6 +234,7 @@ fun NewTabSheet(
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .requiredHeight(maxHeight)
+                    .nestedScroll(sheetNested)
                     .offset { IntOffset(0, offset.value.roundToInt()) },
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
