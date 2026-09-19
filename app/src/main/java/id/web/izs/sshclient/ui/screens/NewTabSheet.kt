@@ -25,11 +25,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -441,11 +441,15 @@ private fun SheetProfileRow(
             .clickable { onPick(p.id) }
             .padding(vertical = 8.dp),
     ) {
-        // Desktop passes the profile color per option: identity dot here.
+        // Desktop selector parity: monitor icon tinted with the profile
+        // color (same treatment as the home list card).
         val dot = remember(p.color) { profileColorArgb(p.color) }
-        if (dot != null) {
-            Box(Modifier.size(10.dp).background(Color(dot), CircleShape))
-        }
+        Icon(
+            Icons.Outlined.DesktopWindows,
+            contentDescription = null,
+            tint = if (dot != null) Color(dot) else MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
         Column(Modifier.weight(1f)) {
             Text(p.name, style = MaterialTheme.typography.bodyLarge)
             if (p.type == "ssh") {

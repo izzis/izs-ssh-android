@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -59,7 +60,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -419,7 +419,6 @@ fun ProfileListScreen(
                 sections = sections,
                 expanded = expanded,
                 forceExpand = false,
-                state = state,
                 onToggle = { id, isCollapsed ->
                     expanded = if (isCollapsed) expanded + id else expanded - id
                     state.disk.expandedGroups = expanded
@@ -433,7 +432,6 @@ fun ProfileListScreen(
             )
             items(ungroupedSorted, key = { it.id }) { p ->
                 ProfileCard(
-                    state = state,
                     profile = p,
                     depth = 0,
                     hidden = false,
@@ -449,7 +447,6 @@ fun ProfileListScreen(
                 sections = fSections.filter { it.second.isNotEmpty() },
                 expanded = expanded,
                 forceExpand = true,
-                state = state,
                 onToggle = { id, isCollapsed ->
                     expanded = if (isCollapsed) expanded + id else expanded - id
                     state.disk.expandedGroups = expanded
@@ -463,7 +460,6 @@ fun ProfileListScreen(
             )
             items(fUngroupedSorted, key = { it.id }) { p ->
                 ProfileCard(
-                    state = state,
                     profile = p,
                     depth = 0,
                     hidden = false,
@@ -515,7 +511,6 @@ fun ProfileListScreen(
             if (!hiddenCollapsed) {
                 items(hiddenSorted, key = { "hidden:${it.id}" }) { p ->
                     ProfileCard(
-                        state = state,
                         profile = p,
                         depth = 0,
                         hidden = true,
@@ -767,7 +762,6 @@ private fun LazyListScope.groupSections(
     sections: List<Pair<GroupNode, List<HomeRow>>>,
     expanded: Set<String>,
     forceExpand: Boolean,
-    state: AppState,
     onToggle: (id: String, isCollapsed: Boolean) -> Unit,
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
@@ -802,7 +796,6 @@ private fun LazyListScope.groupSections(
                     )
                 }
                 is HomeRow.Profile -> ProfileCard(
-                    state = state,
                     profile = row.profile,
                     depth = row.depth,
                     hidden = false,
@@ -1053,7 +1046,6 @@ private fun ParentGroupDropdown(
 
 @Composable
 private fun ProfileCard(
-    state: AppState,
     profile: SshProfile,
     depth: Int,
     /** True inside the Hidden section: the menu offers Show instead of Hide. */
@@ -1073,19 +1065,18 @@ private fun ProfileCard(
         Row(
             Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Identity stripe (desktop tab-colorbar parity). Absent without
-            // a stored color, so uncolored rows look exactly as before.
-            val stripe = remember(profile.color) { profileColorArgb(profile.color) }
-            if (stripe != null) {
-                Box(
-                    Modifier
-                        .size(width = 4.dp, height = 52.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color(stripe)),
-                )
-            }
+            // Leading icon (desktop profile-icon parity: `fas fa-desktop`
+            // tinted with the profile color). The colored icon carries the
+            // identity, so no vertical stripe — desktop has none either.
+            val iconArgb = remember(profile.color) { profileColorArgb(profile.color) }
+            Icon(
+                Icons.Outlined.DesktopWindows,
+                contentDescription = null,
+                tint = if (iconArgb != null) Color(iconArgb) else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp),
+            )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(profile.name, style = MaterialTheme.typography.titleMedium)
                 if (profile.type == "ssh") {
@@ -1102,79 +1093,70 @@ private fun ProfileCard(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
-                if (profile.type == "ssh") {
-                    // Locked vault hides secrets (passwordFor/keysFor resolve
-                    // to null while locked), so say so instead of claiming
-                    // nothing is saved — the creds may be inside the vault.
-                    val locked = state.loaded?.needsPassphrase == true
-                    val creds = if (locked) "Locked — unlock to view"
-                    else buildList {
-                        if (state.passwordFor(profile) != null) add("Password saved")
-                        val n = state.keysFor(profile).size
-                        if (n == 1) add("1 key") else if (n > 1) add("$n keys")
-                    }.joinToString(", ").ifBlank { "No saved credentials" }
-                    Text(
-                        "Auth: ${profile.options.auth ?: "Auto"}, $creds",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
             }
             // Only SSH profiles are editable on this device; other types
             // stay desktop-managed. The overflow menu follows the same
             // gate — except inside Hidden, where every row needs at least
             // Show (a desktop may hide any type).
-            if (profile.type == "ssh") {
-                IconButton(onClick = { onEdit(profile.id) }, modifier = Modifier.size(40.dp)) {
-                    // Low-emphasis like the folder pencil (desktop
-                    // hover-action parity): solid black is too harsh,
-                    // especially in the light theme.
-                    Icon(
-                        Icons.Filled.Edit,
-                        contentDescription = "Edit profile",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            if (profile.type == "ssh" || hidden) {
-                var menuOpen by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(40.dp)) {
+            // Edit + overflow share a tight inner row: the outer 12.dp gap
+            // is for icon/text breathing, not between these two buttons.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                if (profile.type == "ssh") {
+                    IconButton(onClick = { onEdit(profile.id) }, modifier = Modifier.size(40.dp)) {
+                        // Low-emphasis like the folder pencil (desktop
+                        // hover-action parity): solid black is too harsh,
+                        // especially in the light theme.
                         Icon(
-                            Icons.Filled.MoreVert,
-                            contentDescription = "Profile actions",
+                            Icons.Filled.Edit,
+                            contentDescription = "Edit profile",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                    ) {
-                        if (profile.type == "ssh") {
-                            DropdownMenuItem(
-                                text = { Text("Duplicate") },
-                                leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
-                                onClick = { menuOpen = false; onDuplicate(profile) },
+                }
+                if (profile.type == "ssh" || hidden) {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(40.dp)) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = "Profile actions",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text(if (hidden) "Show" else "Hide") },
-                            leadingIcon = {
-                                Icon(
-                                    if (hidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                                    contentDescription = null,
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            if (profile.type == "ssh") {
+                                DropdownMenuItem(
+                                    text = { Text("Duplicate") },
+                                    leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
+                                    onClick = { menuOpen = false; onDuplicate(profile) },
                                 )
-                            },
-                            onClick = { menuOpen = false; onToggleHide(profile, !hidden) },
-                        )
-                        if (profile.type == "ssh") {
+                            }
                             DropdownMenuItem(
-                                text = {
-                                    Text("Delete profile", color = MaterialTheme.colorScheme.error)
+                                text = { Text(if (hidden) "Show" else "Hide") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (hidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                        contentDescription = null,
+                                    )
                                 },
-                                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                                onClick = { menuOpen = false; onDeleteProfile(profile) },
+                                onClick = { menuOpen = false; onToggleHide(profile, !hidden) },
                             )
+                            if (profile.type == "ssh") {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("Delete profile", color = MaterialTheme.colorScheme.error)
+                                    },
+                                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                                    onClick = { menuOpen = false; onDeleteProfile(profile) },
+                                )
+                            }
                         }
                     }
                 }
