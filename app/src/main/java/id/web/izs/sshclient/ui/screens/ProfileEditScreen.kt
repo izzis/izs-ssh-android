@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -54,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -71,6 +75,18 @@ import id.web.izs.sshclient.core.vault.SavedKeyInfo
 import id.web.izs.sshclient.core.vault.SecretResolver
 import id.web.izs.sshclient.ui.AppState
 import kotlinx.coroutines.launch
+
+/**
+ * Keyboard lift minus the nav bar MainActivity's Scaffold already reserves
+ * (safeDrawing): stacking the full IME inset on top double-counts it and
+ * leaves a nav-sized chin between the keyboard and the Save row — the same
+ * double-count the terminal dock subtracts (TerminalScreen keyboard dock).
+ */
+@Composable
+private fun imeLift() = with(LocalDensity.current) {
+    (WindowInsets.ime.getBottom(this) - WindowInsets.navigationBars.getBottom(this))
+        .coerceAtLeast(0).toDp()
+}
 
 private val EDIT_TABS = listOf("General", "Ports", "Advanced", "Ciphers", "Colours", "Login")
 
@@ -407,7 +423,10 @@ fun ProfileEditScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // Snug action row only while the keyboard is open; the closed state
+    // keeps the screen-standard 16dp margin.
+    val kbLift = imeLift()
+    Column(Modifier.fillMaxSize().padding(bottom = kbLift)) {
         ScreenHeader(
             if (isNew) "New profile" else if (isCopy) "Duplicate profile" else "Edit profile",
             onBack,
@@ -507,7 +526,13 @@ fun ProfileEditScreen(
         }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            // Docked against the keyboard when open (8dp); screen-standard
+            // 16dp otherwise. Top keeps 16dp rhythm with content either way.
+            modifier = Modifier.fillMaxWidth()
+                .padding(
+                    start = 16.dp, end = 16.dp, top = 16.dp,
+                    bottom = if (kbLift > 0.dp) 8.dp else 16.dp,
+                ),
         ) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Cancel") }
             if (!isNew && !isCopy) {
