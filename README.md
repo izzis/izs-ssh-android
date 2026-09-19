@@ -49,13 +49,13 @@ binaries) — full matrix in [ARCHITECTURE.md](ARCHITECTURE.md) §11.
 
 | Layer | Choice |
 |---|---|
-| Language / build | Kotlin 2.4.20, Gradle 9.7.1, AGP 9.4.0 |
-| UI | Jetpack Compose (BOM 2026.08.00) + Material3 + Navigation 2.10.0 |
+| Language / build | Kotlin 2.4.20, Gradle 9.7.1, AGP 9.4.1 |
+| UI | Jetpack Compose (BOM 2026.08.00) + Material3 + Navigation 2.10.1 |
 | Lifecycle | lifecycle-viewmodel(-ktx) 2.11.0 |
 | Async / JSON / HTTP | coroutines 1.11.0, serialization-json 1.11.0, OkHttp 5.5.0 |
 | YAML | SnakeYAML 2.7 |
 | Secure storage | Tink AES256-GCM (tink-android 1.23.0) |
-| SSH | sshj 0.40.0 + BouncyCastle (bcprov 1.85.2 / bcpkix 1.85) |
+| SSH | sshj 0.40.0 + BouncyCastle (bcprov 1.86 / bcpkix 1.86) |
 | SDK | minSdk 26, compileSdk 37, targetSdk 36 |
 
 `http://` sync hosts are allowed only for local targets (loopback/LAN/
