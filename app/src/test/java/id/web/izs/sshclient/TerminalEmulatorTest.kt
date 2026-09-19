@@ -257,6 +257,22 @@ class TerminalEmulatorTest {
     }
 
     @Test
+    fun `clear empties grid and scrollback and parks cursor home`() {
+        val t = term(cols = 10, rows = 3)
+        t.feed("hello\r\nworld\r\n!")
+        // Force scrollback: 10 lines into a 3-row grid.
+        repeat(10) { t.feed("line$it\r\n") }
+        assertTrue(t.historyRowCount() > 0)
+        val v0 = t.version
+        t.clear()
+        assertEquals(0, t.historyRowCount())
+        for (y in 0 until t.rows) assertEquals("", rowText(t, y))
+        assertEquals(0, t.cursorX)
+        assertEquals(0, t.cursorY)
+        assertTrue(t.version > v0)
+    }
+
+    @Test
     fun `resize clamps to sane bounds`() {
         val t = term()
         t.resize(1, 2)

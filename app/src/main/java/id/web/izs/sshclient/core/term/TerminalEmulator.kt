@@ -318,6 +318,21 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         version++
     }
 
+    /**
+     * Clear action parity (`frontend.clear()` / `xterm.clear()`): empty the
+     * visible grid plus scrollback and park the cursor home. Modes, margins,
+     * palette and parser state are untouched — unlike [reset], which is a
+     * full RIS. The session stays alive; the shell redraws nothing.
+     */
+    fun clear() {
+        history.clear()
+        clearGrid()
+        cursorX = 0
+        cursorY = 0
+        wrapPending = false
+        version++
+    }
+
     // ---- input ----
 
     private enum class State { GROUND, ESC, ESC_SKIP, CSI, OSC, OSC_ESC, STR_SKIP, STR_ESC }

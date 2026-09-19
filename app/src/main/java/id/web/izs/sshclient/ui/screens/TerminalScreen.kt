@@ -794,6 +794,7 @@ fun TerminalScreen(
                         onDismiss = { tabMenuFor = null },
                         onDisconnect = { requestDisconnect() },
                         onSftp = { showSftp = true },
+                        onClear = { emulator.clear(); handle.bumpVersion() },
                         onFontDown = { setFont(fontSp - 1f) },
                         onFontUp = { setFont(fontSp + 1f) },
                         onToggleKeys = { showKeys = !showKeys },
@@ -921,6 +922,7 @@ fun TerminalScreen(
                         onDismiss = { showMenu = false },
                         onDisconnect = { requestDisconnect() },
                         onSftp = { showSftp = true },
+                        onClear = { emulator.clear(); handle.bumpVersion() },
                         onFontDown = { setFont(fontSp - 1f) },
                         onFontUp = { setFont(fontSp + 1f) },
                         onToggleKeys = { showKeys = !showKeys },
@@ -964,6 +966,7 @@ fun TerminalScreen(
                         onDismiss = { tabMenuFor = null },
                         onDisconnect = { requestDisconnect() },
                         onSftp = { showSftp = true },
+                        onClear = { emulator.clear(); handle.bumpVersion() },
                         onFontDown = { setFont(fontSp - 1f) },
                         onFontUp = { setFont(fontSp + 1f) },
                         onToggleKeys = { showKeys = !showKeys },
@@ -1378,6 +1381,7 @@ fun TerminalScreen(
                                 onDismiss = { tabMenuFor = null },
                                 onDisconnect = { requestDisconnect() },
                                 onSftp = { showSftp = true },
+                                onClear = { emulator.clear(); handle.bumpVersion() },
                                 onFontDown = { setFont(fontSp - 1f) },
                                 onFontUp = { setFont(fontSp + 1f) },
                                 onToggleKeys = { showKeys = !showKeys },
@@ -1726,6 +1730,7 @@ fun TerminalScreen(
                             onDismiss = { fabMenu = false },
                             onDisconnect = { requestDisconnect() },
                             onSftp = { showSftp = true },
+                            onClear = { emulator.clear(); handle.bumpVersion() },
                             onFontDown = { setFont(fontSp - 1f) },
                             onFontUp = { setFont(fontSp + 1f) },
                             onToggleKeys = { showKeys = !showKeys },
@@ -1914,6 +1919,7 @@ private fun ColumnScope.SessionOptionsItems(
     onDismiss: () -> Unit,
     onDisconnect: () -> Unit,
     onSftp: () -> Unit,
+    onClear: () -> Unit,
     onFontDown: () -> Unit,
     onFontUp: () -> Unit,
     onToggleKeys: () -> Unit,
@@ -1932,6 +1938,10 @@ private fun ColumnScope.SessionOptionsItems(
         text = { Text("SFTP") },
         enabled = hasShell,
         onClick = { onDismiss(); onSftp() },
+    )
+    DropdownMenuItem(
+        text = { Text("Clear") },
+        onClick = { onDismiss(); onClear() },
     )
     DropdownMenuItem(
         text = { Text(if (boxMode) "Switch to direct typing" else "Switch to command box") },
