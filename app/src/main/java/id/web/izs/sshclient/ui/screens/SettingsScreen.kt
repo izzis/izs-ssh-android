@@ -8,10 +8,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.ChevronRight
@@ -24,7 +25,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -102,13 +103,25 @@ fun SettingsScreen(
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ScreenHeader("Settings", onBack)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(SETTING_SECTIONS, key = { it.route }) { s ->
+            itemsIndexed(SETTING_SECTIONS, key = { _, it -> it.route }) { index, s ->
                 // Conflict dot: the auto tick pauses for this config when
                 // server and local both changed — visible without opening it.
                 val conflict = s.route == "sync" && state.disk.syncConflict
-                Card(modifier = Modifier.fillMaxWidth().clickable { onSection(s.route) }) {
+                // Flat navigation row (profile-list parity): icon + text +
+                // chevron with dividers between rows, no card container.
+                Column(Modifier.fillMaxWidth()) {
+                    if (index > 0) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
+                    }
                     Row(
-                        Modifier.padding(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 64.dp)
+                            .clickable { onSection(s.route) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {

@@ -456,7 +456,7 @@ private fun SheetProfileRow(
                 Text(
                     SshDefaults.quickName(p.options.user, p.options.host, p.options.port),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 Text(

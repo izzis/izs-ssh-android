@@ -13,16 +13,18 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -47,6 +49,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -419,7 +422,7 @@ fun ProfileListScreen(
         }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
         if (liveSessions.isNotEmpty()) {
             item(key = "active") {
@@ -478,7 +481,7 @@ fun ProfileListScreen(
                 onToggleHide = { p, hide -> doToggleHide(p, hide) },
                 onDeleteProfile = { confirmDeleteProfile = it },
             )
-            items(ungroupedSorted, key = { it.id }) { p ->
+            itemsIndexed(ungroupedSorted, key = { _, it -> it.id }) { index, p ->
                 ProfileCard(
                     profile = p,
                     depth = 0,
@@ -488,6 +491,7 @@ fun ProfileListScreen(
                     onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
                     onToggleHide = { p, hide -> doToggleHide(p, hide) },
                     onDeleteProfile = { confirmDeleteProfile = it },
+                    showDivider = index > 0,
                 )
             }
         } else {
@@ -506,7 +510,7 @@ fun ProfileListScreen(
                 onToggleHide = { p, hide -> doToggleHide(p, hide) },
                 onDeleteProfile = { confirmDeleteProfile = it },
             )
-            items(fUngroupedSorted, key = { it.id }) { p ->
+            itemsIndexed(fUngroupedSorted, key = { _, it -> it.id }) { index, p ->
                 ProfileCard(
                     profile = p,
                     depth = 0,
@@ -516,6 +520,7 @@ fun ProfileListScreen(
                     onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
                     onToggleHide = { p, hide -> doToggleHide(p, hide) },
                     onDeleteProfile = { confirmDeleteProfile = it },
+                    showDivider = index > 0,
                 )
             }
             if (fSections.all { it.second.isEmpty() } && fUngroupedSorted.isEmpty()) {
@@ -557,7 +562,7 @@ fun ProfileListScreen(
                 }
             }
             if (!hiddenCollapsed) {
-                items(hiddenSorted, key = { "hidden:${it.id}" }) { p ->
+                itemsIndexed(hiddenSorted, key = { _, it -> "hidden:${it.id}" }) { index, p ->
                     ProfileCard(
                         profile = p,
                         depth = 0,
@@ -567,6 +572,7 @@ fun ProfileListScreen(
                         onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
                         onToggleHide = { p, hide -> doToggleHide(p, hide) },
                         onDeleteProfile = { confirmDeleteProfile = it },
+                        showDivider = index > 0,
                     )
                 }
             }
@@ -830,7 +836,7 @@ private fun LazyListScope.groupSections(
                 onManage = { onManageGroup(root) },
             )
         }
-        items(sub, key = { it.key }) { row ->
+        itemsIndexed(sub, key = { _, it -> it.key }) { index, row ->
             when (row) {
                 is HomeRow.Folder -> {
                     val cid = row.node.group.id
@@ -852,6 +858,9 @@ private fun LazyListScope.groupSections(
                     onDuplicate = onDuplicate,
                     onToggleHide = onToggleHide,
                     onDeleteProfile = onDeleteProfile,
+                    // Divider between consecutive profile rows only — never
+                    // against folder headers (the tonal bar separates).
+                    showDivider = index > 0 && sub.getOrNull(index - 1) is HomeRow.Profile,
                 )
             }
         }
@@ -883,9 +892,17 @@ private fun ActiveSessionsSection(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onCloseAll) {
-                    Text("Close all")
-                }
+                // Compact text action instead of TextButton: M3 buttons
+                // enforce a 40.dp min height that stretched this header row
+                // with empty space above/below the title.
+                Text(
+                    "Close all",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable { onCloseAll() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
             for (h in sessions) {
                 val status by h.status.collectAsState()
@@ -913,7 +930,12 @@ private fun ActiveSessionsSection(
                         )
                     }
                     IconButton(onClick = { onCloseSession(h.sessionId) }) {
-                        Text("✕", style = MaterialTheme.typography.titleMedium)
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Close session",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
             }
@@ -1008,15 +1030,15 @@ private fun FolderRow(
     onToggle: () -> Unit,
     onManage: () -> Unit,
 ) {
-    // Slim sticky-header bar, deliberately NOT a Card: profile rows are
-    // multi-line Cards, folders are single-line tonal headers (desktop
-    // settings-tree parity). Open/closed reads from Folder/FolderOpen.
+    // Same container as M3 Card default (surfaceContainerLow): headers
+    // and status cards share one ramp — role reads from shape (full-width
+    // bar), typography, icon and sticky behavior, not from tint.
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = (depth * 16).dp),
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         onClick = onToggle,
     ) {
         Row(
@@ -1103,15 +1125,32 @@ private fun ProfileCard(
     onDuplicate: (SshProfile) -> Unit,
     onToggleHide: (SshProfile, Boolean) -> Unit,
     onDeleteProfile: (SshProfile) -> Unit,
+    /** Divider above the row; caller decides to avoid doubling. */
+    showDivider: Boolean,
 ) {
-    Card(
+    // Flat row (desktop tree parity): no card container — icon + text +
+    // actions, dividers between rows. Active/Recent stay cards (status
+    // panels, a different role).
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = (depth * 16).dp)
-            .clickable { onOpen(profile.id) },
+            .padding(start = (depth * 16).dp),
     ) {
+        if (showDivider) {
+            // Bottom breathing room balances the rhythm: below-text gets
+            // 8 (row pad) + 8 (list gap), above-text gets 4 + 8 (row pad)
+            // — near-symmetric instead of 20 vs 8.
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
         Row(
-            Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .clickable { onOpen(profile.id) }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -1131,14 +1170,14 @@ private fun ProfileCard(
                     Text(
                         SshDefaults.quickName(profile.options.user, profile.options.host, profile.options.port),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
                     // Other types are shown for reference. Only SSH connects on this device.
                     Text(
                         "Type: ${profile.type}",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
