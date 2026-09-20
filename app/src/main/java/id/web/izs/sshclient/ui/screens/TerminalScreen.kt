@@ -926,7 +926,13 @@ fun TerminalScreen(
                     }
                 }
                 Text(
-                    "${profile.options.user}@${profile.options.host}:${profile.options.port}",
+                    id.web.izs.sshclient.core.config.SshDefaults.displayQuickName(
+                        profile.options.user,
+                        profile.options.host,
+                        profile.options.port,
+                        askUsername = state.isAskUsername(handle.profileId),
+                        typedUser = sessionViewModel.typedUsernameOf(sessionId),
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

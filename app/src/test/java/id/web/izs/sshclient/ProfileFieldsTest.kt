@@ -41,6 +41,99 @@ class ProfileFieldsTest {
     }
 
     @Test
+    fun `null user key parses as ask-every-time like desktop falsy`() {
+        // `user:` (bare) or `user: null` in YAML: SnakeYAML yields a present
+        // key with a null value. Desktop ConfigProxy returns it as-is (null
+        // !== undefined, so no default applies) and ssh.ts prompts — so it
+        // must parse to blank, NOT to the `root` default.
+        val bare = parsed(linkedMapOf("host" to "h", "user" to null))
+        assertEquals("", bare.options.user)
+        assertTrue(RawConfigStore.storedUserAsksEveryTime(linkedMapOf("host" to "h", "user" to null)))
+    }
+
+    @Test
+    fun `real yaml separates blank null missing and explicit root`() {
+        val doc = RawConfigStore.loadRaw(
+            "version: 1\nprofiles:\n" +
+                "  - {id: ssh:1, type: ssh, name: ask-blank, options: {host: h, user: ''}}\n" +
+                "  - {id: ssh:2, type: ssh, name: ask-null, options: {host: h, user:}}\n" +
+                "  - {id: ssh:3, type: ssh, name: default-root, options: {host: h}}\n" +
+                "  - {id: ssh:4, type: ssh, name: explicit-root, options: {host: h, user: root}}\n",
+        )
+        val ps = RawConfigStore.toDomain(doc).profiles.associateBy { it.id }
+        assertEquals("", ps["ssh:1"]!!.options.user)
+        assertEquals("", ps["ssh:2"]!!.options.user)
+        assertEquals("root", ps["ssh:3"]!!.options.user)
+        assertEquals("root", ps["ssh:4"]!!.options.user)
+    }
+
+    @Test
+    fun `storedUserAsksEveryTime separates absent null blank and named`() {
+        // Absent key = desktop default `root` → connects directly.
+        assertFalse(RawConfigStore.storedUserAsksEveryTime(linkedMapOf("host" to "h")))
+        // Present-but-null and blank = falsy = ask every time.
+        assertTrue(RawConfigStore.storedUserAsksEveryTime(linkedMapOf("host" to "h", "user" to null)))
+        assertTrue(RawConfigStore.storedUserAsksEveryTime(linkedMapOf("host" to "h", "user" to "")))
+        assertTrue(RawConfigStore.storedUserAsksEveryTime(linkedMapOf("host" to "h", "user" to "   ")))
+        // Named users (including an explicit `root`) never ask.
+        assertFalse(RawConfigStore.storedUserAsksEveryTime(linkedMapOf("host" to "h", "user" to "root")))
+        assertFalse(RawConfigStore.storedUserAsksEveryTime(linkedMapOf("host" to "h", "user" to "deploy")))
+    }
+
+    @Test
+    fun `updateProfileMap omits default root user but stores blank`() {
+        // Desktop ConfigProxy parity: `root` == default → key deleted.
+        val existing = linkedMapOf<String, Any?>(
+            "options" to linkedMapOf<String, Any?>("host" to "h", "user" to "root"),
+        )
+        val rootOpts = RawConfigStore.updateProfileMap(
+            existing,
+            SshProfile(id = "ssh:1", name = "n", options = SshOptions(host = "h", user = "root")),
+            null, null, emptyList(),
+        )["options"].asStringMap()!!
+        assertFalse(rootOpts.containsKey("user"))
+        // Blank (ask every time) is meaningful → stored as `user: ''`.
+        val askOpts = RawConfigStore.updateProfileMap(
+            emptyMap(),
+            SshProfile(id = "ssh:1", name = "n", options = SshOptions(host = "h", user = "")),
+            null, null, emptyList(),
+        )["options"].asStringMap()!!
+        assertEquals("", askOpts["user"])
+        // Named users round-trip verbatim.
+        val namedOpts = RawConfigStore.updateProfileMap(
+            emptyMap(),
+            SshProfile(id = "ssh:1", name = "n", options = SshOptions(host = "h", user = "deploy")),
+            null, null, emptyList(),
+        )["options"].asStringMap()!!
+        assertEquals("deploy", namedOpts["user"])
+    }
+
+    @Test
+    fun `saved blank survives a yaml dump and reload`() {
+        val out = RawConfigStore.updateProfileMap(
+            emptyMap(),
+            SshProfile(id = "ssh:1", name = "n", options = SshOptions(host = "h", user = "")),
+            null, null, emptyList(),
+        )
+        val yaml = RawConfigStore.dumpRaw(linkedMapOf("version" to 1, "profiles" to listOf(out)))
+        val reloaded = RawConfigStore.toDomain(RawConfigStore.loadRaw(yaml)).profiles.single()
+        assertEquals("", reloaded.options.user)
+    }
+
+    @Test
+    fun `ask-every-time subtitle shows the bare host, never a fake root`() {
+        // `user: ''` in YAML (ask every time): the transient display `root`
+        // must not leak into the list subtitle.
+        assertEquals("h", SshDefaults.displayQuickName("root", "h", 22, askUsername = true))
+        assertEquals("h:2222", SshDefaults.displayQuickName("root", "h", 2222, askUsername = true))
+        // Missing `user` line (or explicit `root`) keeps user@host.
+        assertEquals("root@h", SshDefaults.displayQuickName("root", "h", 22, askUsername = false))
+        assertEquals("deploy@h:2222", SshDefaults.displayQuickName("deploy", "h", 2222, askUsername = false))
+        // A session-local typed answer wins (connected tab after the prompt).
+        assertEquals("alice@h", SshDefaults.displayQuickName("root", "h", 22, askUsername = true, typedUser = "alice"))
+    }
+
+    @Test
     fun `parseProfile reads the full desktop option set`() {
         val p = parsed(
             linkedMapOf(

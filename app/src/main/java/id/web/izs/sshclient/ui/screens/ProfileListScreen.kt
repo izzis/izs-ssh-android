@@ -277,20 +277,22 @@ fun ProfileListScreen(
         }, { doDeleteProfile() })
     }
 
-    val filtered = remember(visibleProfiles, query) {
+    val filtered = remember(visibleProfiles, query, state.loaded) {
         if (query.isBlank()) visibleProfiles
         else visibleProfiles.filter {
             it.name.contains(query, true) ||
                 it.options.host.contains(query, true) ||
-                it.options.user.contains(query, true)
+                // Ask-every-time rows show the bare host — their transient
+                // `root` must not match a "root" query.
+                (!state.isAskUsername(it.id) && it.options.user.contains(query, true))
         }
     }
-    val hiddenFiltered = remember(hiddenProfiles, query) {
+    val hiddenFiltered = remember(hiddenProfiles, query, state.loaded) {
         if (query.isBlank()) hiddenProfiles
         else hiddenProfiles.filter {
             it.name.contains(query, true) ||
                 it.options.host.contains(query, true) ||
-                it.options.user.contains(query, true)
+                (!state.isAskUsername(it.id) && it.options.user.contains(query, true))
         }
     }
     val hiddenSorted = remember(hiddenFiltered) { hiddenFiltered.sortedBy { it.name.lowercase() } }
@@ -459,6 +461,8 @@ fun ProfileListScreen(
                 ActiveSessionsSection(
                     sessions = liveSessions,
                     maxSessions = state.disk.maxSessions,
+                    isAsk = { state.isAskUsername(it) },
+                    typedUserOf = { sessionViewModel.typedUsernameOf(it) },
                     onOpenSession = onOpenSession,
                     onCloseSession = { sessionViewModel.close(it) },
                     onCloseAll = {
@@ -472,6 +476,7 @@ fun ProfileListScreen(
                 RecentSection(
                     recent = recent,
                     collapsed = recentCollapsed,
+                    isAsk = { state.isAskUsername(it) },
                     onToggle = { recentCollapsed = !recentCollapsed },
                     onClear = {
                         state.disk.recentProfileIds = emptyList()
@@ -500,6 +505,7 @@ fun ProfileListScreen(
                 sections = sections,
                 expanded = expanded,
                 forceExpand = false,
+                isAsk = { state.isAskUsername(it) },
                 onToggle = { id, isCollapsed ->
                     expanded = if (isCollapsed) expanded + id else expanded - id
                     state.disk.expandedGroups = expanded
@@ -516,6 +522,7 @@ fun ProfileListScreen(
                     profile = p,
                     depth = 0,
                     hidden = false,
+                    askUsername = state.isAskUsername(p.id),
                     onOpen = onOpen,
                     onEdit = onEdit,
                     onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
@@ -529,6 +536,7 @@ fun ProfileListScreen(
                 sections = fSections.filter { it.second.isNotEmpty() },
                 expanded = expanded,
                 forceExpand = true,
+                isAsk = { state.isAskUsername(it) },
                 onToggle = { id, isCollapsed ->
                     expanded = if (isCollapsed) expanded + id else expanded - id
                     state.disk.expandedGroups = expanded
@@ -545,6 +553,7 @@ fun ProfileListScreen(
                     profile = p,
                     depth = 0,
                     hidden = false,
+                    askUsername = state.isAskUsername(p.id),
                     onOpen = onOpen,
                     onEdit = onEdit,
                     onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
@@ -597,6 +606,7 @@ fun ProfileListScreen(
                         profile = p,
                         depth = 0,
                         hidden = true,
+                        askUsername = state.isAskUsername(p.id),
                         onOpen = onOpen,
                         onEdit = onEdit,
                         onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
@@ -886,6 +896,7 @@ private fun LazyListScope.groupSections(
     sections: List<Pair<GroupNode, List<HomeRow>>>,
     expanded: Set<String>,
     forceExpand: Boolean,
+    isAsk: (profileId: String) -> Boolean,
     onToggle: (id: String, isCollapsed: Boolean) -> Unit,
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
@@ -923,6 +934,7 @@ private fun LazyListScope.groupSections(
                     profile = row.profile,
                     depth = row.depth,
                     hidden = false,
+                    askUsername = isAsk(row.profile.id),
                     onOpen = onOpen,
                     onEdit = onEdit,
                     onDuplicate = onDuplicate,
@@ -946,6 +958,8 @@ private fun LazyListScope.groupSections(
 private fun ActiveSessionsSection(
     sessions: List<SshSessionHandle>,
     maxSessions: Int,
+    isAsk: (profileId: String) -> Boolean,
+    typedUserOf: (sessionId: String) -> String?,
     onOpenSession: (String) -> Unit,
     onCloseSession: (String) -> Unit,
     onCloseAll: () -> Unit,
@@ -990,10 +1004,12 @@ private fun ActiveSessionsSection(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(h.profileSnapshot.name, style = MaterialTheme.typography.titleSmall)
                         Text(
-                            SshDefaults.quickName(
+                            SshDefaults.displayQuickName(
                                 h.profileSnapshot.options.user,
                                 h.profileSnapshot.options.host,
                                 h.profileSnapshot.options.port,
+                                askUsername = isAsk(h.profileId),
+                                typedUser = typedUserOf(h.sessionId),
                             ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1017,6 +1033,7 @@ private fun ActiveSessionsSection(
 private fun RecentSection(
     recent: List<SshProfile>,
     collapsed: Boolean,
+    isAsk: (profileId: String) -> Boolean,
     onToggle: () -> Unit,
     onClear: () -> Unit,
     onOpen: (String) -> Unit,
@@ -1074,10 +1091,11 @@ private fun RecentSection(
                                 )
                                 if (p.type == "ssh") {
                                     Text(
-                                        SshDefaults.quickName(
+                                        SshDefaults.displayQuickName(
                                             p.options.user,
                                             p.options.host,
                                             p.options.port,
+                                            askUsername = isAsk(p.id),
                                         ),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1190,6 +1208,8 @@ private fun ProfileCard(
     depth: Int,
     /** True inside the Hidden section: the menu offers Show instead of Hide. */
     hidden: Boolean,
+    /** Stored-blank user (`user: ''` = ask every time): subtitle shows the bare host. */
+    askUsername: Boolean = false,
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
     onDuplicate: (SshProfile) -> Unit,
@@ -1238,7 +1258,12 @@ private fun ProfileCard(
                 Text(profile.name, style = MaterialTheme.typography.titleMedium)
                 if (profile.type == "ssh") {
                     Text(
-                        SshDefaults.quickName(profile.options.user, profile.options.host, profile.options.port),
+                        SshDefaults.displayQuickName(
+                            profile.options.user,
+                            profile.options.host,
+                            profile.options.port,
+                            askUsername = askUsername,
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

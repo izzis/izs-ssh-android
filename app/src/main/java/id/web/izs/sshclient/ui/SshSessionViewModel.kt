@@ -440,6 +440,10 @@ class SshSessionViewModel : ViewModel() {
      *  prompt cancel); a closed-then-reopened tab asks again. */
     private val usernameOneShots = mutableMapOf<String, String>()
 
+    /** Session-local answered username (never persisted), if any. */
+    fun typedUsernameOf(sessionId: String): String? =
+        synchronized(poolGuard) { usernameOneShots[sessionId] }
+
     /**
      * Raw username blankness: the display profile transiently fills `root`
      * (SshDefaults), so the prompt decision reads the pre-defaults YAML

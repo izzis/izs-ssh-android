@@ -116,6 +116,18 @@ class AppState(
     fun displayProfiles(): List<SshProfile> = migrated().first
 
     /**
+     * True when the stored profile has no username (ask every time): the
+     * YAML holds `user: ''` (or a bare `user:`), which parses to `""`.
+     * A missing `user` line parses to the desktop default `root`, so only
+     * a real ask-every-time profile returns true. The display view can't
+     * tell them apart ([SshDefaults] fills `root` transiently).
+     * Raw-map equivalent: [RawConfigStore.storedUserAsksEveryTime].
+     */
+    fun isAskUsername(profileId: String): Boolean =
+        loaded?.domain?.profiles?.find { it.id == profileId }
+            ?.options?.user.isNullOrBlank()
+
+    /**
      * Display-ready groups from the SAME migration pass as [displayProfiles].
      * Memoized per [loaded] instance: the v5 migration mints random ids for
      * legacy name-based groups, so profiles and groups must come from one pass.

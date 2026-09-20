@@ -503,7 +503,11 @@ object RawConfigStore {
             options = SshOptions(
                 host = o["host"]?.toString() ?: "",
                 port = (o["port"] as? Number)?.toInt() ?: 22,
-                user = o["user"]?.toString() ?: "root",
+                // Absent key = desktop default `root`; a present-but-null
+                // (`user:`) or blank (`user: ''`) key is falsy on desktop
+                // (ConfigProxy returns it as-is, ssh.ts prompts) — collapse
+                // both to "" so Domain `isBlank()` means "ask every time".
+                user = if (!o.containsKey("user")) "root" else o["user"]?.toString() ?: "",
                 auth = o["auth"]?.toString(),
                 password = o["password"]?.toString(),
                 privateKeys = (o["privateKeys"] as? List<*>)?.map { it.toString() } ?: emptyList(),
@@ -564,6 +568,22 @@ object RawConfigStore {
             )
         }
     }
+
+    /**
+     * Stored-username state (desktop ConfigProxy + ssh.ts parity):
+     * - key ABSENT from the options map → desktop default `root`
+     *   (connects directly, no prompt);
+     * - key present as null (`user:` / `user: null`) or blank (`user: ''`)
+     *   → falsy → `Username for host` prompt (ask every time);
+     * - any other string → that login name.
+     *
+     * Operates on the RAW options map ([Any?.asStringMap] keeps null-valued
+     * keys, so absent vs null stay distinguishable here). Post-parse the
+     * Domain view collapses both ask states to `""` — see [parseProfile] —
+     * so Domain callers just check `user.isBlank()`.
+     */
+    fun storedUserAsksEveryTime(options: Map<String, Any?>): Boolean =
+        options.containsKey("user") && options["user"]?.toString().isNullOrBlank()
 
     /**
      * The upload document — parity with desktop readConfigDataForSync + parts merge.
@@ -766,7 +786,11 @@ object RawConfigStore {
         val opts = LinkedHashMap<String, Any?>((existing["options"].asStringMap()) ?: emptyMap())
         opts["host"] = o.host
         opts["port"] = o.port
-        opts["user"] = o.user
+        // Desktop ConfigProxy parity: `root` IS the default, so it is never
+        // stored (the key is deleted — a missing key reads back as `root`).
+        // A blank ("ask every time") is meaningful and IS stored as `user: ''`.
+        val d = SshOptions()
+        if (o.user != d.user) opts["user"] = o.user else opts.remove("user")
         if (o.auth != null) opts["auth"] = o.auth else opts.remove("auth")
         if (passwordField != null) {
             if (passwordField.isEmpty()) opts.remove("password") else opts["password"] = passwordField
@@ -776,7 +800,6 @@ object RawConfigStore {
         // Desktop ConfigProxy parity: keys the editor owns are written only
         // when they differ from the built-in defaults, otherwise removed —
         // the cloud YAML stores non-defaults, defaults come from code.
-        val d = SshOptions()
         if (o.keepaliveInterval != d.keepaliveInterval) opts["keepaliveInterval"] = o.keepaliveInterval
         else opts.remove("keepaliveInterval")
         if (o.keepaliveCountMax != d.keepaliveCountMax) opts["keepaliveCountMax"] = o.keepaliveCountMax
@@ -1061,7 +1084,9 @@ object RawConfigStore {
         val pw = o["password"]?.toString() ?: return null
         if (pw.isBlank() || pw.startsWith("vault://")) return null
         return InlinePassword(
-            user = o["user"]?.toString() ?: "root",
+            // Same absent-vs-null rule as parseProfile: a missing key means
+            // the desktop default; a null/blank key stays blank (ask mode).
+            user = if (!o.containsKey("user")) "root" else o["user"]?.toString() ?: "",
             host = o["host"]?.toString() ?: "",
             port = (o["port"] as? Number)?.toInt() ?: 22,
             value = pw,

@@ -113,12 +113,12 @@ fun NewTabSheet(
             state.disk.recentProfileIds.take(maxRecent).mapNotNull { byId[it] }
         }
     }
-    val filtered = remember(profiles, query) {
+    val filtered = remember(profiles, query, state.loaded) {
         if (query.isBlank()) profiles
         else profiles.filter {
             it.name.contains(query, true) ||
                 it.options.host.contains(query, true) ||
-                it.options.user.contains(query, true)
+                (!state.isAskUsername(it.id) && it.options.user.contains(query, true))
         }
     }
     // Desktop selector parity (profiles.service.ts): recents on top, then
@@ -327,7 +327,12 @@ fun NewTabSheet(
                                         Text(p.name, style = MaterialTheme.typography.titleSmall)
                                         if (p.type == "ssh") {
                                             Text(
-                                                SshDefaults.quickName(p.options.user, p.options.host, p.options.port),
+                                                SshDefaults.displayQuickName(
+                                                    p.options.user,
+                                                    p.options.host,
+                                                    p.options.port,
+                                                    askUsername = state.isAskUsername(p.id),
+                                                ),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -337,11 +342,19 @@ fun NewTabSheet(
                             }
                         }
                         if (query.isBlank()) {
-                            sheetSections(sections = sections, onPick = onPick)
+                            sheetSections(
+                                sections = sections,
+                                isAsk = { state.isAskUsername(it) },
+                                onPick = onPick,
+                            )
                         } else {
                             // groupBy yields only groups with matches; an empty
                             // result shows a note instead of a blank sheet.
-                            sheetSections(sections = fSections, onPick = onPick)
+                            sheetSections(
+                                sections = fSections,
+                                isAsk = { state.isAskUsername(it) },
+                                onPick = onPick,
+                            )
                             if (fSections.isEmpty()) {
                                 item(key = "no-match") {
                                     Text(
@@ -398,6 +411,7 @@ private fun groupPath(groups: List<ProfileGroup>, id: String?): String {
 @OptIn(ExperimentalFoundationApi::class)
 private fun LazyListScope.sheetSections(
     sections: List<Pair<String, List<SshProfile>>>,
+    isAsk: (profileId: String) -> Boolean,
     onPick: (profileId: String) -> Unit,
 ) {
     for ((gname, ps) in sections) {
@@ -424,7 +438,7 @@ private fun LazyListScope.sheetSections(
             }
         }
         items(ps, key = { it.id }) { p ->
-            SheetProfileRow(p = p, onPick = onPick)
+            SheetProfileRow(p = p, askUsername = isAsk(p.id), onPick = onPick)
         }
     }
 }
@@ -432,6 +446,7 @@ private fun LazyListScope.sheetSections(
 @Composable
 private fun SheetProfileRow(
     p: SshProfile,
+    askUsername: Boolean,
     onPick: (profileId: String) -> Unit,
 ) {
     Row(
@@ -454,7 +469,12 @@ private fun SheetProfileRow(
             Text(p.name, style = MaterialTheme.typography.bodyLarge)
             if (p.type == "ssh") {
                 Text(
-                    SshDefaults.quickName(p.options.user, p.options.host, p.options.port),
+                    SshDefaults.displayQuickName(
+                        p.options.user,
+                        p.options.host,
+                        p.options.port,
+                        askUsername = askUsername,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

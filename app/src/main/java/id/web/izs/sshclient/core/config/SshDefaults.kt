@@ -27,4 +27,23 @@ object SshDefaults {
 
     fun quickName(user: String, host: String, port: Int): String =
         if (port == 22) "$user@$host" else "$user@$host:$port"
+
+    /**
+     * List subtitle for a profile: a stored-blank user (`user: ''` in YAML =
+     * ask every time) shows the host alone; a missing `user` line (or an
+     * explicit `root`) keeps `root@host`. A session-local typed answer
+     * ([typedUser]) wins over both, so a connected `alice` tab reads
+     * `alice@host`.
+     */
+    fun displayQuickName(
+        displayUser: String,
+        host: String,
+        port: Int,
+        askUsername: Boolean,
+        typedUser: String? = null,
+    ): String {
+        typedUser?.takeIf { it.isNotBlank() }?.let { return quickName(it, host, port) }
+        if (askUsername) return if (port == 22) host else "$host:$port"
+        return quickName(displayUser.ifBlank { "root" }, host, port)
+    }
 }
