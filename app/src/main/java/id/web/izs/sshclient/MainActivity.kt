@@ -44,6 +44,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import id.web.izs.sshclient.core.perf.PerfProbe
 import id.web.izs.sshclient.core.sync.AutoSyncOutcome
 import id.web.izs.sshclient.core.sync.SyncRepository
 import id.web.izs.sshclient.core.sync.TabbySyncApi
@@ -162,6 +163,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Debug-only tooling: the last-crash recorder must never run in release builds.
         if (BuildConfig.DEBUG)         CrashLog.install(this)
+        // Debug-only save-path timings (logcat tag SavePerf): zero overhead
+        // when detached; shows PBKDF2 vs AES vs YAML vs Tink per save.
+        if (BuildConfig.DEBUG) {
+            PerfProbe.listener = { tag, ms ->
+                android.util.Log.d("SavePerf", "$tag ${ms}ms")
+            }
+        }
         // Background survival: pump the process foreground counter (no extra
         // deps) and mirror the session registry into SessionService. The
         // ViewModel never touches Context — both lambdas do.

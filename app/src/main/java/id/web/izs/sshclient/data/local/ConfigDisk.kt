@@ -2,6 +2,7 @@ package id.web.izs.sshclient.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import id.web.izs.sshclient.core.perf.PerfProbe
 
 /**
  * Local storage for v1.
@@ -77,9 +78,15 @@ class ConfigDisk(context: Context) {
         }
     }
 
-    fun loadYaml(): String? = prefs().getString(KEY_YAML, null)
+    fun loadYaml(): String? = PerfProbe.measure("disk.loadYaml") { prefs().getString(KEY_YAML, null) }
 
     fun saveYaml(yaml: String) {
+        PerfProbe.measure("disk.saveYaml") {
+            saveYamlMeasured(yaml)
+        }
+    }
+
+    private fun saveYamlMeasured(yaml: String) {
         requireEncrypted("config (holds the sync token, vault blob and possible plaintext secrets)")
         // Desktop saveConfig parity (tabby/app/lib/config.ts): every save
         // also keeps a .backup copy — the safety net for a corrupt main

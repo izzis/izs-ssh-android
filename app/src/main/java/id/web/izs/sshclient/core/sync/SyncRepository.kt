@@ -118,7 +118,10 @@ class SyncRepository(
 
     fun rememberPassphrase(p: String) { rememberedPassphrase = p }
 
-    fun forgetPassphrase() { rememberedPassphrase = null }
+    fun forgetPassphrase() {
+        rememberedPassphrase = null
+        VaultCrypto.clearCache()
+    }
 
     data class Loaded(
         val domain: TabbyConfig,

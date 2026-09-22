@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import id.web.izs.sshclient.core.perf.PerfProbe
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 
@@ -53,7 +54,7 @@ object RawConfigStore {
 
     fun loadRaw(yamlStr: String): LinkedHashMap<String, Any?> {
         if (yamlStr.isBlank()) return linkedMapOf(KEY_VERSION to ConfigMigrator.LATEST_VERSION)
-        val loaded = yaml().load<Any>(yamlStr)
+        val loaded = PerfProbe.measure("yaml.load") { yaml().load<Any>(yamlStr) }
         return when (loaded) {
             // `is Map<*, *>` is fully checkable; asMutableStringMap copies
             // with string keys (dynamic YAML maps: keys are strings by construction).
@@ -63,7 +64,8 @@ object RawConfigStore {
         }
     }
 
-    fun dumpRaw(doc: Map<String, Any?>): String = yaml().dump(doc)
+    fun dumpRaw(doc: Map<String, Any?>): String =
+        PerfProbe.measure("yaml.dump") { yaml().dump(doc) }
 
     /**
      * Strict parse for Settings > Config file > Import (pasted full YAML).
@@ -299,11 +301,12 @@ object RawConfigStore {
     /**
      * Parse a vault-blob config JSON object into a raw document (decrypt path).
      * Inverse of [toJson]; shared with the sync layer so tests exercise it.
+     * Converted directly (no YAML round-trip): SnakeYAML re-parsing can
+     * coerce exotic strings, while the direct map is exactly the payload.
      */
     fun jsonToRaw(configJson: String): LinkedHashMap<String, Any?> {
         val el = kotlinx.serialization.json.Json.parseToJsonElement(configJson)
-        val map = jsonElementToJava(el).asStringMap() ?: emptyMap()
-        return loadRaw(dumpRaw(LinkedHashMap(map)))
+        return LinkedHashMap(jsonElementToJava(el).asStringMap() ?: emptyMap())
     }
 
     private fun jsonElementToJava(el: JsonElement): Any? = when (el) {
@@ -737,9 +740,9 @@ object RawConfigStore {
     }
 
     /**
-     * Convert a decrypted vault JSON object -> YAML so it can be re-parsed
-     * by [loadRaw] (SnakeYAML). No nested structure is lost. Shared by the
-     * sync layer and the vault-state resolution so tests exercise one path.
+     * Convert a decrypted vault JSON object -> YAML for the decrypt path.
+     * No nested structure is lost. Shared by the sync layer and the
+     * vault-state resolution so tests exercise one path.
      */
     fun yamlFromJson(configJson: String): String =
         dumpRaw(jsonToRaw(configJson))

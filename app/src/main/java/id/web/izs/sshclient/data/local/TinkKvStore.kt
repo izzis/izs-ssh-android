@@ -16,6 +16,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import id.web.izs.sshclient.core.perf.PerfProbe
 import java.io.File
 
 /**
@@ -127,7 +128,17 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
 
     @Synchronized
     override fun putString(key: String, value: String?) {
-        if (value == null) remove(key) else { cache[key] = envelope(TYPE_STRING, JsonPrimitive(value)); persist() }
+        if (value == null) {
+            remove(key)
+            return
+        }
+        // Skip the full reseal when the value is byte-identical: every
+        // saveYaml of unchanged content and every repeated pref write
+        // would otherwise re-encrypt ~1MB for zero new information.
+        val env = envelope(TYPE_STRING, JsonPrimitive(value))
+        if (cache[key] == env) return
+        cache[key] = env
+        persist()
     }
 
     @Synchronized
@@ -138,7 +149,10 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
 
     @Synchronized
     override fun putBoolean(key: String, value: Boolean) {
-        cache[key] = envelope(TYPE_BOOLEAN, JsonPrimitive(value)); persist()
+        val env = envelope(TYPE_BOOLEAN, JsonPrimitive(value))
+        if (cache[key] == env) return
+        cache[key] = env
+        persist()
     }
 
     @Synchronized
@@ -149,7 +163,10 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
 
     @Synchronized
     override fun putInt(key: String, value: Int) {
-        cache[key] = envelope(TYPE_INT, JsonPrimitive(value)); persist()
+        val env = envelope(TYPE_INT, JsonPrimitive(value))
+        if (cache[key] == env) return
+        cache[key] = env
+        persist()
     }
 
     @Synchronized
@@ -160,7 +177,10 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
 
     @Synchronized
     override fun putLong(key: String, value: Long) {
-        cache[key] = envelope(TYPE_LONG, JsonPrimitive(value)); persist()
+        val env = envelope(TYPE_LONG, JsonPrimitive(value))
+        if (cache[key] == env) return
+        cache[key] = env
+        persist()
     }
 
     @Synchronized
@@ -171,7 +191,10 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
 
     @Synchronized
     override fun putFloat(key: String, value: Float) {
-        cache[key] = envelope(TYPE_FLOAT, JsonPrimitive(value.toDouble())); persist()
+        val env = envelope(TYPE_FLOAT, JsonPrimitive(value.toDouble()))
+        if (cache[key] == env) return
+        cache[key] = env
+        persist()
     }
 
     @Synchronized
@@ -214,6 +237,11 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
 
     @Synchronized
     private fun applyBatch(puts: Map<String, String>, removals: Set<String>) {
+        // Same skip as the single putters: a batch that changes nothing
+        // (e.g. saveYaml of identical content) must not reseal the file.
+        val removesHit = removals.any { cache.containsKey(it) }
+        val putsHit = puts.any { (k, v) -> cache[k] != v }
+        if (!removesHit && !putsHit) return
         removals.forEach { cache.remove(it) }
         cache.putAll(puts)
         persist()
@@ -224,8 +252,19 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
     private fun envelope(type: String, value: JsonPrimitive): String =
         JsonObject(mapOf(KEY_TYPE to JsonPrimitive(type), KEY_VALUE to value)).toString()
 
-    private fun parseEnvelope(raw: String?): Envelope? = try {
-        val obj = (kotlinx.serialization.json.Json.parseToJsonElement(raw ?: return null) as? JsonObject)
+    private fun parseEnvelope(raw: String?): Envelope? {
+        if (raw == null) return null
+        // Fast path for big string values (400KB YAML): skip the generic
+        // kotlinx parser tree and unescape the "v" string directly.
+        // Falls back below on any shape mismatch. Output identical.
+        if (raw.length > 4096) {
+            fastStringEnvelope(raw)?.let { return it }
+        }
+        return parseEnvelopeGeneric(raw)
+    }
+
+    private fun parseEnvelopeGeneric(raw: String): Envelope? = try {
+        val obj = (kotlinx.serialization.json.Json.parseToJsonElement(raw) as? JsonObject)
             ?: return null
         val type = (obj[KEY_TYPE] as? JsonPrimitive)?.contentOrNull ?: return null
         val value = obj[KEY_VALUE] as? JsonPrimitive ?: return null
@@ -234,12 +273,106 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
         null
     }
 
+    /**
+     * Direct `{"t":"s","v":"..."}` decode without building a JsonElement
+     * tree. Only for string values (the big YAML/blob slots); anything
+     * else returns null so the generic parser handles it.
+     */
+    private fun fastStringEnvelope(raw: String): Envelope? = try {
+        val t = findJsonStringForKey(raw, KEY_TYPE) ?: return null
+        if (t != TYPE_STRING) return null
+        val v = findJsonStringForKey(raw, KEY_VALUE) ?: return null
+        Envelope(t, JsonPrimitive(v))
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Unescaped string content for `"key":"value"` (null when absent/malformed). */
+    private fun findJsonStringForKey(raw: String, key: String): String? {
+        val needle = "\"$key\""
+        var from = 0
+        while (true) {
+            val ki = raw.indexOf(needle, from)
+            if (ki < 0) return null
+            var i = ki + needle.length
+            while (i < raw.length && raw[i].isWhitespace()) i++
+            if (i >= raw.length || raw[i] != ':') {
+                from = ki + 1
+                continue
+            }
+            i++
+            while (i < raw.length && raw[i].isWhitespace()) i++
+            if (i >= raw.length || raw[i] != '"') {
+                from = ki + 1
+                continue
+            }
+            return unescapeJsonString(raw, i + 1)
+        }
+    }
+
+    /** Unescape from just after the opening quote; null on unterminated. */
+    private fun unescapeJsonString(raw: String, start: Int): String? {
+        // Slow path (escapes present) builds; fast path copies the slice.
+        var i = start
+        var esc = false
+        while (i < raw.length) {
+            val c = raw[i]
+            if (esc) esc = false
+            else if (c == '\\') esc = true
+            else if (c == '"') break
+            i++
+        }
+        if (i >= raw.length) return null
+        val end = i
+        // No backslash at all: plain slice, zero unescape work.
+        var hasBackslash = false
+        for (j in start until end) {
+            if (raw[j] == '\\') {
+                hasBackslash = true
+                break
+            }
+        }
+        if (!hasBackslash) return raw.substring(start, end)
+        val sb = StringBuilder(end - start)
+        var k = start
+        while (k < end) {
+            val c = raw[k]
+            if (c != '\\') {
+                sb.append(c)
+                k++
+                continue
+            }
+            k++
+            if (k >= end) return null
+            when (raw[k]) {
+                '"', '\\', '/' -> sb.append(raw[k])
+                'b' -> sb.append('\b')
+                'f' -> sb.append('\u000C')
+                'n' -> sb.append('\n')
+                'r' -> sb.append('\r')
+                't' -> sb.append('\t')
+                'u' -> {
+                    if (k + 4 >= end) return null
+                    val hex = raw.substring(k + 1, k + 5)
+                    sb.append(hex.toIntOrNull(16)?.toChar() ?: return null)
+                    k += 4
+                }
+                else -> return null
+            }
+            k++
+        }
+        return sb.toString()
+    }
+
     private fun load(): MutableMap<String, String> {
         if (!file.exists()) return mutableMapOf()
         return try {
-            val blob = kotlinx.serialization.json.Json.parseToJsonElement(
-                String(aead.decrypt(file.readBytes(), ASSOCIATED_DATA), Charsets.UTF_8),
-            ).jsonObject
+            val raw = PerfProbe.measure("tink.aead.decrypt") {
+                String(aead.decrypt(file.readBytes(), ASSOCIATED_DATA), Charsets.UTF_8)
+            }
+            val blob = PerfProbe.measure("tink.json.parse") {
+                kotlinx.serialization.json.Json.parseToJsonElement(raw)
+            }.jsonObject
             LinkedHashMap<String, String>().also { m ->
                 blob.keys.forEach { k -> m[k] = blob.getValue(k).toString() }
             }
@@ -254,15 +387,39 @@ internal class TinkKvStore(private val aead: Aead, private val file: File) : KvB
     }
 
     private fun persist() {
-        val blob = JsonObject(cache.mapValues { (_, v) ->
-            kotlinx.serialization.json.Json.parseToJsonElement(v)
-        }).toString()
-        val bytes = aead.encrypt(blob.toByteArray(Charsets.UTF_8), ASSOCIATED_DATA)
-        file.parentFile?.mkdirs()
-        val tmp = File(file.parent, "${file.name}.tmp")
-        tmp.writeBytes(bytes)
-        if (!tmp.renameTo(file)) {
-            file.writeBytes(bytes)
+        // Same bytes-semantics as JsonObject(mapValues{parse(v)}): the
+        // envelopes in cache are already valid JSON, so embed them
+        // directly instead of parse-then-reserialize (saves two full
+        // 400KB+ JSON passes per save). Keys are re-escaped like
+        // JsonObject does; entry order (LinkedHashMap) is preserved.
+        val blob = PerfProbe.measure("tink.json.build") {
+            buildString {
+                // Rough pre-size: sum of envelope lengths + key overhead.
+                var size = 2
+                for ((k, v) in cache) size += k.length + v.length + 8
+                ensureCapacity(size)
+                append('{')
+                var first = true
+                for ((k, v) in cache) {
+                    if (!first) append(',')
+                    first = false
+                    append(JsonPrimitive(k).toString())
+                    append(':')
+                    append(v)
+                }
+                append('}')
+            }
+        }
+        val bytes = PerfProbe.measure("tink.aead.encrypt") {
+            aead.encrypt(blob.toByteArray(Charsets.UTF_8), ASSOCIATED_DATA)
+        }
+        PerfProbe.measure("tink.file.write") {
+            file.parentFile?.mkdirs()
+            val tmp = File(file.parent, "${file.name}.tmp")
+            tmp.writeBytes(bytes)
+            if (!tmp.renameTo(file)) {
+                file.writeBytes(bytes)
+            }
         }
     }
 

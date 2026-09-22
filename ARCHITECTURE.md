@@ -17,7 +17,9 @@ Tabby terminal `config.service.ts` / `vault.service.ts`
    from RAW so unknown/future keys survive round-trips byte-identical.
 2. **Secrets never touch disk.** The vault passphrase lives in RAM only
    (`VaultState`, inside `AppState`, inside `AppViewModel`). It is asked
-   lazily — only when vault content is actually needed.
+   lazily — only when vault content is actually needed. Derived PBKDF2
+   keys are likewise RAM-only (bounded LRU in `VaultCrypto`, cleared on
+   vault lock/erase) — a decrypt fast path, never persisted.
 
 ## 2. Module map
 
@@ -162,7 +164,13 @@ app/src/main/java/id/web/izs/sshclient/
                           upsert/delete customs, YAML compat (pure JVM)
       TerminalAppearance.kt terminal.font/cursor/cursorBlink keys (pure JVM)
     vault/
-      VaultCrypto.kt      PBKDF2-HmacSHA512 x100k/salt8 -> AES-256-CBC/iv16 (pure JVM)
+      VaultCrypto.kt      PBKDF2-HmacSHA512 x100k/salt8 -> AES-256-CBC/iv16 (pure JVM;
+                          RAM-only LRU of derived keys + blob-identity payload
+                          cache (passphrase-bound, 2 entries) as decrypt fast
+                          paths, cleared on lock — wrong passphrase/tampered
+                          blob never hits; every encrypt still mints fresh
+                          salt/iv per desktop parity, so encrypt-side PBKDF2
+                          is never cached)
       VaultState.kt       Pure resolve/unlock-required logic + secret CRUD ops
       SecretResolver.kt   vault:// URIs -> passwords / key passphrases / PEM files
     sync/
@@ -211,7 +219,11 @@ app/src/main/java/id/web/izs/sshclient/
   data/local/
     TinkKvStore.kt        Encrypted KV backend (Tink AES256-GCM, Keystore-backed
                            keyset; batched single sealed write, corrupt-blob
-                           quarantine) + unencrypted fallback
+                           quarantine) + unencrypted fallback. Persist embeds
+                           the already-valid envelope JSON directly (no
+                           parse/reserialize round-trip) and big string slots
+                           decode via a direct unescape fast path — same
+                           bytes-semantics, no format change
     ConfigDisk.kt         TinkKvStore (Tink AES256-GCM whole-blob, backend pinned once per
                            process; secret writes refused when encryption is
                            unavailable): sync behavior prefs (auto/parts/stamp),
@@ -227,7 +239,7 @@ app/src/main/java/id/web/izs/sshclient/
                             deleted on first boot (one-time alpha reset).
     CrashLog.kt           Debug-only uncaught-exception recorder -> CrashReportScreen
 
-app/src/test/... (45 files, 362 tests — §8)
+app/src/test/... (46 files, 379 tests — §8)
 ```
 
 ## 3. Boot & navigation
@@ -252,7 +264,13 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
 - **Decrypt only when needed** (`maybeDecryptConfig` parity): boot list,
   upload, and metadata never decrypt. The passphrase is requested for:
   showing a vault password, editing a secret-backed field, first connect
-  needing a secret, deleting a shell-encrypted profile.
+  needing a secret, deleting a shell-encrypted profile. Repeated decrypts
+  of the same blob reuse the cached PBKDF2 key (RAM-only); every encrypted
+  save still re-encrypts with a fresh salt/iv exactly like desktop, so one
+  save costs 1x PBKDF2 + one full Tink reseal of the whole store. Vault JSON
+  converts straight to the raw map (no YAML round-trip, so exotic scalars
+  never drift type); post-write screens adopt the returned state instead of
+  reloading.
 - **Blob rule (desktop truth):** a stored blob is ALWAYS a container of
   secrets regardless of the profile's `encrypted` flag; the flag only
   describes the file shape (shell-encrypted vs full document + inline blob).
@@ -523,7 +541,7 @@ the IME:
 
 ## 8. Testing
 
-`./gradlew :app:testDebugUnitTest` — 362 tests, 0 failures (pure JVM, no device):
+`./gradlew :app:testDebugUnitTest` — 379 tests, 0 failures (pure JVM, no device):
 
 | File | Covers |
 |---|---|

@@ -322,7 +322,7 @@ fun ProfileEditScreen(
             msg = null
             try {
                 if (isNew || isCopy) {
-                    state.repo.createProfile(
+                    val loaded = state.repo.createProfile(
                         profile = SshProfile(
                             id = "",
                             name = name.ifBlank { "New profile" },
@@ -334,6 +334,11 @@ fun ProfileEditScreen(
                         groupName = groups.find { it.id == groupId }?.name,
                         secretEdits = secrets,
                     )
+                    // Adopt the just-written state instead of a full reload:
+                    // the write fns already resolved it from the written doc
+                    // (AppState.adopt contract — same pattern as the color
+                    // scheme and sync screens).
+                    state.adopt(loaded) { onBack() }
                 } else {
                     val orig = original!!
                     val port = portText.toIntOrNull()?.takeIf { it in 1..65535 } ?: orig.options.port
@@ -349,16 +354,18 @@ fun ProfileEditScreen(
                             user = user.trim(),
                         ),
                     )
-                    state.repo.updateProfile(
-                        profileId = profileId,
-                        original = orig,
-                        updated = updated,
-                        newGroupId = groupId.ifBlank { "" }.takeIf { it != (orig.group ?: "") },
-                        newGroupName = groups.find { it.id == groupId }?.name,
-                        secretEdits = secrets,
-                    )
+                    val groupArg = groupId.ifBlank { "" }.takeIf { it != (orig.group ?: "") }
+                    state.adopt(
+                        state.repo.updateProfile(
+                            profileId = profileId,
+                            original = orig,
+                            updated = updated,
+                            newGroupId = groupArg,
+                            newGroupName = groups.find { it.id == groupId }?.name,
+                            secretEdits = secrets,
+                        ),
+                    ) { onBack() }
                 }
-                state.refresh { onBack() }
             } catch (e: IllegalStateException) {
                 // Lazy unlock: the save actually needs vault contents.
                 if ((e.message ?: "").contains("locked", ignoreCase = true)) {
@@ -381,8 +388,7 @@ fun ProfileEditScreen(
             msg = null
             try {
                 val id = java.util.UUID.randomUUID().toString()
-                state.repo.createGroup(id, name.trim())
-                state.refresh { groupId = id }
+                state.adopt(state.repo.createGroup(id, name.trim())) { groupId = id }
             } catch (e: IllegalStateException) {
                 // Encrypted shell: re-encrypting needs the passphrase.
                 if ((e.message ?: "").contains("locked", ignoreCase = true)) {
@@ -405,8 +411,7 @@ fun ProfileEditScreen(
             busy = true
             msg = null
             try {
-                state.repo.deleteProfile(profileId, original!!)
-                state.refresh { onBack() }
+                state.adopt(state.repo.deleteProfile(profileId, original!!)) { onBack() }
             } catch (e: IllegalStateException) {
                 // Lazy unlock: re-encrypting the shell needs the passphrase.
                 if ((e.message ?: "").contains("locked", ignoreCase = true)) {

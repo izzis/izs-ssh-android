@@ -147,4 +147,41 @@ class RawRoundTripTest {
         assertFalse(rawOpts.containsKey("port"))
         assertFalse(rawOpts.containsKey("user"))
     }
+
+    /**
+     * Vault payload round-trip fidelity: re-serializing an untouched
+     * decrypted blob config must reproduce the exact payload JSON.
+     */
+    @Test
+    fun `untouched blob config re-serializes byte-identical`() {
+        val doc = RawConfigStore.loadRaw(desktopYaml)
+        // Simulate the vault payload: the blob config is the doc minus
+        // vault/encrypted/configSync, exactly like encryptSource.
+        val blobConfig = LinkedHashMap<String, Any?>(doc)
+        blobConfig.remove(RawConfigStore.KEY_VAULT)
+        blobConfig.remove(RawConfigStore.KEY_ENCRYPTED)
+        blobConfig.remove(RawConfigStore.KEY_CONFIG_SYNC)
+        val configJson = RawConfigStore.toJson(blobConfig)
+        val reparsed = RawConfigStore.loadRaw(RawConfigStore.yamlFromJson(configJson))
+        assertEquals(configJson, RawConfigStore.toJson(reparsed))
+    }
+
+    /**
+     * `jsonToRaw` converts directly (no YAML round-trip): scalars that
+     * SnakeYAML would coerce (YAML-1.1 bools, dates, leading-zero numbers)
+     * must survive byte-identical.
+     */
+    @Test
+    fun `tricky scalars survive jsonToRaw byte-identical`() {
+        val configJson = """{"version":8,"profiles":[{"id":"ssh:1","type":"ssh","name":"on","options":{"host":"2024-01-01","port":22,"user":"0123","password":"yes","keepaliveInterval":5000,"ratio":0.5,"big":9223372036854775807,"nothing":null,"flag":true,"multi":"line1\nline2","uni":"tëst🔑"}}],"groups":[]}"""
+        val reparsed = RawConfigStore.jsonToRaw(configJson)
+        assertEquals(configJson, RawConfigStore.toJson(reparsed))
+        // Spot-check the types came through as JSON types, not YAML-coerced.
+        val opts = (((reparsed["profiles"] as List<*>)[0] as Map<*, *>)["options"] as Map<*, *>)
+        assertEquals("yes", opts["password"])
+        assertEquals("0123", opts["user"])
+        assertEquals(22, (opts["port"] as Number).toInt())
+        assertEquals(0.5, (opts["ratio"] as Number).toDouble(), 0.0)
+        assertNull(opts["nothing"])
+    }
 }
