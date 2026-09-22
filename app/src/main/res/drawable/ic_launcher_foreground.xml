@@ -3,18 +3,27 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Simple terminal prompt: green ">_" centered in the safe zone. -->
+    <!-- Terminal window + ">_" prompt (Lucide "terminal" glyph,
+         ISC-licensed): white strokes, centered in the adaptive-icon
+         safe zone. -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M40,38 L58,54 L40,70"
-        android:strokeWidth="9"
+        android:pathData="M41,38 H67 A6,6 0 0 1 73,44 V64 A6,6 0 0 1 67,70 H41 A6,6 0 0 1 35,64 V44 A6,6 0 0 1 41,38 Z"
+        android:strokeWidth="5"
         android:strokeColor="@color/ic_launcher_glyph"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
     <path
         android:fillColor="#00000000"
-        android:pathData="M38,80 H70"
-        android:strokeWidth="9"
+        android:pathData="M44,49 L49,54 L44,59"
+        android:strokeWidth="5"
+        android:strokeColor="@color/ic_launcher_glyph"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,59 H60"
+        android:strokeWidth="5"
         android:strokeColor="@color/ic_launcher_glyph"
         android:strokeLineCap="round" />
 </vector>
