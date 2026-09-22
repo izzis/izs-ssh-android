@@ -5,22 +5,34 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,10 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SheetState
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,8 +54,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import id.web.izs.sshclient.core.ssh.SftpTransfer
 import id.web.izs.sshclient.core.ssh.SftpTransferManager
@@ -65,8 +75,14 @@ import net.schmizz.sshj.SSHClient
  * [SftpTransferManager] and keep running in the background. Only the
  * per-item Cancel aborts one transfer, and only session
  * disconnect/close aborts them all.
+ *
+ * Windowing lives in [AnchoredSheet] (shared with the New-tab picker):
+ * the header below (title + directory navigation) is the drag-handle
+ * zone, the file list scrolls first and only edge leftover moves the
+ * sheet half <-> full <-> hidden — so a drag down past the top of the
+ * list collapses full -> half -> away instead of fighting the scroll.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SftpSheet(
     sessionViewModel: SshSessionViewModel,
@@ -75,22 +91,6 @@ fun SftpSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Open at half by POSITION, not content size: SheetState starts at the
-    // partial anchor, so a long file list does not push the sheet to full
-    // on open — and full stays reachable by drag (the list is unbounded).
-    // (rememberModalBottomSheetState in this BOM has no initialValue, and
-    // capping the list instead would remove the full anchor entirely.)
-    val density = LocalDensity.current
-    val sheetState = remember(density) {
-        with(density) {
-            SheetState(
-                skipPartiallyExpanded = false,
-                positionalThreshold = { 56.dp.toPx() },
-                velocityThreshold = { 125.dp.toPx() },
-                initialValue = SheetValue.PartiallyExpanded,
-            )
-        }
-    }
     val handle = remember(sessionId) { sessionViewModel.get(sessionId) }
     // Session-owned: survives this sheet, tab switches, and rotation.
     val manager = remember(sessionId) { sessionViewModel.sftpOf(sessionId) }
@@ -101,6 +101,14 @@ fun SftpSheet(
     var listing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var info by remember { mutableStateOf<String?>(null) }
+    // Desktop sftpPanel parity: filter box hidden until the header
+    // button shows it; the X (or the button again) hides + clears.
+    var showFilter by remember { mutableStateOf(false) }
+    var filterText by remember { mutableStateOf("") }
+    fun clearFilter() {
+        showFilter = false
+        filterText = ""
+    }
     // Download handshake: a finished download's cache file is taken from
     // the (session-scoped) manager for the Save-as picker. Terminal
     // non-DONE rows take nothing (the manager already deleted their
@@ -165,7 +173,11 @@ fun SftpSheet(
             listing = false
         }
     }
-    LaunchedEffect(sessionId, dir) { reload() }
+    LaunchedEffect(sessionId, dir) {
+        // Desktop parity: navigating clears the filter.
+        clearFilter()
+        reload()
+    }
 
     // Settle handshake: DONE downloads go to the Save-as picker, finished
     // uploads refresh the listing. Runs on every list change; each id is
@@ -261,129 +273,246 @@ fun SftpSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                "SFTP: ${handle?.profileSnapshot?.name ?: "session"}",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            if (handle == null) {
-                Text("This session is closed.", color = MaterialTheme.colorScheme.error)
-                return@Column
-            }
-            val hasShell by handle.hasShell.collectAsState()
-            if (!hasShell) {
+    if (handle == null) {
+        AnchoredSheet(
+            onDismiss = onDismiss,
+            handle = {
                 Text(
-                    "Not connected. Connect the session to use SFTP.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
+                    "SFTP",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
-            }
-            // Active + finished transfers: rows survive dismiss/back (the
-            // manager owns them); Cancel aborts one, disconnect aborts all.
-            if (transfers.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    for (t in transfers) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(
-                                if (t.direction == SftpTransferManager.Direction.DOWNLOAD) {
-                                    Icons.Filled.Download
-                                } else {
-                                    Icons.Filled.Upload
-                                },
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(t.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                val label = when (t.status) {
-                                    SftpTransferManager.Status.RUNNING ->
-                                        "${formatSize(t.done)}${if (t.total > 0) " / ${formatSize(t.total)}" else ""}"
-                                    SftpTransferManager.Status.DONE -> "Done"
-                                    SftpTransferManager.Status.FAILED -> t.error ?: "Failed"
-                                    SftpTransferManager.Status.CANCELLED -> "Canceled"
-                                }
-                                Text(
-                                    label,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (t.status == SftpTransferManager.Status.FAILED) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                                if (t.status == SftpTransferManager.Status.RUNNING) {
-                                    if (t.total > 0) LinearProgressIndicator(
-                                        progress = { t.done.toFloat() / t.total.toFloat() },
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                                }
-                            }
-                            if (t.status == SftpTransferManager.Status.RUNNING) {
-                                TextButton(onClick = { manager.cancel(t.id) }) { Text("Cancel") }
-                            }
-                        }
-                    }
-                    if (transfers.any { it.status != SftpTransferManager.Status.RUNNING }) {
-                        TextButton(
-                            onClick = { manager.clearFinished() },
-                            modifier = Modifier.align(Alignment.End),
-                        ) { Text("Clear completed transfers") }
-                    }
+            },
+        ) {
+            Text("This session is closed.", color = MaterialTheme.colorScheme.error)
+        }
+        return
+    }
+    val hasShell by handle.hasShell.collectAsState()
+
+    AnchoredSheet(
+        onDismiss = onDismiss,
+        handle = {
+            // Title + filter toggle share one row (filter at the right,
+            // desktop sftpPanel header parity). The box below appears in
+            // the handle zone, so it never scrolls away.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text(
+                    "SFTP: ${handle.profileSnapshot.name}",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                )
+                IconButton(onClick = { if (showFilter) clearFilter() else showFilter = true }) {
+                    Icon(
+                        Icons.Filled.FilterList,
+                        contentDescription = if (showFilter) "Hide filter" else "Show filter",
+                        tint = if (showFilter) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (showFilter) {
+                // Compact custom box (46dp): OutlinedTextField enforces
+                // a 56dp min height, so shrinking it clips the text —
+                // here every size is ours, nothing to clip. Border
+                // follows focus like the M3 field; the X always shows
+                // (desktop filter-bar parity) and hides + clears.
+                val filterInteraction = remember { MutableInteractionSource() }
+                val filterFocused by filterInteraction.collectIsFocusedAsState()
+                BasicTextField(
+                    value = filterText,
+                    onValueChange = { filterText = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    interactionSource = filterInteraction,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(46.dp)
+                        .border(
+                            if (filterFocused) 2.dp else 1.dp,
+                            if (filterFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            RoundedCornerShape(4.dp),
+                        )
+                        .padding(horizontal = 12.dp),
+                    decorationBox = { inner ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            Box(Modifier.weight(1f)) {
+                                if (filterText.isEmpty()) {
+                                    Text(
+                                        "Filter...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
+                                }
+                                inner()
+                            }
+                            IconButton(
+                                onClick = { clearFilter() },
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Clear filter",
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    },
+                )
+            }
+            // Directory navigation lives in the handle zone (like the
+            // New-tab search): always visible, never scrolls away, and
+            // its touches never fight the file list.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 val parent = parentDir(dir)
                 IconButton(enabled = parent != null && !listing && hasShell, onClick = { dir = parent!! }) {
                     Icon(Icons.Filled.ArrowUpward, contentDescription = "Up one directory")
                 }
-                Text(
-                    dir,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                )
+                // Breadcrumb-style wrap (desktop sftpPanel parity): one
+                // chunk per segment, chunks after the first start with
+                // "/", so the FlowRow only breaks between segments and
+                // every continuation line starts with "/".
+                FlowRow(modifier = Modifier.weight(1f)) {
+                    for (chunk in pathChunks(dir)) {
+                        Text(
+                            chunk,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 IconButton(enabled = hasShell, onClick = { uploadPicker.launch("*/*") }) {
                     Icon(Icons.Filled.Upload, contentDescription = "Upload file")
                 }
             }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            info?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-            if (listing && entries == null) CircularProgressIndicator()
-            Card(
-                // Fill the sheet height from the first frame: with the list
-                // taking all remaining space, content height never changes
-                // when entries/transfers land — so the sheet opens at half
-                // (initialValue) and STAYS there, no balloon-then-settle.
-                // Full stays reachable by drag; the list scrolls inside.
-                modifier = Modifier.fillMaxWidth().weight(1f),
-            ) {
-                val list = entries
-                when {
-                    list == null -> Text(
-                        "Loading...",
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    list.isEmpty() -> Text(
-                        "Empty directory",
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    else -> LazyColumn {
-                        items(list, key = { (if (it.isDirectory) "d:" else "f:") + it.name }) { e ->
+        },
+    ) {
+        if (!hasShell) {
+            Text(
+                "Not connected. Connect the session to use SFTP.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        // Active + finished transfers: rows survive dismiss/back (the
+        // manager owns them); Cancel aborts one, disconnect aborts all.
+        if (transfers.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (t in transfers) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            if (t.direction == SftpTransferManager.Direction.DOWNLOAD) {
+                                Icons.Filled.Download
+                            } else {
+                                Icons.Filled.Upload
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(t.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                            val label = when (t.status) {
+                                SftpTransferManager.Status.RUNNING ->
+                                    "${formatSize(t.done)}${if (t.total > 0) " / ${formatSize(t.total)}" else ""}"
+                                SftpTransferManager.Status.DONE -> "Done"
+                                SftpTransferManager.Status.FAILED -> t.error ?: "Failed"
+                                SftpTransferManager.Status.CANCELLED -> "Canceled"
+                            }
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (t.status == SftpTransferManager.Status.FAILED) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            if (t.status == SftpTransferManager.Status.RUNNING) {
+                                if (t.total > 0) LinearProgressIndicator(
+                                    progress = { t.done.toFloat() / t.total.toFloat() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                        if (t.status == SftpTransferManager.Status.RUNNING) {
+                            TextButton(onClick = { manager.cancel(t.id) }) { Text("Cancel") }
+                        }
+                    }
+                }
+                if (transfers.any { it.status != SftpTransferManager.Status.RUNNING }) {
+                    TextButton(
+                        onClick = { manager.clearFinished() },
+                        modifier = Modifier.align(Alignment.End),
+                    ) { Text("Clear completed transfers") }
+                }
+            }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        info?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        if (listing && entries == null) CircularProgressIndicator()
+        Card(
+            // The list takes all remaining space, so content height never
+            // changes when entries/transfers land — the sheet opens at
+            // half and STAYS there, no balloon-then-settle. Full stays
+            // reachable by drag; the list scrolls inside, and a drag
+            // down past its top collapses the sheet instead.
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) {
+            // Desktop parity: blank filter (or hidden box) shows all;
+            // otherwise a case-insensitive name match.
+            val filtering = showFilter && filterText.isNotBlank()
+            val list = entries
+            val visible = if (!filtering) list else list?.filter { it.name.contains(filterText, ignoreCase = true) }
+            if (visible == null) {
+                Text(
+                    "Loading...",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                // Always a full-size list — even for the empty note. A
+                // plain Text leaves a dead zone: touches there dispatch
+                // no nested scroll, so a collapse-drag on the empty area
+                // dies silently. The LazyColumn fills the card, so every
+                // finger position scrolls first and collapses at the edge.
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    if (visible.isEmpty()) {
+                        item(key = "empty") {
+                            Text(
+                                if (filtering) {
+                                    "No files match the filter \"$filterText\""
+                                } else {
+                                    "Empty directory"
+                                },
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    } else {
+                        items(visible, key = { (if (it.isDirectory) "d:" else "f:") + it.name }) { e ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -417,59 +546,69 @@ fun SftpSheet(
                 }
             }
         }
-        // Same-name choice: Overwrite (replace the server file), Keep both
-        // (upload as "name (1).ext"), or Cancel (drop the staged copy).
-        // The stored dir (not the current one) wins: the dialog may outlive
-        // a navigation.
-        overwriteAsk?.let { ask ->
-            val (staged, name, dirAtPick, client) = ask
-            AlertDialog(
-                onDismissRequest = {
-                    staged.delete()
-                    overwriteAsk = null
-                },
-                title = { Text("File exists") },
-                text = { Text("\"$name\" already exists in this folder.") },
-                confirmButton = {
-                    Column(
+    }
+    // Same-name choice: Overwrite (replace the server file), Keep both
+    // (upload as "name (1).ext"), or Cancel (drop the staged copy).
+    // The stored dir (not the current one) wins: the dialog may outlive
+    // a navigation.
+    overwriteAsk?.let { ask ->
+        val (staged, name, dirAtPick, client) = ask
+        AlertDialog(
+            onDismissRequest = {
+                staged.delete()
+                overwriteAsk = null
+            },
+            title = { Text("File exists") },
+            text = { Text("\"$name\" already exists in this folder.") },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            overwriteAsk = null
+                            beginUpload(client, staged, dirAtPick, name)
+                        },
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            onClick = {
-                                overwriteAsk = null
-                                beginUpload(client, staged, dirAtPick, name)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Overwrite") }
-                        OutlinedButton(
-                            onClick = {
-                                val taken = entries
-                                    ?.filter { !it.isDirectory }
-                                    ?.map { it.name }
-                                    ?.toSet() ?: emptySet()
-                                val free = freeName(name, taken)
-                                overwriteAsk = null
-                                beginUpload(client, staged, dirAtPick, free)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Keep both") }
-                        TextButton(
-                            onClick = {
-                                staged.delete()
-                                overwriteAsk = null
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Cancel") }
-                    }
-                },
-                dismissButton = null,
-            )
-        }
+                    ) { Text("Overwrite") }
+                    OutlinedButton(
+                        onClick = {
+                            val taken = entries
+                                ?.filter { !it.isDirectory }
+                                ?.map { it.name }
+                                ?.toSet() ?: emptySet()
+                            val free = freeName(name, taken)
+                            overwriteAsk = null
+                            beginUpload(client, staged, dirAtPick, free)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Keep both") }
+                    TextButton(
+                        onClick = {
+                            staged.delete()
+                            overwriteAsk = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Cancel") }
+                }
+            },
+            dismissButton = null,
+        )
     }
 }
 
 private fun joinDir(dir: String, name: String): String = if (dir == ".") name else "$dir/$name"
+
+/**
+ * Wrap-friendly chunks: ["."] or ["seg", "/seg", …]. Only the joints
+ * between chunks may break, so every wrapped line starts with "/".
+ */
+private fun pathChunks(dir: String): List<String> {
+    if (dir == ".") return listOf(".")
+    val parts = dir.split('/')
+    return parts.mapIndexed { i, p -> if (i == 0) p else "/$p" }
+}
 
 /** Upload waiting on the same-name choice (dir frozen at pick time). */
 private data class PendingUpload(
