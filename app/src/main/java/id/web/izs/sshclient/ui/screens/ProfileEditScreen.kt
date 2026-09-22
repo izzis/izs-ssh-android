@@ -1397,8 +1397,10 @@ private fun GroupDropdown(
     onNewGroup: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    // Desktop parity (editProfileModal.component.pug: placeholder
+    // 'Ungrouped'): no group reads "Ungrouped", not "No group".
     val label = when {
-        selected.isBlank() -> "No group"
+        selected.isBlank() -> "Ungrouped"
         else -> groups.find { it.id == selected }?.name ?: selected
     }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
@@ -1410,7 +1412,7 @@ private fun GroupDropdown(
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("No group") },
+                text = { Text("Ungrouped") },
                 onClick = { onSelect(""); expanded = false },
             )
             for (g in groups) {

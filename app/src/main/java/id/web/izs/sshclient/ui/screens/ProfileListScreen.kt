@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -297,16 +298,23 @@ fun ProfileListScreen(
     }
     val hiddenSorted = remember(hiddenFiltered) { hiddenFiltered.sortedBy { it.name.lowercase() } }
     val (roots, ungrouped) = remember(visibleProfiles, groups) { buildTree(groups, visibleProfiles) }
+    val ungroupedSorted = remember(ungrouped) { ungrouped.sortedBy { it.name.lowercase() } }
+    // Desktop profileTree parity (profileTree.component.ts: the ungrouped
+    // sort pins id 'ungrouped' first): profiles without a group live in an
+    // "Ungrouped" folder at the TOP, rendered through the same folder path
+    // (sticky header + expand/collapse + count). Shown only when non-empty;
+    // never manageable (desktop editable:false).
+    val allRoots = remember(roots, ungroupedSorted) { withUngrouped(roots, ungroupedSorted) }
     // Per top-level folder: flattened child rows (subfolders + profiles),
     // empty when collapsed (only the sticky folder bar stays visible).
     // While searching the same shape is built over the filtered matches
     // with everything force-expanded, so matches are never hidden inside
     // a collapsed folder; groups without matches are skipped at render.
-    val sections = remember(roots, expanded) { buildSections(roots, expanded, forceExpand = false) }
-    val ungroupedSorted = remember(ungrouped) { ungrouped.sortedBy { it.name.lowercase() } }
+    val sections = remember(allRoots, expanded) { buildSections(allRoots, expanded, forceExpand = false) }
     val (fRoots, fUngrouped) = remember(groups, filtered) { buildTree(groups, filtered) }
-    val fSections = remember(fRoots, expanded) { buildSections(fRoots, expanded, forceExpand = true) }
     val fUngroupedSorted = remember(fUngrouped) { fUngrouped.sortedBy { it.name.lowercase() } }
+    val fAllRoots = remember(fRoots, fUngroupedSorted) { withUngrouped(fRoots, fUngroupedSorted) }
+    val fSections = remember(fAllRoots, expanded) { buildSections(fAllRoots, expanded, forceExpand = true) }
 
     // Recent profiles (desktop start-page parity): N most-recently launched,
     // N = terminal.showRecentProfiles (0 hides). Ids resolve against the
@@ -512,25 +520,11 @@ fun ProfileListScreen(
                 },
                 onOpen = onOpen,
                 onEdit = onEdit,
-                onManageGroup = { openManage(it) },
+                onManageGroup = { if (it.group.id != UNGROUPED_ID) openManage(it) },
                 onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
                 onToggleHide = { p, hide -> doToggleHide(p, hide) },
                 onDeleteProfile = { confirmDeleteProfile = it },
             )
-            itemsIndexed(ungroupedSorted, key = { _, it -> it.id }) { index, p ->
-                ProfileCard(
-                    profile = p,
-                    depth = 0,
-                    hidden = false,
-                    askUsername = state.isAskUsername(p.id),
-                    onOpen = onOpen,
-                    onEdit = onEdit,
-                    onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
-                    onToggleHide = { p, hide -> doToggleHide(p, hide) },
-                    onDeleteProfile = { confirmDeleteProfile = it },
-                    showDivider = index > 0,
-                )
-            }
         } else {
             groupSections(
                 sections = fSections.filter { it.second.isNotEmpty() },
@@ -543,26 +537,12 @@ fun ProfileListScreen(
                 },
                 onOpen = onOpen,
                 onEdit = onEdit,
-                onManageGroup = { openManage(it) },
+                onManageGroup = { if (it.group.id != UNGROUPED_ID) openManage(it) },
                 onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
                 onToggleHide = { p, hide -> doToggleHide(p, hide) },
                 onDeleteProfile = { confirmDeleteProfile = it },
             )
-            itemsIndexed(fUngroupedSorted, key = { _, it -> it.id }) { index, p ->
-                ProfileCard(
-                    profile = p,
-                    depth = 0,
-                    hidden = false,
-                    askUsername = state.isAskUsername(p.id),
-                    onOpen = onOpen,
-                    onEdit = onEdit,
-                    onDuplicate = { onEdit(PROFILE_COPY_PREFIX + it.id) },
-                    onToggleHide = { p, hide -> doToggleHide(p, hide) },
-                    onDeleteProfile = { confirmDeleteProfile = it },
-                    showDivider = index > 0,
-                )
-            }
-            if (fSections.all { it.second.isEmpty() } && fUngroupedSorted.isEmpty()) {
+            if (fSections.all { it.second.isEmpty() }) {
                 item(key = "no-match") {
                     Text(
                         "No profiles match \"$query\".",
@@ -824,6 +804,17 @@ private sealed interface HomeRow {
     }
 }
 
+/** Desktop profileTree parity: synthetic folder id for ungrouped profiles (always sorts first). */
+private const val UNGROUPED_ID = "ungrouped"
+
+/** Prepend the synthetic Ungrouped folder when it has profiles; otherwise the roots pass through. */
+private fun withUngrouped(
+    roots: List<GroupNode>,
+    ungrouped: List<SshProfile>,
+): List<GroupNode> =
+    if (ungrouped.isEmpty()) roots
+    else listOf(GroupNode(ProfileGroup(id = UNGROUPED_ID, name = "Ungrouped"), ungrouped, emptyList())) + roots
+
 /** Forest of top-level folders + ungrouped profiles. Unknown/blank/cyclic parents fall back to root. */
 private fun buildTree(
     groups: List<ProfileGroup>,
@@ -913,6 +904,9 @@ private fun LazyListScope.groupSections(
                 node = root,
                 depth = 0,
                 collapsed = isCollapsed,
+                // Desktop parity (editable:false): the synthetic Ungrouped
+                // folder can't be renamed or deleted, so no pencil.
+                showManage = id != UNGROUPED_ID,
                 onToggle = { onToggle(id, isCollapsed) },
                 onManage = { onManageGroup(root) },
             )
@@ -926,6 +920,9 @@ private fun LazyListScope.groupSections(
                         node = row.node,
                         depth = row.depth,
                         collapsed = cCollapsed,
+                        // Child folders are always real groups (the synthetic
+                        // Ungrouped node has no children); kept explicit.
+                        showManage = cid != UNGROUPED_ID,
                         onToggle = { onToggle(cid, cCollapsed) },
                         onManage = { onManageGroup(row.node) },
                     )
@@ -1117,18 +1114,25 @@ private fun FolderRow(
     collapsed: Boolean,
     onToggle: () -> Unit,
     onManage: () -> Unit,
+    showManage: Boolean = true,
 ) {
     // Same container as M3 Card default (surfaceContainerLow): headers
     // and status cards share one ramp — role reads from shape (full-width
     // bar), typography, icon and sticky behavior, not from tint.
+    // Fixed min height (40.dp action + 8.dp padding): without the pencil
+    // (Ungrouped folder) the bar must not collapse shorter than the rest.
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .padding(start = (depth * 16).dp),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         onClick = onToggle,
     ) {
+        // Fixed slot for the manage action on every row: the Ungrouped
+        // folder keeps an empty 40.dp spacer where the pencil would be, so
+        // its count aligns exactly with the folders below it.
         Row(
             Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1154,14 +1158,20 @@ private fun FolderRow(
             )
             // Desktop parity: folder actions are hover-revealed there (no
             // hover on touch), so the pencil stays low-emphasis instead of
-            // a full primary-colour button.
-            IconButton(onClick = onManage, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    Icons.Filled.Edit,
-                    contentDescription = "Rename or delete group",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
+            // a full primary-colour button. Hidden for the synthetic
+            // Ungrouped folder (desktop editable:false) — but its slot
+            // stays, keeping the count aligned with every other folder.
+            if (showManage) {
+                IconButton(onClick = onManage, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "Rename or delete group",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            } else {
+                Spacer(Modifier.size(40.dp))
             }
         }
     }
