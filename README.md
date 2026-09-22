@@ -21,18 +21,19 @@ Release flow: [RELEASE.md](RELEASE.md).
 
 - **Tabby Sync import** — host + token setup, download/upload with lossless
   RAW round-trip, foreground auto-sync every 60s (opt-in).
-- **Vault** — desktop-interop encryption (PBKDF2 + AES-256-CBC), lazy unlock,
+- **Vault** — Tabby-interop encryption (PBKDF2 + AES-256-CBC), lazy unlock,
   RAM-only, never written to disk.
 - **Profiles** — search, groups, tabbed editor (connection incl. SOCKS
   proxy, ports, ciphers, login scripts), live RAW `config.yaml` viewer.
 - **Terminal** — real PTY shell (sshj), xterm subset, alt-buffer, scrollback,
   text selection, host-key trust prompts, password + multi-key auth.
 - **Multi-session tabs** — one tab per tap, transport sharing via
-  `reuseSession`, desktop `tabsLocation` parity (strip / side drawer).
+  `reuseSession`, Tabby `tabsLocation` parity (strip / side drawer).
 - **SFTP browser** — download/upload over the session's own transport,
-  transfers survive sheet dismiss and tab switches.
-- **Port forwarding** — Local/Remote rules open at connect (desktop parity);
-  Dynamic (SOCKS) stays desktop-only with a clear message.
+  transfers survive sheet dismiss and tab switches; Tabby-parity
+  filter, long-press copies the full path.
+- **Port forwarding** — Local/Remote rules open at connect (Tabby parity);
+  Dynamic (SOCKS) stays Tabby-only with a clear message.
 - **Appearance** — app theme + palettes, terminal font/cursor, 100+ color
   schemes with per-profile overrides, Follow color scheme (whole app
   theme derived from the active scheme).
@@ -41,8 +42,8 @@ Release flow: [RELEASE.md](RELEASE.md).
 - **Background survival** — foreground service with per-host notification,
   auto-retry once after a kill.
 
-Mobile scope: every YAML value syncs back untouched, but a few desktop
-features are desktop-only on a phone (no X server / agent / helper
+Mobile scope: every YAML value syncs back untouched, but a few Tabby
+features are Tabby-only on a phone (no X server / agent / helper
 binaries) — full matrix in [ARCHITECTURE.md](ARCHITECTURE.md) §11.
 
 ## Stack

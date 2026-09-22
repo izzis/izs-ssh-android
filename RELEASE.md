@@ -34,10 +34,11 @@ keep working; the release APK is then left unsigned instead of failing).
 ## Cutting a release
 
 1. Make sure `main` is green: `./gradlew :app:testDebugUnitTest`.
-2. Push the commits to release. Bump the `versionName` fallback in
-   `app/build.gradle.kts` to the new tag (dev-build display only, so a
-   local build's About + update check stay truthful; the release version
-   itself still comes from the tag, never from code).
+2. Push the commits to release. The `versionName` fallback in
+   `app/build.gradle.kts` may stay on its last value (dev-build display
+   in About only) — the release version always comes from the tag via
+   `-PversionNameOverride` in CI, never from code. Bump it only if you
+   want local dev builds to display the new version.
 3. Open GitHub → **Actions** → **Build APK release** → **Run workflow**,
    enter the `tag_name` (e.g. `v1.0.0`, no spaces), tick `prerelease`
    for betas/RCs only. CLI equivalent:

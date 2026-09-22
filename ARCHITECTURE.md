@@ -75,17 +75,24 @@ app/src/main/java/id/web/izs/sshclient/
                                     section, Delete with confirm; 40dp action
                                     buttons, 4dp row end-padding),
                                     exit-with-confirm top-bar button
+        AnchoredSheet.kt            Shared bottom-sheet scaffold + compact filter box:
+                                    AnchoredSheet (Dialog + Animatable anchors
+                                    full/70%-open/hidden; nested-scroll contract:
+                                    lists scroll first, only edge leftover moves
+                                    the sheet) and CompactFilterField (46dp custom
+                                    BasicTextField box — no 56dp M3 min-height
+                                    clipping); used by NewTabSheet + SftpSheet
         NewTabSheet.kt              Quick-pick bottom sheet (search + recent + grouped
-                                    profiles, desktop-selector parity; custom
-                                    sheet: header-only drag to half/full/hide,
-                                    list owns all scrolls; blacklisted
-                                    profiles filtered out, search included)
+                                    profiles, Tabby-selector parity; windowing via
+                                    AnchoredSheet, list owns all scrolls; blacklisted
+                                    profiles filtered out, search included; always-
+                                    visible CompactFilterField)
        ProfileEditScreen.kt        Tabbed editor (General + colour picker (FlowRow swatch
                                     grid — fixed chunked rows clipped the rightmost
                                     swatch into an oval on narrow phones) / Ports /
                                     Advanced / Ciphers / Colours (terminal-scheme
                                     override: Use-global + scheme search) / Login),
-                                     desktop-only options labeled, new profile + new group; sticky header with busy spinner.
+                                     Tabby-only options labeled, new profile + new group; sticky header with busy spinner.
                                      `copy:<id>` duplicates one (editor
                                      pre-filled from the source, Save creates,
                                      Back cancels, Delete hidden)
@@ -102,13 +109,19 @@ app/src/main/java/id/web/izs/sshclient/
                                      SFTP, extra keys, command box — lists stay
                                      on the shared scheme); Copy stays silent
                                      (no banner)
-       SftpSheet.kt                SFTP browser + transfers as a bottom sheet over the terminal
-                                    (half by position via SheetState initial Partial, list
-                                    fills sheet height so loads never balloon it, draggable
-                                    to full): SAF Save-as/Choose-file, DISPLAY_NAME lookup,
-                                    same-name Overwrite/Keep-both/Cancel dialog (dir frozen
-                                    at pick time), per-item Cancel, Clear finished.
-                                    UI-only: dismiss/back touches no transfer.
+        SftpSheet.kt                SFTP browser + transfers over the terminal via
+                                    AnchoredSheet (title + filter + dir nav in the
+                                    handle zone; always full-size list, so a
+                                    collapse-drag works even on empty/short dirs):
+                                    Tabby-parity filter (hide/show box, cleared
+                                    on navigate, case-insensitive match),
+                                    breadcrumb path wrap at `/` boundaries,
+                                    long-press copies the full path (Toast);
+                                    SAF Save-as/Choose-file, DISPLAY_NAME lookup,
+                                    same-name Overwrite/Keep-both/Cancel dialog
+                                    (dir frozen at pick time), per-item Cancel,
+                                    Clear finished. UI-only: dismiss/back touches
+                                    no transfer.
        TerminalView.kt             Grid + scrollback Canvas, pinned follow-bottom, measured cells;
                                    hold/triple-tap selection with back-gesture
                                    guards + dismissing Copy/Paste pill
@@ -124,21 +137,21 @@ app/src/main/java/id/web/izs/sshclient/
                                     New-tab mode (profile list vs quick-pick sheet, device-only pref);
                                     Hide-terminal-header toggle (device-only pref, whole-row tap)
        SessionTabs.kt (components/) Tab strip (top/bottom, VM-hoisted scroll, slim 32dp buttons,
-                                    tight ⋮/× cluster, desktop `.colorbar` profile-colour bar
+                                    tight ⋮/× cluster, Tabby `.colorbar` profile-colour bar
                                     sealed inside the rounded tab box; strip scrolls
                                     horizontally = unbounded width, so items bind
                                     `IntrinsicSize.Max` or fillMaxWidth underlines
                                     collapse to 0) + side drawer frame (left/right, no RTL mirror) +
                                     single status dot + primary activity underline (cleared on select) + pinned Profile-list/Settings footer
                                     (drawer ⋮ menu hides its own Settings/Profile-list copies)
-       ConfigFileScreen.kt         Live RAW YAML view (parity with desktop `_store`, sticky header with busy spinner)
+       ConfigFileScreen.kt         Live RAW YAML view (parity with Tabby `_store`, sticky header with busy spinner)
        VaultUnlockDialog.kt        Passphrase prompt (lazy: only when needed)
        SetVaultPassphraseDialog.kt Set/change vault passphrase
        VaultSettingsScreen.kt      Vault management (set/change/erase, encrypt-config toggle, sticky header with busy spinner)
        SshSettingsScreen.kt        SSH defaults: host-key verification + warn-on-close
                                    + background keep-awake toggle (device-only)
-                                   (desktop Settings > SSH parity; live-save, vault-aware; sticky header with busy spinner)
-       SettingsScreen.kt           Sidebar mirroring desktop Settings sections
+                                   (Tabby Settings > SSH parity; live-save, vault-aware; sticky header with busy spinner)
+       SettingsScreen.kt           Sidebar mirroring Tabby Settings sections
        CrashReportScreen.kt        Shows last crash trace with copy button
        ColorSchemeComponents.kt    Shared scheme picker list + sample-line
                                    preview (used by Colours tab + global screen)
@@ -156,7 +169,7 @@ app/src/main/java/id/web/izs/sshclient/
       ConfigMigrator.kt   Legacy migrations (name-based groups -> ids, jump hosts)
       RawConfigStore.kt   RAW YAML document ops (update/delete profile, secrets JSON,
                           terminal.showRecentProfiles + appearance.tabsLocation + 4 clipboard keys (bracketed/warn/replace/trim,
-                          delete-on-default + empty-map prune) read/write — desktop-owned keys, never invented)
+                          delete-on-default + empty-map prune) read/write — Tabby-owned keys, never invented)
       ProfileColor.kt     Identity-color palette + hex normalize/parse (pure JVM)
       ColorScheme.kt      TerminalColorScheme shape (theme.ts parity):
                           parse/normalize/readability gates, resolution order
@@ -169,7 +182,7 @@ app/src/main/java/id/web/izs/sshclient/
                           cache (passphrase-bound, 2 entries) as decrypt fast
                           paths, cleared on lock — wrong passphrase/tampered
                           blob never hits; every encrypt still mints fresh
-                          salt/iv per desktop parity, so encrypt-side PBKDF2
+                          salt/iv per Tabby parity, so encrypt-side PBKDF2
                           is never cached)
       VaultState.kt       Pure resolve/unlock-required logic + secret CRUD ops
       SecretResolver.kt   vault:// URIs -> passwords / key passphrases / PEM files
@@ -180,7 +193,7 @@ app/src/main/java/id/web/izs/sshclient/
                           savePassword/deletePassword (prompt-password remember /
                           total-failure forget; vault secret or no-vault literal)
     ssh/
-      SshConnector.kt     sshj sessions, exec + shell channels, desktop-format host-key
+      SshConnector.kt     sshj sessions, exec + shell channels, Tabby-format host-key
                            trust prompt, multi-key auth, PTY window-change, keepalive,
                            login scripts, typed SshAuthFailed + friendly reason
                            (never raw "Exhausted…") driving the password prompt
@@ -195,15 +208,15 @@ app/src/main/java/id/web/izs/sshclient/
                            (wired to session close only), takeDownloadFile(id)
                            (once-only Save-as handshake, survives sheet reopen),
                            clearFinished() (drops rows + deletes untaken files)
-      HostKeyTrust.kt     Trust decisions on desktop ssh.knownHosts (sha256 wire digest,
+      HostKeyTrust.kt     Trust decisions on Tabby ssh.knownHosts (sha256 wire digest,
                           exact host/port/type match, known-first negotiation order,
                           legacy prefs self-healing upgrade — pure JVM)
-      LoginScriptRunner.kt Ordered expect/send automation (desktop LoginScriptProcessor
+      LoginScriptRunner.kt Ordered expect/send automation (Tabby LoginScriptProcessor
                           parity, pure JVM)
       SshAlgorithmFactories.kt Profile cipher/kex/mac/hostkey/compression wire names ->
                            sshj factories, unknown skipped (pure JVM + Config build)
       PortForwarding.kt   Local + Remote forwarding at connect (addPortForward
-                           parity); Dynamic stays desktop-only (pure JVM)
+                           parity); Dynamic stays Tabby-only (pure JVM)
       SocksProxy.kt       Outbound SOCKS proxy for the transport (newSocksProxy
                            parity, default 1080; pure JVM)
     term/
@@ -266,12 +279,12 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   showing a vault password, editing a secret-backed field, first connect
   needing a secret, deleting a shell-encrypted profile. Repeated decrypts
   of the same blob reuse the cached PBKDF2 key (RAM-only); every encrypted
-  save still re-encrypts with a fresh salt/iv exactly like desktop, so one
+  save still re-encrypts with a fresh salt/iv exactly like Tabby, so one
   save costs 1x PBKDF2 + one full Tink reseal of the whole store. Vault JSON
   converts straight to the raw map (no YAML round-trip, so exotic scalars
   never drift type); post-write screens adopt the returned state instead of
   reloading.
-- **Blob rule (desktop truth):** a stored blob is ALWAYS a container of
+- **Blob rule (Tabby truth):** a stored blob is ALWAYS a container of
   secrets regardless of the profile's `encrypted` flag; the flag only
   describes the file shape (shell-encrypted vs full document + inline blob).
 - **Upload strip/restore:** `configSync` is stripped on upload and restored
@@ -282,11 +295,11 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   `file{id}=base64(PEM)` <-> `vault://id`.
 - **Set-vault sweep:** setting a vault passphrase moves inline plaintext
   passwords + PEM keys into the vault once (single save, no duplicates).
-- **Post-download re-encrypt (desktop `writeConfigDataFromSync` parity):**
+- **Post-download re-encrypt (Tabby `writeConfigDataFromSync` parity):**
   a fresh encrypted shell is saved verbatim, then re-encrypted once with a
   fresh salt/iv after the passphrase prompt — immediately when already
   unlocked (RAM passphrase reused, no extra prompt), otherwise on the first
-  unlock. `keySalt` therefore rotates exactly like desktop; plaintext docs
+  unlock. `keySalt` therefore rotates exactly like Tabby; plaintext docs
   are never rewritten, and upload stays verbatim (no encrypt).
 - **Failed-import restore:** before every download/import overwrite, the
   previous YAML + sync target (YAML `configSync` host/token/configID + prefs
@@ -295,10 +308,10 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   `pendingEncryptedRewrite` in `SyncRepository`, surfaced as
   `Loaded.pendingRewrite`). Cancelling/deleting before the first unlock
   (`abortPendingImport`) restores all three — the old config comes back
-  already unlocked. Ordinary boot unlocks keep desktop "Erase config"
+  already unlocked. Ordinary boot unlocks keep Tabby "Erase config"
   semantics instead (erase → `refresh()` → seeded empty, so the UI never
   strands on a stale locked view).
-- **Foreground auto-sync (desktop `autoSync` parity), both directions:**
+- **Foreground auto-sync (Tabby `autoSync` parity), both directions:**
   `AutoSyncTicker` in `MainActivity` polls cloud metadata every 60s while
   the app is open. Guards run cheap-first (background/busy/`sync.auto`-off/
   locked/stamp-equal all skip before any network); default OFF. Each tick
@@ -317,14 +330,14 @@ always confirms). Session hops use shallow navigate (`launchSingleTop` +
   `KeyboardType.Password` (no predictions/autocomplete), not just visual
   masking — secrets never leak into the keyboard dictionary.
 - **Host keys (single source: `ssh.knownHosts` in YAML):** unknown/changed
-  keys NEVER auto-trust — the connect pauses with a desktop-parity dialog
+  keys NEVER auto-trust — the connect pauses with a Tabby-parity dialog
   (MITM warning + previous fingerprint on mismatch; Accept and remember /
-  just this once / Disconnect). Remember writes the desktop-format entry
+  just this once / Disconnect). Remember writes the Tabby-format entry
   locally (uploaded later via normal sync); `verifyHostKeys=false` trusts
   silently. Accept-and-remember connects FIRST on session-only trust and
   persists in the background — no Disconnected flash while an encrypted
   store rewrites (the persisted entry only matters for future sessions).
-  Negotiation is known-first, desktop order on defaults
+  Negotiation is known-first, Tabby order on defaults
   (ecdsa before ed25519 — sshj's own default would pick otherwise, and the
   verifier list alone can't reorder: sshj's `Proposal` only uses it as a
   membership filter, so the per-connection config carries the order).
@@ -404,7 +417,7 @@ resize: measured grid -> settle-debounced (150ms) emulator.resize +
   6dp side padding keeps edge columns clear of screen protectors.
 - **Connect honors the profile:** login scripts (`LoginScriptRunner`:
   unconditional at session-ready, then per-chunk expect/regex/optional
-  matching, desktop quirk-for-quirk), keepalive interval + countMax as
+  matching, Tabby quirk-for-quirk), keepalive interval + countMax as
   `KEEP_ALIVE` (SSH_MSG_IGNORE heartbeats; the provider is fixed on the
   `Config` before `SSHClient()` is built — sshj freezes it into the
   connection at construction), custom algorithms via per-connection `DefaultConfig`.
@@ -445,31 +458,31 @@ the IME:
   green = connected, amber = connecting, red = disconnected. The dot always
   asks before disconnecting (it is a 32dp invisible tap target — an instant
   silent kill reads exactly like a dropped session); the power button honors
-  `warnOnClose` like desktop — and full-width `user@host:port` below.
+  `warnOnClose` like Tabby — and full-width `user@host:port` below.
   Settings > Window can hide the header (device-only): its options move to
   the ⋮ on the active tab, or a floating ⋮ when tabs are off (draggable to
    any corner, anchor in ConfigDisk).
-- Settings toggle parity: desktop `toggle` (`terminalSettingsTab.pug`, `sshSettingsTab.pug`, `sshProfileSettings.pug` Advanced, `configSyncSettingsTab.pug`) → `Switch` pill on the right (`Row(fillMaxWidth.clickable){ Text(weight1f.padding(end=12.dp)) + Switch }`); desktop `checkbox` (ciphers, remember password) → `Checkbox`.
-- Home Recent section (desktop `recentProfiles` parity, per-row History icons
-  like the desktop selector, default card colour): header lives outside the
+- Settings toggle parity: Tabby `toggle` (`terminalSettingsTab.pug`, `sshSettingsTab.pug`, `sshProfileSettings.pug` Advanced, `configSyncSettingsTab.pug`) → `Switch` pill on the right (`Row(fillMaxWidth.clickable){ Text(weight1f.padding(end=12.dp)) + Switch }`); Tabby `checkbox` (ciphers, remember password) → `Checkbox`.
+- Home Recent section (Tabby `recentProfiles` parity, per-row History icons
+  like the Tabby selector, default card colour): header lives outside the
   card (title + Clear + collapse), collapsible, sized by
   `terminal.showRecentProfiles` (0 = off, hidden while searching); Active
   card above it is always expanded with Close all.
   Settings > Window edits the
-  desktop `appearance.tabsLocation` (Off removes the key; encrypted configs
+  Tabby `appearance.tabsLocation` (Off removes the key; encrypted configs
   stay writable but Android ignores the value) or picks This-device-only
   (local pref, YAML ignored for display — the painless encrypted path);
   New-tab mode (list vs sheet) is a second device-only pref.
 - Profile identity color: dot selector beside Name in the General tab
   (14 presets + Default + stored-custom-hex extra swatch, wrapping FlowRow
-  grid; custom desktop hex shows as an extra swatch), stripe
-  on list rows plus a desktop-`.colorbar` bar sealed inside the tab box
+  grid; custom Tabby hex shows as an extra swatch), stripe
+  on list rows plus a Tabby-`.colorbar` bar sealed inside the tab box
   (absent without a stored color, live-resolved like the tab title so
   late-set colors still show). Terminal scheme override
   lives in the Colours tab (Use-global + scheme search) and Settings >
   Color scheme. Options with no mobile
    effect (forwarding, x11/agent, non-direct modes) carry a
-   desktop-only note in the editor instead of failing silently.
+   Tabby-only note in the editor instead of failing silently.
 - Extra-keys rows: `ESC / - HOME UP END PGUP` and
   `TAB CTRL ALT LEFT DOWN RIGHT PGDN`; special keys bypass stickies via
   `sendSpecial`. Font size pref `terminal.fontSp` (8–24sp, default 14,
@@ -498,7 +511,7 @@ the IME:
   Copy/Paste float above the selection in an opaque pill (below when no
   room); both dismiss back to typing (Copy stays silent — no banner).
   Copy is always plaintext (grid chars, no ANSI/HTML — `copyAsHTML` is not
-  synced). Paste goes through the desktop funnel (`paste()`: newline fold,
+  synced). Paste goes through the Tabby funnel (`paste()`: newline fold,
   replace-newlines, single-trailing strip, multiline warn dialog outside
   the alt screen, bracketed `ESC[200~…ESC[201~` wrap when the shell enabled
   `?2004`) and refocuses the keyboard. Keyboard-driven paste (IME commit
@@ -506,7 +519,7 @@ the IME:
   stay direct so auto-spaces survive. Absolute rows are scroll-stable so
   handles track the text (a history shrink, resize, font change, or
   alt-buffer switch drops the selection).
-- **Clipboard parity (desktop Settings > Terminal > Clipboard):** 4 synced
+- **Clipboard parity (Tabby Settings > Terminal > Clipboard):** 4 synced
   keys under `terminal.*`, absent = default, delete-on-default (ConfigProxy
   parity). `copyOnSelect`/`copyAsHTML` are intentionally NOT synced.
   | Key | Default |
@@ -519,13 +532,13 @@ the IME:
   cleared by `resetTerminalModes()` on every fresh shell + full `reset()`),
   `isAlternateScreenActive()` gates the warn dialog. Server-emitted standout
   (e.g. a shell highlighting the bracketed-pasted region) renders faithfully
-  like desktop xterm — a white block over pasted text is shell bytes, not an
+  like Tabby xterm — a white block over pasted text is shell bytes, not an
   app selection bug (app selection is the purple overlay, cleared by tap).
   Alt-screen tracking covers `?1049` only (pre-existing gap: `?1047`-only apps
   are rare and undetected; `?1048` needs no handling — cursor save/restore
   only, never switches buffers).
 - **Sync target (YAML-only):** host/token/configID live ONLY in YAML >
-  `configSync` (outer shell, readable while locked — desktop parity) and are
+  `configSync` (outer shell, readable while locked — Tabby parity) and are
   RAM-mirrored after load; no prefs duplicate exists. "Test and save" writes
   the YAML section; the ticker reads it back from disk each poll.
 - **Cleartext policy:** `https://` always; `http://` only for local targets
@@ -546,7 +559,7 @@ the IME:
 | File | Covers |
 |---|---|
 | `DesktopParityTest` | decrypt-when-needed matrix |
-| `DesktopVaultInteropTest` | real desktop `vault.json` fixture interop |
+| `DesktopVaultInteropTest` | real Tabby `vault.json` fixture interop |
 | `RawRoundTripTest` | lossless upload/download round-trips |
 | `SecretStoreTest` | secret CRUD + `updateProfile`/`deleteProfile` matrix |
 | `VaultCryptoTest` | PBKDF2/AES vectors, `BAD_DECRYPT` |
@@ -585,7 +598,7 @@ the IME:
 | `ClipboardParityTest` | 4 clipboard keys (defaults/delete-on-default/prune) + `?2004`/`?1049` tracking + paste funnel (fold/replace/strip/trim) |
 | `BannerTextTest` | auth-banner fold (`\n`→`\r\n`) + blank-only collapse + skipBanner first-service-line |
 | `ConfigBackupTest` | single-slot YAML backup generations + RAM→disk restore fallback |
-| `KeepaliveTest` | custom keepalive values reach the transport + defaults match desktop |
+| `KeepaliveTest` | custom keepalive values reach the transport + defaults match Tabby |
 | `TinkKvStoreTest` | typed KV round-trip + single-write batching + corrupt-blob quarantine + cross-instance persist |
 | `UsernamePromptTest` | blank-user prompt: trim/empty/cancel-to-error-card/retry gating |
 | `GroupEditTest` | group rename (trim/unknown-key keep/no-op) + delete (ungroup members, lift children) + move (reparent/top-level/cycle-guard) |
@@ -621,18 +634,18 @@ countered in four layers:
    Allow/Never persist `window.batteryOptAsked`, Later re-arms.
 4. **Graceful death**: `onTransportDeath` funnels every dead shell through
    `onSessionShellEnded`, gated by the profile's `behaviorOnSessionEnd`
-   (desktop `base/connectableTerminalTab` + `sshTab` parity, default `auto`,
-   synced to desktop verbatim, Advanced tab > Session section):
+   (Tabby `base/connectableTerminalTab` + `sshTab` parity, default `auto`,
+   synced to Tabby verbatim, Advanced tab > Session section):
    `close` and explicit-`auto` destroy the tab (registry drop + `tabDestroy`
    event navigates its screen back); `reconnect` redials at once (consuming
    the auto-retry one-shot so it can't double-fire); `keep` and
-   non-explicit `auto` keep today's failed card + Retry and add the desktop
+   non-explicit `auto` keep today's failed card + Retry and add the Tabby
    "Press any key to reconnect" service line (first keypress reconnects;
    input stays alive while the offer stands — tap-to-focus, extra keys,
    box mode and paste all route through the `reconnectOffer` intercept, so
    the promise is reachable even with the shell dead). Explicit exit = Ctrl+D tail or a
-   submitted `exit` (`recentInputs`, desktop-capped last 32 chars).
-   Explicit `keep` never self-heals (desktop-exact); `auto` keeps the
+   submitted `exit` (`recentInputs`, Tabby-capped last 32 chars).
+   Explicit `keep` never self-heals (Tabby-exact); `auto` keeps the
    single pre-existing auto-retry (`everConnected` + `!autoRetried` + no
    pending UI, 2s settle, aborts if the user acted) using the last connect
    environment so backgrounded tabs redial too. A backgrounded death also
@@ -670,28 +683,28 @@ this file: <https://ssh.izs.web.id/roadmap> (source:
 <https://raw.githubusercontent.com/izzis/izs-assets/main/tabby-parity-roadmap.md>).
 What stays here is the on-device capability contract — what connects,
 what round-trips untouched, and what never will.
-- **Port forwarding:** Local + Remote rules open at connect (desktop
+- **Port forwarding:** Local + Remote rules open at connect (Tabby
   `addPortForward` parity — Local bind failure aborts the connect, Remote
   rejection warns in-terminal and continues); Dynamic (SOCKS) stays
-  desktop-only with a clear error. Forward rules join the transport key so
+  Tabby-only with a clear error. Forward rules join the transport key so
   different rules never silently share one transport.
 - **jumpHost / proxyCommand / HTTP proxy:** saved to YAML via the
-  `connectionMode` dropdown (other-mode fields nulled on save, desktop
+  `connectionMode` dropdown (other-mode fields nulled on save, Tabby
   priority), but connect shows a not-supported message. SOCKS proxy connects
-  on-device (desktop `newSocksProxy` parity, default port 1080). The dropdown
+  on-device (Tabby `newSocksProxy` parity, default port 1080). The dropdown
   disables switching INTO still-unsupported modes from the phone ("…
-  (desktop only)"); a synced non-direct value stays visible/selected so it
+  (Tabby only)"); a synced non-direct value stays visible/selected so it
   round-trips untouched.
 
 ### Mobile scope: YAML features vs this device
 
 Guarantee first: every YAML value round-trips untouched (unknown keys ride
 the raw map) — scope differences below are connect-time only, never silent
-stripping. Editor marks non-working options "(desktop only)" instead of
+stripping. Editor marks non-working options "(Tabby only)" instead of
 hiding them, so synced values stay manageable from the phone.
 
 Connects on-device: password, publicKey, Auto, username prompt when blank
-(desktop `Username for host` parity; typed name is session-local), SOCKS
+(Tabby `Username for host` parity; typed name is session-local), SOCKS
 proxy (default 1080), Local/Remote port forwarding, keepalive interval +
 countMax watchdog, auth-banner service line unless skipped, readyTimeout, reuseSession, custom algorithms, login
 scripts, per-profile warnOnClose.
@@ -703,7 +716,7 @@ transport + challenge UI, HTTP CONNECT proxy, jump-host chains
 (`connectVia` exists in sshj), Dynamic (device-side SOCKS listener),
 `telnet` profile type (plain TCP + the existing emulator).
 
-Desktop-only (no mobile counterpart): `x11` (no X server), `agentForward`
+Tabby-only (no mobile counterpart): `x11` (no X server), `agentForward`
 and `auth: agent` (no ssh-agent), `proxyCommand` (no helper binaries like
 `ssh -W` on stock Android), hotkeys/shortcuts (no physical keyboard),
 `options.input` nuances (input is the native IME pipe here — stored,
