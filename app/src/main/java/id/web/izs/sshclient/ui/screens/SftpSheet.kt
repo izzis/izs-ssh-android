@@ -1,32 +1,26 @@
 package id.web.izs.sshclient.ui.screens
 
+import android.content.ClipData
 import android.content.Context
+import android.widget.Toast
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
@@ -54,7 +48,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -82,7 +77,7 @@ import net.schmizz.sshj.SSHClient
  * sheet half <-> full <-> hidden — so a drag down past the top of the
  * list collapses full -> half -> away instead of fighting the scroll.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun SftpSheet(
     sessionViewModel: SshSessionViewModel,
@@ -90,6 +85,7 @@ fun SftpSheet(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val handle = remember(sessionId) { sessionViewModel.get(sessionId) }
     // Session-owned: survives this sheet, tab switches, and rotation.
@@ -319,57 +315,15 @@ fun SftpSheet(
                 }
             }
             if (showFilter) {
-                // Compact custom box (46dp): OutlinedTextField enforces
-                // a 56dp min height, so shrinking it clips the text —
-                // here every size is ours, nothing to clip. Border
-                // follows focus like the M3 field; the X always shows
-                // (desktop filter-bar parity) and hides + clears.
-                val filterInteraction = remember { MutableInteractionSource() }
-                val filterFocused by filterInteraction.collectIsFocusedAsState()
-                BasicTextField(
+                CompactFilterField(
                     value = filterText,
                     onValueChange = { filterText = it },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    interactionSource = filterInteraction,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(46.dp)
-                        .border(
-                            if (filterFocused) 2.dp else 1.dp,
-                            if (filterFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                            RoundedCornerShape(4.dp),
-                        )
-                        .padding(horizontal = 12.dp),
-                    decorationBox = { inner ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            Box(Modifier.weight(1f)) {
-                                if (filterText.isEmpty()) {
-                                    Text(
-                                        "Filter...",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                    )
-                                }
-                                inner()
-                            }
-                            IconButton(
-                                onClick = { clearFilter() },
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    Icons.Filled.Close,
-                                    contentDescription = "Clear filter",
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
-                    },
+                    placeholder = "Filter...",
+                    // The X always shows (desktop filter-bar parity)
+                    // and hides + clears the box.
+                    showClear = true,
+                    onClear = { clearFilter() },
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
             // Directory navigation lives in the handle zone (like the
@@ -517,7 +471,25 @@ fun SftpSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier.fillMaxWidth()
-                                    .clickable(enabled = e.isDirectory && hasShell) { dir = joinDir(dir, e.name) }
+                                    .combinedClickable(
+                                        // Tap still navigates into folders
+                                        // (guarded: needs a live session).
+                                        onClick = { if (e.isDirectory && hasShell) dir = joinDir(dir, e.name) },
+                                        // Long-press copies the full path
+                                        // shown by the browser — works for
+                                        // files and folders, offline too.
+                                        onLongClick = {
+                                            val full = joinDir(dir, e.name)
+                                            scope.launch {
+                                                clipboard.setClipEntry(
+                                                    ClipEntry(ClipData.newPlainText("sftp-path", full)),
+                                                )
+                                                // Toast, not the info line:
+                                                // no sheet space wasted.
+                                                Toast.makeText(context, "Copied \"$full\".", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                    )
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                             ) {
                                 Icon(

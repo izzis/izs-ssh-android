@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -97,12 +96,13 @@ fun NewTabSheet(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-            OutlinedTextField(
+            CompactFilterField(
                 value = query,
                 onValueChange = { query = it },
-                label = { Text("Filter by name, host, or user") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                singleLine = true,
+                placeholder = "Filter by name, host, or user",
+                showClear = query.isNotEmpty(),
+                onClear = { query = "" },
+                modifier = Modifier.padding(top = 8.dp),
             )
         },
     ) {

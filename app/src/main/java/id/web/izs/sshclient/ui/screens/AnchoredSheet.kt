@@ -5,24 +5,34 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -82,8 +93,10 @@ fun AnchoredSheet(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val screenH = with(LocalDensity.current) { maxHeight.toPx() }
-            val halfY = screenH / 2f
-            // Sheet offset: 0 = full, halfY = half, screenH = hidden.
+            // Default anchor: sheet covers 70% of the screen (offset
+            // from top = 30%). Roomier than half without going full.
+            val defaultY = screenH * 0.3f
+            // Sheet offset: 0 = full, defaultY = 70% open, screenH = hidden.
             val offset = remember(screenH) { Animatable(screenH) }
             val scope = rememberCoroutineScope()
             var gone by remember { mutableStateOf(false) }
@@ -104,7 +117,7 @@ fun AnchoredSheet(
             // never moves the sheet; it stops at the edge and a second
             // drag decides the next anchor. Settling only snaps a sheet
             // that a drag left between anchors.
-            val sheetNested = remember(screenH, halfY, onDismiss) {
+            val sheetNested = remember(screenH, defaultY, onDismiss) {
                 object : NestedScrollConnection {
                     override fun onPreScroll(
                         available: Offset,
@@ -139,7 +152,7 @@ fun AnchoredSheet(
                         available: Velocity,
                     ): Velocity {
                         val start = offset.value
-                        val atAnchor = listOf(0f, halfY, screenH).any { abs(it - start) < 0.5f }
+                        val atAnchor = listOf(0f, defaultY, screenH).any { abs(it - start) < 0.5f }
                         if (atAnchor) {
                             if (abs(screenH - start) < 0.5f && !gone) {
                                 gone = true
@@ -149,9 +162,9 @@ fun AnchoredSheet(
                             return Velocity.Zero
                         }
                         val target = when {
-                            available.y < -SHEET_FLING_VELOCITY -> if (start > halfY) halfY else 0f
-                            available.y > SHEET_FLING_VELOCITY -> if (start < halfY) halfY else screenH
-                            else -> listOf(0f, halfY, screenH).minBy { abs(it - start) }
+                            available.y < -SHEET_FLING_VELOCITY -> if (start > defaultY) defaultY else 0f
+                            available.y > SHEET_FLING_VELOCITY -> if (start < defaultY) defaultY else screenH
+                            else -> listOf(0f, defaultY, screenH).minBy { abs(it - start) }
                         }
                         offset.animateTo(target, spring(stiffness = Spring.StiffnessMedium))
                         if (target == screenH && !gone) {
@@ -162,9 +175,9 @@ fun AnchoredSheet(
                     }
                 }
             }
-            // Enter at half (M3 sheet behavior).
+            // Enter at the default anchor (was M3 half behavior).
             LaunchedEffect(screenH) {
-                offset.animateTo(halfY, spring(stiffness = Spring.StiffnessMediumLow))
+                offset.animateTo(defaultY, spring(stiffness = Spring.StiffnessMediumLow))
             }
             BackHandler { hide() }
             // Scrim fades with the sheet; tap dismisses with exit animation.
@@ -201,9 +214,9 @@ fun AnchoredSheet(
                                 },
                                 onDragStopped = { v ->
                                     val target = when {
-                                        v < -SHEET_FLING_VELOCITY -> if (offset.value > halfY) halfY else 0f
-                                        v > SHEET_FLING_VELOCITY -> if (offset.value < halfY) halfY else screenH
-                                        else -> listOf(0f, halfY, screenH).minBy { abs(it - offset.value) }
+                                        v < -SHEET_FLING_VELOCITY -> if (offset.value > defaultY) defaultY else 0f
+                                        v > SHEET_FLING_VELOCITY -> if (offset.value < defaultY) defaultY else screenH
+                                        else -> listOf(0f, defaultY, screenH).minBy { abs(it - offset.value) }
                                     }
                                     settle(target, target == screenH)
                                 },
@@ -224,4 +237,72 @@ fun AnchoredSheet(
             }
         }
     }
+}
+
+/**
+ * Compact single-line filter box (46dp) shared by the SFTP filter and
+ * the New-tab search. A custom [BasicTextField]: OutlinedTextField
+ * enforces a 56dp min height, so shrinking it clips the text — here
+ * every size is ours, nothing to clip. Border follows focus like the
+ * M3 field. The X shows when [showClear] and runs [onClear] (SFTP
+ * hides + clears the box; New-tab just clears the query).
+ */
+@Composable
+fun CompactFilterField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    showClear: Boolean,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(
+            color = MaterialTheme.colorScheme.onSurface,
+        ),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        interactionSource = interaction,
+        modifier = modifier.fillMaxWidth().height(46.dp)
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                RoundedCornerShape(4.dp),
+            )
+            .padding(horizontal = 12.dp),
+        decorationBox = { inner ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) {
+                        Text(
+                            placeholder,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    inner()
+                }
+                if (showClear) {
+                    IconButton(
+                        onClick = onClear,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Clear filter",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+        },
+    )
 }
