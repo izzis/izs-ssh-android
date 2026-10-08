@@ -168,10 +168,20 @@ class PortForwardingTest {
                     t.close()
                 }
                 // Torn down with the transport: the listen port is free again.
-                try {
-                    Socket().use { it.connect(InetSocketAddress("127.0.0.1", listenPort), 2_000) }
-                    fail("forward listener must be gone after close")
-                } catch (_: java.io.IOException) { }
+                // The teardown finishes asynchronously — poll for the refused
+                // connect instead of racing a single one against the close.
+                val deadline = System.currentTimeMillis() + 2_000
+                while (true) {
+                    val stillListening = try {
+                        Socket().use { it.connect(InetSocketAddress("127.0.0.1", listenPort), 500) }
+                        true
+                    } catch (_: java.io.IOException) {
+                        false
+                    }
+                    if (!stillListening) break
+                    if (System.currentTimeMillis() >= deadline) fail("forward listener must be gone after close")
+                    Thread.sleep(50)
+                }
             } finally {
                 try { echo.close() } catch (_: Exception) { }
             }
