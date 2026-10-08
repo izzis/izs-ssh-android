@@ -130,6 +130,7 @@ import id.web.izs.sshclient.ui.components.SessionTabDrawerContent
 import id.web.izs.sshclient.ui.components.SessionTabStrip
 import id.web.izs.sshclient.ui.components.TabDrawerFrame
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -550,6 +551,23 @@ fun TerminalScreen(
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { s.sendRaw(text) }
+            } catch (e: Exception) {
+                sessionViewModel.markSendFailed(sessionId, "Send failed: ${e.message}")
+            }
+        }
+    }
+
+    // Mouse reports ride a FIFO: every sendRaw launches its own coroutine,
+    // so a motion burst could hit the socket out of order. Unlimited buffer
+    // (the gesture thread only ever trySend()s), ONE consumer = byte order.
+    val mouseQueue = remember { Channel<ByteArray>(Channel.UNLIMITED) }
+    LaunchedEffect(handle) {
+        // Drop anything queued for a previous shell (tab switch mid-burst).
+        while (mouseQueue.tryReceive().isSuccess) { }
+        for (bytes in mouseQueue) {
+            val s = handle.shell ?: continue
+            try {
+                withContext(Dispatchers.IO) { s.sendRawBytes(bytes) }
             } catch (e: Exception) {
                 sessionViewModel.markSendFailed(sessionId, "Send failed: ${e.message}")
             }
@@ -1389,6 +1407,11 @@ fun TerminalScreen(
                             // Desktop parity: same funnel as BaseTerminalTab.paste
                             // (newline fold, replace, trim, warn, bracketed).
                             paste(text)
+                        },
+                        onMouseReport = { bytes ->
+                            // Any input consumes a standing reconnect offer
+                            // (then bytes drop until the new shell is up).
+                            if (!consumeReconnectOffer()) mouseQueue.trySend(bytes)
                         },
                         sidePadPx = sidePadPx,
                         modifier = Modifier.fillMaxSize(),

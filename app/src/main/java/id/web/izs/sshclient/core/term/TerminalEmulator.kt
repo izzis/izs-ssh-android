@@ -12,11 +12,12 @@ package id.web.izs.sshclient.core.term
  * Swallowed (never printed): OSC title, xterm-private CSI (`>`, `=`, `<`
  * prefixes, e.g. vim's `ESC[>4;m` key-modifier reset on exit), kitty/DECRQM
  * queries with intermediate bytes, DCS/SOS/PM/APC strings.
- * Tracked (never printed, never acted on visually): bracketed-paste mode
- * (`?2004`, xtermFrontend.supportsBracketedPaste parity) and mouse modes
- * (`?1000/1002/1003/1006`, resetTerminalModes parity).
- * Ignored: charsets, scroll-region origin mode, wide chars
- * (treated as single cells), visual bell, mouse reporting itself.
+ * Tracked (never printed): bracketed-paste mode (`?2004`,
+ * xtermFrontend.supportsBracketedPaste parity) and mouse tracking modes
+ * (`?9/1000/1002/1003` protocol + `?1006` SGR encoding — the view reads
+ * [mouseProtocol]/[mouseSgr] to forward touch as mouse reports,
+ * MouseReport.kt). Ignored: charsets, scroll-region origin mode, wide
+ * chars (treated as single cells), visual bell.
  */
 class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
 
@@ -198,6 +199,16 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
      * `xterm.modes.bracketedPasteMode`.
      */
     private var bracketedPasteMode = false
+    /**
+     * Mouse tracking protocol (`CSI ? 9/1000/1002/1003 h/l`, xterm.js
+     * CoreMouseService parity: X10/VT200/DRAG/ANY). The view reads it to
+     * decide whether touch gestures are forwarded as mouse reports.
+     */
+    var mouseProtocol: MouseProtocol = MouseProtocol.NONE
+        private set
+    /** SGR mouse encoding (`CSI ? 1006 h/l`) instead of the 3-byte default. */
+    var mouseSgr: Boolean = false
+        private set
 
     /** Bumped per feed() call; the UI recomposes the Canvas on change. */
     var version: Long = 0L
@@ -577,11 +588,11 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     /**
      * frontend.resetTerminalModes parity: called on a fresh shell so stale
      * modes (mouse tracking, bracketed paste) never leak across sessions.
-     * Mouse modes are tracked-nowhere (reporting is unsupported), so this
-     * only clears the bracketed-paste flag.
      */
     fun resetTerminalModes() {
         bracketedPasteMode = false
+        mouseProtocol = MouseProtocol.NONE
+        mouseSgr = false
     }
 
     private fun setPrivate(code: Int, on: Boolean) {
@@ -589,6 +600,14 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
             25 -> showCursor = on
             7 -> wrapEnabled = on
             2004 -> bracketedPasteMode = on
+            // Mouse tracking (xterm.js InputHandler setPrivateModes parity):
+            // enabling picks a protocol, disabling any of them drops back to
+            // NONE; ?1006 only flips the encoding.
+            9 -> mouseProtocol = if (on) MouseProtocol.X10 else MouseProtocol.NONE
+            1000 -> mouseProtocol = if (on) MouseProtocol.VT200 else MouseProtocol.NONE
+            1002 -> mouseProtocol = if (on) MouseProtocol.DRAG else MouseProtocol.NONE
+            1003 -> mouseProtocol = if (on) MouseProtocol.ANY else MouseProtocol.NONE
+            1006 -> mouseSgr = on
             1049 -> if (on) {
                 savedX = cursorX
                 savedY = cursorY
@@ -749,6 +768,8 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         wrapEnabled = true
         wrapPending = false
         bracketedPasteMode = false
+        mouseProtocol = MouseProtocol.NONE
+        mouseSgr = false
         topMargin = 0
         bottomMargin = rows - 1
         altActive = false

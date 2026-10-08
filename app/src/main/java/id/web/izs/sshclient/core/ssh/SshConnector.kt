@@ -130,6 +130,15 @@ class SshConnector {
         }
 
         /**
+         * Pre-encoded bytes (mouse reports): bypasses the String/UTF-8
+         * round-trip, which would corrupt DEFAULT-encoding coords >127.
+         */
+        suspend fun sendRawBytes(bytes: ByteArray) = withContext(Dispatchers.IO) {
+            shell.outputStream.write(bytes)
+            shell.outputStream.flush()
+        }
+
+        /**
          * Window-change request (RFC 4254 §6.7): tell the server the pty is
          * now cols×rows. Best-effort — failures are swallowed because the
          * local grid keeps working regardless (scroll-follow safety net).

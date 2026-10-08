@@ -1,5 +1,6 @@
 package id.web.izs.sshclient
 
+import id.web.izs.sshclient.core.term.MouseProtocol
 import id.web.izs.sshclient.core.term.TerminalEmulator
 import org.junit.Assert.*
 import org.junit.Test
@@ -281,5 +282,34 @@ class TerminalEmulatorTest {
         t.resize(999, 999)
         assertEquals(256, t.cols)
         assertEquals(64, t.rows)
+    }
+
+    @Test
+    fun `mouse tracking modes set, override and reset`() {
+        val t = term()
+        assertEquals(MouseProtocol.NONE, t.mouseProtocol)
+        assertFalse(t.mouseSgr)
+        t.feed("$esc[?1000h")
+        assertEquals(MouseProtocol.VT200, t.mouseProtocol)
+        // Each DECSET overwrites the protocol (last one wins, xterm.js).
+        t.feed("$esc[?1002h")
+        assertEquals(MouseProtocol.DRAG, t.mouseProtocol)
+        t.feed("$esc[?1003h")
+        assertEquals(MouseProtocol.ANY, t.mouseProtocol)
+        t.feed("$esc[?9h")
+        assertEquals(MouseProtocol.X10, t.mouseProtocol)
+        t.feed("$esc[?1006h")
+        assertTrue(t.mouseSgr)
+        // Disabling any protocol drops to NONE; ?1006 is independent.
+        t.feed("$esc[?1003l")
+        assertEquals(MouseProtocol.NONE, t.mouseProtocol)
+        assertTrue(t.mouseSgr)
+        t.feed("$esc[?1006l")
+        assertFalse(t.mouseSgr)
+        // Fresh-shell reset clears both (stale modes never leak).
+        t.feed("$esc[?1000h$esc[?1006h")
+        t.resetTerminalModes()
+        assertEquals(MouseProtocol.NONE, t.mouseProtocol)
+        assertFalse(t.mouseSgr)
     }
 }

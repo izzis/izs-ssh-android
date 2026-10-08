@@ -43,6 +43,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
@@ -64,7 +66,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import id.web.izs.sshclient.core.term.MouseAction
+import id.web.izs.sshclient.core.term.MouseButton
+import id.web.izs.sshclient.core.term.MouseEvt
+import id.web.izs.sshclient.core.term.MouseProtocol
+import id.web.izs.sshclient.core.term.MouseReporter
 import id.web.izs.sshclient.core.term.TerminalEmulator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -151,14 +159,32 @@ fun rememberTerminalFontFamily(font: TerminalFont): FontFamily {
  * system gestures (a back swipe lingering at the screen edge ends as
  * "gone", never as a tap/release, so no phantom 1-char selection). Two-stage hold: 300ms
  * ticks haptically (release to commit the word, move to scroll); ~600ms
- * commits and extends the nearest endpoint until release, with edge-zone
- * auto-scroll. Summoning is vetoed once scrolled content moves. Endpoints
+ * commits and then extends once the finger moves past slop — fresh words
+ * pick the dragged endpoint by motion direction (forward owns the focus,
+ * so the held word never drops out), a pre-existing selection grabs the
+ * nearest endpoint — with edge-zone auto-scroll. Summoning is vetoed once
+ * scrolled content moves. Endpoints
  * also move via immediate handle drags (a press on a handle locks scroll
  * at down); a Copy/Paste pill floats above the selection. Scroll stays on
  * while selecting (locked only for an endpoint drag) and a tap clears.
  * Absolute rows are scroll-stable (grid-up D cancels history-grow D), so
  * handles need no shifting — but a history SHRINK (clear screen) drops the
  * selection instead of highlighting wrong cells.
+ *
+ * Mouse tracking (xterm.js gate parity): while the app has a mouse mode on
+ * (`CSI ? 9/1000/1002/1003 h`), touch belongs to the app — tap = click
+ * (focus first, then press+release), DRAG/ANY drag = press + per-cell
+ * motion + release with edge-zone auto-scroll, VT200 drag = wheel, two
+ * fingers = wheel (X10 falls back to local scroll since it cannot carry
+ * wheel). Long-press stays LOCAL as the escape hatch into selection: a
+ * single 500ms hold commits the word, then real motion (past slop)
+ * extends it — fresh words pick the dragged endpoint by motion direction
+ * (forward owns the focus; the held word stays selected in every
+ * direction), a pre-existing selection grabs the nearest endpoint. Every
+ * press that releases without ever crossing the slop dismisses a
+ * pre-existing selection — however long the dwell — and releases before
+ * 500ms are taps: click the app, or clear an existing selection (no click
+ * leaks while one is up; Copy stays as the other exit).
  *
  * Performance: the keyboard animation resizes this scope every frame. The
  * expensive part (full-grid Canvas redraw) lives in [TerminalCanvas], whose
@@ -196,6 +222,8 @@ fun TerminalView(
     onCopySelection: (String) -> Unit = {},
     /** Selection paste: sends the given text to the session as typed input. */
     onPasteSelection: (String) -> Unit = {},
+    /** Mouse reports: pre-encoded bytes out (touch while a mouse mode is on). */
+    onMouseReport: (ByteArray) -> Unit = {},
 ) {
     val density = LocalDensity.current
     val vScroll = rememberScrollState()
@@ -242,6 +270,18 @@ fun TerminalView(
     val onTapState = rememberUpdatedState(onTap)
     val onCopyState = rememberUpdatedState(onCopySelection)
     val onPasteState = rememberUpdatedState(onPasteSelection)
+    val onMouseState = rememberUpdatedState(onMouseReport)
+    // Emulator-owned tracking state (protocol + SGR encoding); one reporter
+    // per emulator keeps the cell-level move debounce across gestures.
+    val mouseReporter = remember(emulator) { MouseReporter(emulator) }
+    // True only while a DRAG/ANY app-drag runs: the edge ticker then
+    // scrolls + reports instead of stretching the local selection.
+    var mouseDragActive by remember { mutableStateOf(false) }
+    /** Encode + forward one mouse event (no-op when restricted/debounced). */
+    fun mouseSend(col: Int, row: Int, button: Int, action: Int) {
+        val bytes = mouseReporter.report(MouseEvt(col, row, button, action)) ?: return
+        onMouseState.value(bytes)
+    }
     val clipboard = LocalClipboard.current
     val clipScope = rememberCoroutineScope()
     // Clipboard snapshot for the Paste button, refreshed every time a
@@ -352,6 +392,14 @@ fun TerminalView(
             // Viewport px (finger, taps, press-drags): content sits scroll below.
             return contentToSel(px + hScroll.value, py + vScroll.value)
         }
+        // Mouse reports are VIEWPORT-relative (xterm.js getMouseReportCoords:
+        // element coords / cell size, clamped to the canvas) — this one must
+        // NOT add the scroll offset the way toSelPoint does.
+        fun toMouseCell(p: Offset): Pair<Int, Int> {
+            val col = ((p.x - sidePadPx) / charW).toInt().coerceIn(0, emulator.cols - 1)
+            val row = (p.y / lineH).toInt().coerceIn(0, emulator.rows - 1)
+            return col to row
+        }
         fun startSelection(at: Offset) {
             val p = toSelPoint(at.x, at.y)
             val (s, e) = emulator.expandWord(p.row, p.col)
@@ -444,6 +492,8 @@ fun TerminalView(
             return hit(n[1], n[0]) || hit(n[3], n[2])
         }
         // Endpoint nearest to a viewport finger: press-drag extends from it.
+        // (A pre-existing selection only — a fresh word commit picks its
+        // endpoint by motion direction instead, see motionEndpoint.)
         fun nearestEndpoint(vpos: Offset): Int {
             val fx = vpos.x + hScroll.value
             val fy = vpos.y + vScroll.value
@@ -454,6 +504,22 @@ fun TerminalView(
                 return dx * dx + dy * dy
             }
             return if (d(selAnchor) <= d(selFocus)) 0 else 1
+        }
+        // Fresh-commit endpoint pick: forward motion (right/down — terminal
+        // reading order) owns the focus (end), backward owns the anchor.
+        // The held word's start therefore stays pinned at its first char on
+        // forward drags, and the held word itself never drops out of the
+        // range in ANY direction — which the nearest-endpoint pick could do
+        // (hold near the word start → the anchor was grabbed and dragged to
+        // the far end). Dominant axis decides diagonals; 0 = anchor, 1 = focus.
+        fun motionEndpoint(from: Offset, to: Offset): Int {
+            val dx = to.x - from.x
+            val dy = to.y - from.y
+            return if (abs(dx) >= abs(dy)) {
+                if (dx >= 0f) 1 else 0
+            } else {
+                if (dy >= 0f) 1 else 0
+            }
         }
         // Hold drift budget: a human finger cannot hold pixel-still, but a
         // real scroll travels far. Past this radius a hold becomes a scroll.
@@ -510,7 +576,10 @@ fun TerminalView(
         // leaves the zone, lifts, idles, or the scroll can't move further.
         LaunchedEffect(autoV, autoH) {
             while (autoV != 0 || autoH != 0) {
-                if (System.currentTimeMillis() - lastDragMs > 600) {
+                // Dead-man applies to LOCAL drags only: a parked app-drag
+                // finger is deliberately still, so the edge ticker keeps
+                // scrolling and re-reporting until it leaves the zone.
+                if (!mouseDragActive && System.currentTimeMillis() - lastDragMs > 600) {
                     stopAutoScroll()
                     break
                 }
@@ -524,8 +593,15 @@ fun TerminalView(
                 }
                 // Parked finger is viewport px: map straight (the scroll it
                 // sits under already moved above — no double-count).
-                val p = toSelPoint(dragVpX, dragVpY)
-                if (dragWhich == 0) selAnchor = p else selFocus = p
+                if (mouseDragActive) {
+                    // App-drag: report the parked cell (the reporter debounces
+                    // an unchanged cell); never touch the local selection.
+                    val c = toMouseCell(Offset(dragVpX, dragVpY))
+                    mouseSend(c.first, c.second, MouseButton.LEFT, MouseAction.MOVE)
+                } else {
+                    val p = toSelPoint(dragVpX, dragVpY)
+                    if (dragWhich == 0) selAnchor = p else selFocus = p
+                }
                 if (vScroll.value == bv && hScroll.value == bh) stopAutoScroll()
                 delay(120)
             }
@@ -610,8 +686,282 @@ fun TerminalView(
                     }
                 }
                 // Keyed Unit (never restarts mid-gesture): all reads inside stay
-                // live via State delegates / UpdatedState.
+                // live via State delegates / UpdatedState — NEVER via
+                // composition-local vals (they freeze at first composition and
+                // lie forever, e.g. `selecting` once did).
                 .pointerInput(Unit) {
+                    // ---- mouse-tracking takeover (xterm.js gate parity) ----
+
+                    // Live selection check for every closure in this block:
+                    // direct delegate reads stay correct across gestures.
+                    fun hasSelection() = selAnchor != null && selFocus != null
+
+                    /** Handle grab rides out here (both worlds): lock, wait lift, unlock. */
+                    suspend fun AwaitPointerEventScope.holdHandleGrab(down: PointerInputChange) {
+                        lockGesture()
+                        try {
+                            var held = false
+                            while (!held) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id }
+                                if (c == null || !c.pressed) held = true
+                            }
+                        } finally {
+                            unlockGesture()
+                        }
+                    }
+
+                    /** Mouse-mode tap: clear the local selection, else focus + click. */
+                    fun mouseTap(at: Offset) {
+                        if (hasSelection()) {
+                            clearSelection()
+                            tapCount = 0
+                            return
+                        }
+                        // xterm.js mousedown parity: focus first, then press+release.
+                        onTapState.value()
+                        val c = toMouseCell(at)
+                        mouseSend(c.first, c.second, MouseButton.LEFT, MouseAction.DOWN)
+                        mouseSend(c.first, c.second, MouseButton.LEFT, MouseAction.UP)
+                    }
+
+                    /** Arm the edge ticker for an app-drag finger (viewport px). */
+                    fun armMouseEdge(px: Float, py: Float) {
+                        dragVpX = px
+                        dragVpY = py
+                        lastDragMs = System.currentTimeMillis()
+                        autoV = when {
+                            py < edgeZonePx -> -1
+                            py > vpHState.value - edgeZonePx -> 1
+                            else -> 0
+                        }
+                        autoH = when {
+                            px < edgeZonePx -> -1
+                            px > vpWState.value - edgeZonePx -> 1
+                            else -> 0
+                        }
+                    }
+
+                    /** Two-finger scroll: wheel reports (X10 falls back to local scroll). */
+                    suspend fun AwaitPointerEventScope.twoFingerWheel(down: PointerInputChange) {
+                        if (hasSelection()) clearSelection()
+                        val x10 = emulator.mouseProtocol == MouseProtocol.X10
+                        var init = false
+                        var lastAvg = 0f
+                        var acc = 0f
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val c0 = ev.changes.firstOrNull { it.id == down.id }
+                            if (c0 == null || c0.isConsumed) break
+                            val pressed = ev.changes.filter { it.pressed }
+                            if (pressed.size < 2) break
+                            val ax = pressed.map { it.position.x }.average().toFloat()
+                            val ay = pressed.map { it.position.y }.average().toFloat()
+                            if (!init) {
+                                lastAvg = ay
+                                init = true
+                                continue
+                            }
+                            val dy = ay - lastAvg
+                            lastAvg = ay
+                            if (x10) {
+                                // Restricted scope: raw delta only (no suspend
+                                // scrollTo on a foreign receiver here).
+                                vScroll.dispatchRawDelta(-dy)
+                            } else {
+                                // Finger down = see earlier = wheel UP (64), one
+                                // report per line traveled (natural-scroll parity).
+                                acc += dy
+                                val cell = toMouseCell(Offset(ax, ay))
+                                while (acc >= lineH) {
+                                    mouseSend(cell.first, cell.second, MouseButton.WHEEL, MouseAction.UP)
+                                    acc -= lineH
+                                }
+                                while (acc <= -lineH) {
+                                    mouseSend(cell.first, cell.second, MouseButton.WHEEL, MouseAction.DOWN)
+                                    acc += lineH
+                                }
+                            }
+                        }
+                    }
+
+                    /** One finger past slop: the protocol picks the drag shape. */
+                    suspend fun AwaitPointerEventScope.mouseDrag(down: PointerInputChange, first: Offset) {
+                        if (hasSelection()) clearSelection()
+                        val origin = toMouseCell(down.position)
+                        // The press the tap-deferral held back — DOWN is allowed everywhere.
+                        mouseSend(origin.first, origin.second, MouseButton.LEFT, MouseAction.DOWN)
+                        val protocol = emulator.mouseProtocol
+                        if (protocol == MouseProtocol.DRAG || protocol == MouseProtocol.ANY) {
+                            mouseDragActive = true
+                            var last = origin
+                            var lift = first
+                            fun step(p: Offset) {
+                                armMouseEdge(p.x, p.y)
+                                val cell = toMouseCell(p)
+                                if (cell != last) {
+                                    mouseSend(cell.first, cell.second, MouseButton.LEFT, MouseAction.MOVE)
+                                    last = cell
+                                }
+                            }
+                            step(first)
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id }
+                                if (c == null) break
+                                lift = c.position
+                                if (!c.pressed || c.isConsumed) break
+                                step(c.position)
+                            }
+                            // Kill the edge ticker BEFORE release so no MOVE can
+                            // trail the UP and re-open the drag for the app.
+                            stopAutoScroll()
+                            val end = toMouseCell(lift)
+                            mouseSend(end.first, end.second, MouseButton.LEFT, MouseAction.UP)
+                        } else {
+                            // VT200/X10 report no motion: wheel per line dragged
+                            // (X10's restrict drops wheel — it scrolls locally).
+                            val x10 = protocol == MouseProtocol.X10
+                            var lastPos = first
+                            var acc = 0f
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id }
+                                if (c == null) break
+                                val p = c.position
+                                if (!c.pressed || c.isConsumed) {
+                                    lastPos = p
+                                    break
+                                }
+                                if (x10) {
+                                    // Restricted scope: raw deltas only.
+                                    vScroll.dispatchRawDelta(-(p.y - lastPos.y))
+                                    hScroll.dispatchRawDelta(-(p.x - lastPos.x))
+                                } else {
+                                    acc += p.y - lastPos.y
+                                    val cell = toMouseCell(p)
+                                    while (acc >= lineH) {
+                                        mouseSend(cell.first, cell.second, MouseButton.WHEEL, MouseAction.UP)
+                                        acc -= lineH
+                                    }
+                                    while (acc <= -lineH) {
+                                        mouseSend(cell.first, cell.second, MouseButton.WHEEL, MouseAction.DOWN)
+                                        acc += lineH
+                                    }
+                                }
+                                lastPos = p
+                            }
+                            val end = toMouseCell(lastPos)
+                            mouseSend(end.first, end.second, MouseButton.LEFT, MouseAction.UP)
+                        }
+                    }
+
+                    /**
+                     * Committed hold stays LOCAL under mouse mode — the
+                     * escape hatch back into selection. The verdict loop
+                     * already held 500ms without slop: commit the word NOW
+                     * (fresh case), then wait for real motion before any
+                     * endpoint moves. Which endpoint the finger owns is
+                     * decided once, at the first post-slop event: a fresh
+                     * word follows motion direction (forward owns the focus,
+                     * so the held word stays selected in every direction —
+                     * see [motionEndpoint]); a pre-existing selection keeps
+                     * [nearestEndpoint] (touching near an end grabs that
+                     * end). A release that never crossed the slop dismisses
+                     * a selection that predates the hold — every
+                     * press-then-release now closes it, however long the
+                     * dwell. Nothing is ever reported from a hold (press
+                     * stays deferred); edge auto-scroll rides [dragHandle]
+                     * as in mouse-OFF.
+                     */
+                    suspend fun AwaitPointerEventScope.mouseHold(down: PointerInputChange) {
+                        hapticTick()
+                        val hadSelection = hasSelection()
+                        if (!hadSelection) startSelection(down.position)
+                        var which = -1
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val c = ev.changes.firstOrNull { it.id == down.id }
+                            if (c == null || !c.pressed) {
+                                // No real motion: the hold was a (slow) tap.
+                                // A selection that predates it goes away;
+                                // a freshly committed word stays (that hold
+                                // was deliberate — it ticked).
+                                if (hadSelection && which < 0) {
+                                    clearSelection()
+                                    tapCount = 0
+                                }
+                                break
+                            }
+                            if (which < 0) {
+                                if ((c.position - down.position).getDistance() <= holdSlopPx) continue
+                                which = if (hadSelection) {
+                                    nearestEndpoint(down.position)
+                                } else {
+                                    motionEndpoint(down.position, c.position)
+                                }
+                            }
+                            dragHandle(which, c.position.x, c.position.y)
+                        }
+                    }
+
+                    /** The takeover: decide tap/drag/hold BEFORE one byte goes out. */
+                    suspend fun AwaitPointerEventScope.mouseGesture(down: PointerInputChange) {
+                        // Back-gesture strip: only a clean tap clicks; the
+                        // system owns everything else born in there. Hold
+                        // never selects in the strip — wait the release out
+                        // (release = tap, slop = bail), so a slow press in
+                        // there still ends as a tap instead of dying.
+                        val summonAllowed = down.position.x > edgeVetoPx &&
+                            down.position.x < viewportW - edgeVetoPx
+                        if (!summonAllowed) {
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id }
+                                if (c == null || c.isConsumed) return
+                                if (!c.pressed) { mouseTap(c.position); return }
+                                if ((c.position - down.position).getDistance() > holdSlopPx) return
+                            }
+                        }
+                        lockGesture()
+                        try {
+                            // Press is DEFERRED: no click may leak behind a
+                            // long-press or a drag (xterm reports mousedown
+                            // immediately; we cannot know the intent yet).
+                            // 500ms, not 300: everything released before it
+                            // is a tap (click or clear), so casual slow taps
+                            // never commit a stranded selection — only a
+                            // full deliberate hold does (Android's own
+                            // long-press is 500ms too).
+                            var verdict = "held" // held | released | moved | gone | second
+                            var lastPos = down.position
+                            withTimeoutOrNull(500) {
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val c = ev.changes.firstOrNull { it.id == down.id }
+                                    if (c == null || c.isConsumed) { verdict = "gone"; break }
+                                    if (!c.pressed) { verdict = "released"; lastPos = c.position; break }
+                                    if (ev.changes.count { it.pressed } > 1) { verdict = "second"; break }
+                                    if ((c.position - down.position).getDistance() > holdSlopPx) {
+                                        verdict = "moved"
+                                        lastPos = c.position
+                                        break
+                                    }
+                                }
+                            }
+                            when (verdict) {
+                                "gone" -> return
+                                "released" -> mouseTap(lastPos)
+                                "second" -> twoFingerWheel(down)
+                                "moved" -> mouseDrag(down, lastPos)
+                                else -> mouseHold(down)
+                            }
+                        } finally {
+                            stopAutoScroll()
+                            mouseDragActive = false
+                            unlockGesture()
+                        }
+                    }
                     // Selection is born ONLY from a committed hold (word) or a
                     // triple-tap (line) — never from plain drags, and never
                     // from a stolen system gesture. Two guards: holds born in
@@ -628,6 +978,16 @@ fun TerminalView(
                     // gesture; nothing here ever consumes.
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        // Mouse tracking on: touch belongs to the app (except
+                        // handle grabs, which stay the local selection's).
+                        if (emulator.mouseProtocol != MouseProtocol.NONE) {
+                            if (onHandleDown(down.position)) {
+                                holdHandleGrab(down)
+                                return@awaitEachGesture
+                            }
+                            mouseGesture(down)
+                            return@awaitEachGesture
+                        }
                         // Back-gesture guard, part 1 (origin): a press born
                         // inside the system edge strip can never summon —
                         // the finger is starting a back swipe, not a hold.
@@ -662,17 +1022,7 @@ fun TerminalView(
                         // release, unlock. Taps do nothing; drags are the
                         // handle's own detector below.
                         if (onHandleDown(down.position)) {
-                            lockGesture()
-                            try {
-                                var held = false
-                                while (!held) {
-                                    val ev = awaitPointerEvent()
-                                    val c = ev.changes.firstOrNull { it.id == down.id }
-                                    if (c == null || !c.pressed) held = true
-                                }
-                            } finally {
-                                unlockGesture()
-                            }
+                            holdHandleGrab(down)
                             return@awaitEachGesture
                         }
                         // Slop-first race: non-null = dragged before timeout
@@ -743,22 +1093,41 @@ fun TerminalView(
                             else -> {
                                 // Held ~600ms: commit the word, tick again,
                                 // lock scroll (settled — the finger is still),
-                                // then extend the nearest endpoint to the
-                                // finger until release (edge zone auto-scrolls
-                                // via dragHandle, as with handle drags).
+                                // then extend to the finger until release
+                                // (edge zone auto-scrolls via dragHandle, as
+                                // with handle drags). The endpoint is picked
+                                // once, at the first post-slop event: a fresh
+                                // word follows motion direction (forward
+                                // owns the focus — the held word never drops
+                                // out, same rule as the mouse-mode hold); a
+                                // pre-existing selection keeps
+                                // nearestEndpoint.
                                 hapticTick()
-                                if (selAnchor == null && selFocus == null) {
+                                val fresh = selAnchor == null && selFocus == null
+                                if (fresh) {
                                     startSelection(down.position)
                                 }
                                 lockGesture()
                                 try {
-                                    val pressWhich = nearestEndpoint(down.position)
+                                    var pressWhich = -1
                                     var done = false
                                     while (!done) {
                                         val ev = awaitPointerEvent()
                                         val c = ev.changes.firstOrNull { it.id == down.id }
-                                        if (c == null || !c.pressed) done = true
-                                        else dragHandle(pressWhich, c.position.x, c.position.y)
+                                        if (c == null || !c.pressed) {
+                                            done = true
+                                            continue
+                                        }
+                                        if (pressWhich < 0) {
+                                            // No endpoint moves before real motion.
+                                            if ((c.position - down.position).getDistance() <= holdSlopPx) continue
+                                            pressWhich = if (fresh) {
+                                                motionEndpoint(down.position, c.position)
+                                            } else {
+                                                nearestEndpoint(down.position)
+                                            }
+                                        }
+                                        dragHandle(pressWhich, c.position.x, c.position.y)
                                     }
                                 } finally {
                                     unlockGesture()
