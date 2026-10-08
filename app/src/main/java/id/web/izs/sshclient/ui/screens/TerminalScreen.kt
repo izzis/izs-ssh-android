@@ -38,6 +38,8 @@ import androidx.compose.material.icons.filled.PowerOff
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,6 +71,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import id.web.izs.sshclient.ui.AuthPrompt
 import id.web.izs.sshclient.ui.UsernamePrompt
 import androidx.compose.ui.Modifier
@@ -2080,6 +2083,7 @@ private fun PasswordPromptDialog(
     onCancel: () -> Unit,
 ) {
     var password by remember(prompt) { mutableStateOf(prompt.prefill ?: "") }
+    var showPassword by remember(prompt) { mutableStateOf(false) }
     var remember by remember(prompt) { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onCancel,
@@ -2093,8 +2097,18 @@ private fun PasswordPromptDialog(
                     label = { Text("Password") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (showPassword) VisualTransformation.None
+                    else PasswordVisualTransformation(),
+                    // Keep password keyboard (no predictions) even while revealed.
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { showPassword = !showPassword }) {
+                            Icon(
+                                if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (showPassword) "Hide password" else "Show password",
+                            )
+                        }
+                    },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = remember, onCheckedChange = { remember = it })

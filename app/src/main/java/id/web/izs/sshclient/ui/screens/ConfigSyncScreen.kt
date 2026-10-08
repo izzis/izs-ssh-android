@@ -11,12 +11,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -33,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import id.web.izs.sshclient.core.config.RawConfigStore
@@ -65,6 +71,7 @@ fun ConfigSyncScreen(
     val yamlTarget = state.loaded?.domain?.configSync
     var host by remember(yamlTarget?.host) { mutableStateOf(yamlTarget?.host ?: "") }
     var token by remember(yamlTarget?.token) { mutableStateOf(yamlTarget?.token ?: "") }
+    var showToken by remember { mutableStateOf(false) }
     var items by remember { mutableStateOf<List<RemoteConfigMeta>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -263,8 +270,18 @@ fun ConfigSyncScreen(
             label = { Text("Secret sync token") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (showToken) VisualTransformation.None
+            else PasswordVisualTransformation(),
+            // Keep password keyboard (no predictions) even while revealed.
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { showToken = !showToken }) {
+                    Icon(
+                        if (showToken) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (showToken) "Hide secret sync token" else "Show secret sync token",
+                    )
+                }
+            },
         )
         Button(
             onClick = {
