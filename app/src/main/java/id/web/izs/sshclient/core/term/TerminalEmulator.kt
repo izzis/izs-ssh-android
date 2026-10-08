@@ -1,5 +1,7 @@
 package id.web.izs.sshclient.core.term
 
+import java.util.Base64
+
 /**
  * A pragmatic VT100/xterm-subset terminal emulator (pure Kotlin, no Android
  * deps, fully unit-tested). Powers the real shell screen: colored output,
@@ -12,6 +14,9 @@ package id.web.izs.sshclient.core.term
  * Swallowed (never printed): OSC title, xterm-private CSI (`>`, `=`, `<`
  * prefixes, e.g. vim's `ESC[>4;m` key-modifier reset on exit), kitty/DECRQM
  * queries with intermediate bytes, DCS/SOS/PM/APC strings.
+ * Handled: OSC 52 (clipboard) — the base64 payload is decoded and handed
+ * to [onClipboardSet] so remote copies (opencode, tmux `set-clipboard`)
+ * land in the local clipboard; read requests (`?`) are ignored.
  * Tracked (never printed): bracketed-paste mode (`?2004`,
  * xtermFrontend.supportsBracketedPaste parity) and mouse tracking modes
  * (`?9/1000/1002/1003` protocol + `?1006` SGR encoding — the view reads
@@ -28,6 +33,9 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         // Matches the app background so the grid blends with lists/settings.
         const val BG = 0xFF1D1E23.toInt()
         const val MAX_HISTORY = 2000
+        // OSC 52 payload cap (base64 chars, ~75KB decoded): opencode caps its
+        // own writes at 100KB — larger sequences are hostile or a bug, dropped.
+        const val MAX_OSC52_BASE64 = 100_000
 
         /**
          * Pre-schemes default palette (also [IZS_DEFAULT_SCHEME] in
@@ -209,6 +217,13 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     /** SGR mouse encoding (`CSI ? 1006 h/l`) instead of the 3-byte default. */
     var mouseSgr: Boolean = false
         private set
+    /**
+     * OSC 52 clipboard sink: decoded text to put on the LOCAL clipboard, or
+     * null to clear it (remote code drives this — opencode's copy, tmux
+     * `set-clipboard on`). Set by the UI layer; the emulator stays
+     * Android-free. Null = feature unhooked (unit tests, detached screen).
+     */
+    var onClipboardSet: ((String?) -> Unit)? = null
 
     /** Bumped per feed() call; the UI recomposes the Canvas on change. */
     var version: Long = 0L
@@ -352,6 +367,8 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     private var csiParams = StringBuilder()
     /** CSI private-marker prefix (`?`, `>`, `=`, `<`), null for plain sequences. */
     private var csiPrefix: Char? = null
+    /** OSC payload collector: OSCs can span feed() chunks (OSC 52 base64). */
+    private var oscBuf = StringBuilder()
 
     fun feed(s: String) {
         if (s.isEmpty()) return
@@ -387,7 +404,10 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                     csiParams = StringBuilder()
                     csiPrefix = null
                 }
-                ']' -> state = State.OSC
+                ']' -> {
+                    oscBuf.setLength(0)
+                    state = State.OSC
+                }
                 // DCS/SOS/PM/APC: skip the whole string until ST (ESC \ or
                 // BEL) — vim's XTGETTCAP queries live here and must never
                 // reach the grid as literal text.
@@ -434,11 +454,21 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                 else -> Unit
             }
             State.OSC -> when {
-                c == '\u0007' -> state = State.GROUND
-                c == '\u001B' -> state = State.OSC_ESC
+                // BEL (7) terminates and dispatches; ESC (27) starts ST.
+                c.code == 7 -> {
+                    state = State.GROUND
+                    handleOsc()
+                }
+                c.code == 27 -> state = State.OSC_ESC
+                else -> oscBuf.append(c)
             }
             State.ESC_SKIP -> state = State.GROUND
-            State.OSC_ESC -> state = State.GROUND
+            // ST terminator (ESC \): dispatch the collected OSC. A lone ESC
+            // still abandons the string (next char consumed, never printed).
+            State.OSC_ESC -> {
+                state = State.GROUND
+                if (c.code == 92) handleOsc()
+            }
             State.STR_SKIP -> when {
                 c == '\u0007' -> state = State.GROUND
                 c == '\u001B' -> state = State.STR_ESC
@@ -448,6 +478,36 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
                 else -> state = State.STR_SKIP
             }
         }
+    }
+
+    /**
+     * Finished OSC dispatch: the payload collected in [oscBuf], drained.
+     * OSC 52 (`52;Pc;Pd`) sets/clears the local clipboard via
+     * [onClipboardSet] — Pc (target) is accepted as-is (one clipboard on
+     * Android), Pd `?` is an xterm clipboard-read request (ignored: no
+     * current client reads), and an oversized payload is dropped whole
+     * (never truncated — a half base64 string is garbage anyway).
+     * Everything else (titles, color schemes, ...) stays swallowed.
+     */
+    private fun handleOsc() {
+        val osc = oscBuf.toString()
+        oscBuf.setLength(0)
+        if (!osc.startsWith("52;")) return
+        val rest = osc.substring(3)
+        val sep = rest.indexOf(';')
+        if (sep < 0) return
+        val payload = rest.substring(sep + 1)
+        if (payload.isEmpty()) {
+            onClipboardSet?.invoke(null)
+            return
+        }
+        if (payload == "?" || payload.length > MAX_OSC52_BASE64) return
+        val decoded = try {
+            Base64.getDecoder().decode(payload)
+        } catch (_: IllegalArgumentException) {
+            return
+        }
+        onClipboardSet?.invoke(decoded.decodeToString())
     }
 
     // `;` separates params, `:` sub-params (Termux parseArg treats both
@@ -770,6 +830,7 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         bracketedPasteMode = false
         mouseProtocol = MouseProtocol.NONE
         mouseSgr = false
+        oscBuf.setLength(0)
         topMargin = 0
         bottomMargin = rows - 1
         altActive = false

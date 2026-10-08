@@ -574,6 +574,25 @@ fun TerminalScreen(
         }
     }
 
+    // OSC 52: remote copies (opencode's copy, tmux `set-clipboard on`) land
+    // in the Android clipboard. feed() runs off the main thread, so the
+    // hop through scope covers setClipEntry; unhook on handle swap.
+    DisposableEffect(handle) {
+        val emulator = handle.emulator
+        emulator.onClipboardSet = { text ->
+            scope.launch {
+                clipboard.setClipEntry(
+                    if (text.isNullOrEmpty()) {
+                        null
+                    } else {
+                        ClipEntry(ClipData.newPlainText("terminal", text))
+                    },
+                )
+            }
+        }
+        onDispose { emulator.onClipboardSet = null }
+    }
+
     /**
      * Termux-like sticky modifiers: typed text goes through CTRL/ALT, then
      * the stickies reset (special-key buttons bypass + reset as well).

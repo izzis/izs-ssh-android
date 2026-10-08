@@ -312,4 +312,36 @@ class TerminalEmulatorTest {
         assertEquals(MouseProtocol.NONE, t.mouseProtocol)
         assertFalse(t.mouseSgr)
     }
+
+    @Test
+    fun `OSC 52 sets and clears the clipboard, everything else stays swallowed`() {
+        val t = term()
+        val bel = 7.toChar()
+        val got = mutableListOf<String?>()
+        t.onClipboardSet = { got.add(it) }
+
+        // BEL-terminated set (opencode's form), then ST-terminated.
+        t.feed("$esc]52;c;aGVsbG8=$bel") // "hello"
+        t.feed("$esc]52;c;dGVz$esc\\") // "tes"
+        // Empty payload clears (any Pc target — Android has one clipboard).
+        t.feed("$esc]52;p;$bel")
+        assertEquals(listOf<String?>("hello", "tes", null), got)
+
+        // Read request (Pd = ?): ignored, no callback, no reply.
+        t.feed("$esc]52;c;?$esc\\")
+        // Oversized payload: dropped whole (never a truncated decode).
+        t.feed("$esc]52;c;" + "A".repeat(TerminalEmulator.MAX_OSC52_BASE64 + 1) + bel)
+        // Invalid base64: dropped, never throws.
+        t.feed("$esc]52;c;not*valid!$bel")
+        // A plain title OSC must not reach the callback or the grid.
+        t.feed("$esc]0;my title$esc\\")
+        assertEquals(3, got.size)
+        assertEquals("", rowText(t, 0))
+
+        // Payload split across feed() chunks still parses (oscBuf persists).
+        t.feed("$esc]52;c;aGVs")
+        t.feed("bG8=$bel")
+        assertEquals(4, got.size)
+        assertEquals("hello", got[3])
+    }
 }
