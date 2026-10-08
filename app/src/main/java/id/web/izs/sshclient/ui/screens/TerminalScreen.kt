@@ -682,21 +682,17 @@ fun TerminalScreen(
      * in order (vim `:q!`: ESC, then text, then Enter). A submitted line
      * (CR/LF) resets IME state. UP/DOWN is just ESC[A/B — the shell owns
      * the recalled line and the IME never models it (Termux: backspace
-     * sends DEL unconditionally, so any length deletes). The bar tap
-     * steals focus onto the button, so hand it straight back.
+     * sends DEL unconditionally, so any length deletes).
      *
-     * Hold-to-repeat ticks pass [grabFocus] = false: focus was already
-     * reclaimed by the initial press, and re-showing the keyboard a dozen
-     * times a second would jank for no benefit.
+     * Focus/IME policy: the bar never changes the Android keyboard's
+     * visibility — its buttons cannot take input focus at all (see
+     * ExtraKeyBtn), so the pipe field stays focused and the IME neither
+     * auto-opens when it was closed nor collapses when it was open. No
+     * requestFocus/show here, ever. Tapping the terminal canvas is the
+     * gesture that opens the keyboard (its onTap handler).
      */
-    fun sendKeySteps(steps: List<KeyStep>, grabFocus: Boolean = true) {
-        if (consumeReconnectOffer()) {
-            if (grabFocus) {
-                focusRequester.requestFocus()
-                keyboard?.show()
-            }
-            return
-        }
+    fun sendKeySteps(steps: List<KeyStep>) {
+        if (consumeReconnectOffer()) return
         val s = handle.shell ?: return
         val byteSteps = steps.map(::stepBytes).filter { it.isNotEmpty() }
         if (byteSteps.isEmpty()) return
@@ -706,10 +702,6 @@ fun TerminalScreen(
         }
         if (submitted) resetImeLine()
         sendChunks(s, byteSteps)
-        if (grabFocus) {
-            focusRequester.requestFocus()
-            keyboard?.show()
-        }
     }
 
     fun acceptHostKey(remember: Boolean) {
@@ -1459,7 +1451,7 @@ fun TerminalScreen(
                             ctrlActive = ctrlSticky,
                             altActive = altSticky,
                             onSendSteps = { sendKeySteps(it) },
-                            onRepeatSteps = { sendKeySteps(it, grabFocus = false) },
+                            onRepeatSteps = { sendKeySteps(it) },
                             onToggleCtrl = { ctrlSticky = !ctrlSticky },
                             onToggleAlt = { altSticky = !altSticky },
                             modifier = Modifier.onSizeChanged { dockedBarH = it.height.toFloat() },

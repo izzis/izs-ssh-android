@@ -28,6 +28,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.unit.dp
@@ -216,9 +217,11 @@ private fun ExtraKeyBtn(
         Surface(
             onClick = onTap,
             enabled = enabled,
-            // Bar keys are plain tappables; focus returns to the pipe via
-            // sendKeySteps (requestFocus + show) after every tap.
-            modifier = modifier.height(ExtraKeyHeight),
+            // Bar keys never take input focus (focusProperties canFocus=false):
+            // a tap must leave the pipe field focused, so the IME's
+            // visibility is untouched — no auto-open when it is closed,
+            // no collapse when it is open. Nothing re-focuses afterwards.
+            modifier = modifier.height(ExtraKeyHeight).focusProperties { canFocus = false },
             shape = RoundedCornerShape(6.dp),
             color = fill ?: Color.Transparent,
             contentColor = content ?: MaterialTheme.colorScheme.onSurface,
@@ -282,8 +285,11 @@ private fun RepeatableKeyBtn(
         }
     }
     Surface(
+        // Same no-input-focus rule as the plain tap key: hold-to-repeat
+        // ticks must not move the IME's state either.
         modifier = modifier
             .height(ExtraKeyHeight)
+            .focusProperties { canFocus = false }
             .combinedClickable(
                 enabled = enabled,
                 onClick = onTap,
