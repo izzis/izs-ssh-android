@@ -191,9 +191,18 @@ fun ConfigSyncScreen(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+        // Name resolves from the cloud list (loaded when connected); the id
+        // stays visible — "1 - Office". No config at all → both sides "-",
+        // so a stamp left by a deleted config can't keep showing a date.
+        val configName = items?.find { it.id == syncId }?.name?.takeIf { it.isNotBlank() }
+        val currentConfig = when {
+            syncId < 0 -> "-"
+            configName != null -> "$syncId - $configName"
+            else -> syncId.toString()
+        }
         Text(
-            "Current config: ${syncId.takeIf { it >= 0 } ?: "-"}, " +
-                "updated ${state.disk.lastRemoteChange.ifBlank { "-" }}",
+            "Current config: $currentConfig, updated " +
+                (if (syncId < 0) "-" else state.disk.lastRemoteChange.ifBlank { "-" }),
             style = MaterialTheme.typography.bodySmall,
         )
         if (conflict) {

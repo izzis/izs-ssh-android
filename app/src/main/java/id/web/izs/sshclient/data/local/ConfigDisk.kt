@@ -119,9 +119,17 @@ class ConfigDisk(context: Context) {
         return bak
     }
 
+    /**
+     * Erase the local config: the YAML docs (incl. the pre-import snapshot)
+     * plus the per-config sync stamps — lastRemoteChange (the "updated" in
+     * the sync header), lastSyncedHash and the conflict flag, so a deleted
+     * config never leaves a stale timestamp or conflict card behind. User
+     * prefs (auto/parts) survive; they are settings, not sync state.
+     */
     fun clearYaml() {
         prefs().edit().remove(KEY_YAML).remove(KEY_YAML_BAK)
-            .remove(KEY_YAML_PREIMPORT).remove(KEY_PREIMPORT_STAMP).apply()
+            .remove(KEY_YAML_PREIMPORT).remove(KEY_PREIMPORT_STAMP)
+            .remove(KEY_LAST_CHANGE).remove(KEY_SYNC_HASH).remove(KEY_SYNC_CONFLICT).apply()
     }
 
     /**
