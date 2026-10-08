@@ -92,8 +92,20 @@ fun ConfigSyncScreen(
     // (null still short-circuits to false on the left side).
     val connected = !yamlTarget?.host.isNullOrBlank() && !yamlTarget.token.isNullOrBlank()
     val syncId = yamlTarget?.configID ?: -1L
+    // Banner reflects the EFFECTIVE scheme: scheme-less input normalizes to
+    // https at save (so no banner — the choice was never cleartext), only an
+    // explicit http:// warns. Invalid input skips the banner; save shows why.
     val showHttpWarning = remember(host) {
-        host.isNotBlank() && !RawConfigStore.isHttps(host.trim().trimEnd('/'))
+        val h = host.trim().trimEnd('/')
+        if (h.isBlank()) {
+            false
+        } else {
+            try {
+                !RawConfigStore.isHttps(RawConfigStore.normalizeHost(h))
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     fun reload() {
@@ -229,7 +241,10 @@ fun ConfigSyncScreen(
             value = host,
             onValueChange = { host = it },
             label = { Text("Sync host") },
-            placeholder = { Text("https://example.com") },
+            placeholder = { Text("sync.example.com") },
+            supportingText = {
+                Text("https:// is added automatically to keep sync encrypted. Use http:// only for local addresses.")
+            },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -244,6 +259,15 @@ fun ConfigSyncScreen(
         )
         Button(
             onClick = {
+                // Eager write-back: show the canonical form (https:// assumed
+                // when the scheme is missing) right away — the save only lands
+                // after a successful test, so without this the assumption stays
+                // invisible when the connection fails.
+                host = try {
+                    RawConfigStore.normalizeHost(host)
+                } catch (_: Exception) {
+                    host
+                }
                 scope.launch {
                     busy = true
                     error = null

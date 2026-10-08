@@ -946,7 +946,16 @@ object RawConfigStore {
     fun normalizeHost(raw: String): String {
         val h = raw.trim().trimEnd('/')
         require(h.isNotEmpty()) { "Sync host is empty" }
-        require(h.startsWith("http://") || h.startsWith("https://")) {
+        // No http hint at all: assume https (typed http:// for local servers
+        // is kept below — the cleartext policy still decides what may be http).
+        // A foreign scheme (ftp://…) fails the require — never wrapped.
+        if (!h.startsWith("http", ignoreCase = true)) {
+            require("://" !in h) { "Host must be http:// or https://" }
+            return "https://$h"
+        }
+        // Starts with "http…": must be a full scheme (case-insensitive, RFC
+        // 3986 / Tabby's `/^https?:\/\//i`) — a half-typed "http:/x" is a typo.
+        require(h.startsWith("http://", ignoreCase = true) || h.startsWith("https://", ignoreCase = true)) {
             "Host must be http:// or https://"
         }
         return h
